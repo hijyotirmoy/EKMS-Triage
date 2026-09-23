@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCaseByRef } from "@/lib/db";
+import { getCaseByRef, deleteCase } from "@/lib/db";
 
 export async function GET(request, { params }) {
   const { case_ref } = params;
@@ -10,4 +10,10 @@ export async function GET(request, { params }) {
   }
 
   return NextResponse.json(caseItem);
+}
+
+export async function DELETE(request, { params }) {
+  const { case_ref } = params;
+  await deleteCase(case_ref);
+  return NextResponse.json({ success: true, case_ref });
 }

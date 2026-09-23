@@ -20,6 +20,7 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const callId = searchParams.get("callId");
   const role = searchParams.get("role"); // 'agent' | 'caller'
+  const agentId = searchParams.get("agentId");
 
   try {
     const db = getFirestoreDb();
@@ -39,6 +40,11 @@ export async function GET(request) {
           const call = docSnap.data();
           // Valid if updated/created within the last 60 seconds
           if (call && now - (call.updatedAt || call.createdAt || 0) < 60000) {
+            if (agentId) {
+              const target = (call.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+              const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
+              if (target !== myAgent) continue;
+            }
             return NextResponse.json({ activeCall: call });
           }
         }
@@ -49,6 +55,11 @@ export async function GET(request) {
       // Memory fallback
       for (const [id, call] of memoryCalls.entries()) {
         if (call.status === "ringing" && Date.now() - call.updatedAt < 60000) {
+          if (agentId) {
+            const target = (call.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+            const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
+            if (target !== myAgent) continue;
+          }
           return NextResponse.json({ activeCall: call });
         }
       }
@@ -98,6 +109,7 @@ export async function POST(request) {
           phone: "",
           city: "",
         },
+        targetAgent: data.targetAgent || "Agent 1",
         offer: data.offer || null,
         answer: null,
         callerCandidates: data.candidates || [],

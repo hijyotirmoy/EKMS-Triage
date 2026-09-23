@@ -244,6 +244,39 @@ export async function saveCase(caseData) {
   return caseData;
 }
 
+export async function deleteCase(caseRef) {
+  const ctx = await getFirestoreContext();
+  if (ctx) {
+    try {
+      if (ctx.type === "admin") {
+        const snap = await ctx.db
+          .collection("cases")
+          .where("case_ref", "==", caseRef)
+          .get();
+        const batch = ctx.db.batch();
+        snap.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+      } else {
+        const { collection, query, where, getDocs, deleteDoc } = await import(
+          "firebase/firestore"
+        );
+        const q = query(
+          collection(ctx.db, "cases"),
+          where("case_ref", "==", caseRef)
+        );
+        const snap = await getDocs(q);
+        for (const docSnap of snap.docs) {
+          await deleteDoc(docSnap.ref);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not delete case from Firestore:", e.message);
+    }
+  }
+  memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef);
+  return true;
+}
+
 export async function getCaseStats() {
   const all = await getCases();
   const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };

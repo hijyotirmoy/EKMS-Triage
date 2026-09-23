@@ -224,9 +224,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
         </div>
 
         {/* 1. Caller Demographic Fields */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {callerFoundInfo && (
-            <div className="col-span-2 sm:col-span-4 flex items-center justify-between rounded-md bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
+            <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex items-center justify-between rounded-md bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
               <div className="flex items-center gap-2">
                 <UserCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span>

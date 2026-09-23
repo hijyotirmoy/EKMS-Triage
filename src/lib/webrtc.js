@@ -126,8 +126,9 @@ export function stopRingtone() {
 }
 
 export class WebRtcCallSession {
-  constructor({ role, onStateChange, onRemoteStream }) {
+  constructor({ role, agentId = "Agent 1", onStateChange, onRemoteStream }) {
     this.role = role; // 'caller' | 'agent'
+    this.agentId = agentId;
     this.onStateChange = onStateChange;
     this.onRemoteStream = onRemoteStream;
 
@@ -186,6 +187,7 @@ export class WebRtcCallSession {
   }
 
   setState(newState, details = {}) {
+    if (this.state === newState) return;
     this.state = newState;
     this.onStateChange?.(newState, details);
   }
@@ -519,9 +521,11 @@ export class WebRtcCallSession {
 
       // 1. Create document directly in Firestore for real-time cross-device listening
       const now = Date.now();
+      const targetAgent = callerInfo.targetAgent || "Agent 1";
       const callData = {
         id: this.callId,
         callerInfo,
+        targetAgent,
         offer: { type: offer.type, sdp: offer.sdp },
         answer: null,
         callerCandidates: [],
@@ -544,6 +548,7 @@ export class WebRtcCallSession {
         callId: this.callId,
         data: {
           callerInfo,
+          targetAgent,
           offer: { type: offer.type, sdp: offer.sdp },
         },
       });
@@ -712,6 +717,10 @@ export class WebRtcCallSession {
         msg.action === "initiate" &&
         (this.state === "idle" || this.state === "ended")
       ) {
+        const target = (msg.data?.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+        const myAgent = (this.agentId || "Agent 1").toLowerCase().replace(/\s+/g, "");
+        if (target !== myAgent) return;
+
         playRingtone("incoming");
         this.setState("incoming_call", {
           callData: msg.data ? { ...msg.data, id: msg.callId } : null,
@@ -811,6 +820,7 @@ export class WebRtcCallSession {
   }
 
   endCall(notifyRemote = true) {
+    if (this.state === "idle" || this.state === "ended") return;
     stopRingtone();
     clearInterval(this.pollInterval);
     if (this.ringTimeout) {

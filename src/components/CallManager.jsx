@@ -18,7 +18,7 @@ import { playRingtone, stopRingtone, unlockMobileAudio, WebRtcCallSession } from
 import { getFirestoreDb } from "@/lib/firebase";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 
-export const CallManager = ({ onCallerConnected }) => {
+export const CallManager = ({ agentId = "Agent 1", onCallerConnected }) => {
   const [callState, setCallState] = useState("idle"); // 'idle' | 'incoming' | 'connected' | 'on_hold' | 'ended'
   const [incomingCallData, setIncomingCallData] = useState(null);
   const [activeCaller, setActiveCaller] = useState(null);
@@ -45,6 +45,7 @@ export const CallManager = ({ onCallerConnected }) => {
   useEffect(() => {
     const session = new WebRtcCallSession({
       role: "agent",
+      agentId: agentId || "Agent 1",
       onStateChange: (state, details) => {
         if (state === "incoming_call") {
           setCallState("incoming");
@@ -58,7 +59,7 @@ export const CallManager = ({ onCallerConnected }) => {
           const caller = details.callerInfo || incomingCallData?.callerInfo;
           setActiveCaller(caller);
           startTimer();
-          toast.success("Voice call connected! Audio is live.");
+          toast.success("Voice call connected! Audio is live.", { id: "call-status" });
 
           // Auto-fill Agent's intake form with caller phone/details via ref
           if (caller) {
@@ -70,7 +71,7 @@ export const CallManager = ({ onCallerConnected }) => {
         } else if (state === "ended") {
           setCallState("ended");
           stopTimer();
-          toast.info("Call ended");
+          toast.info("Call ended", { id: "call-status" });
           setTimeout(() => {
             setCallState("idle");
             setIncomingCallData(null);
@@ -106,6 +107,13 @@ export const CallManager = ({ onCallerConnected }) => {
                   callData.status === "ringing" &&
                   now - (callData.updatedAt || callData.createdAt || 0) < 60000
                 ) {
+                  // Targeted routing: ensure call is intended for this desk
+                  const target = (callData.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+                  const myAgent = (agentId || "Agent 1").toLowerCase().replace(/\s+/g, "");
+                  if (target !== myAgent) {
+                    continue; // Skip calls intended for other agents
+                  }
+
                   playRingtone("incoming");
                   session.setState("incoming_call", { callData });
                   if (callData.callerInfo) {
@@ -129,13 +137,17 @@ export const CallManager = ({ onCallerConnected }) => {
     pollIntervalRef.current = setInterval(async () => {
       if (session.state === "idle") {
         try {
-          const res = await fetch("/api/call/signal?role=agent");
+          const res = await fetch(`/api/call/signal?role=agent&agentId=${encodeURIComponent(agentId || "Agent 1")}`);
           const data = await res.json();
           if (data && data.activeCall && data.activeCall.status === "ringing") {
-            playRingtone("incoming");
-            session.setState("incoming_call", { callData: data.activeCall });
-            if (data.activeCall.callerInfo) {
-              onCallerConnectedRef.current?.(data.activeCall.callerInfo);
+            const target = (data.activeCall.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+            const myAgent = (agentId || "Agent 1").toLowerCase().replace(/\s+/g, "");
+            if (target === myAgent) {
+              playRingtone("incoming");
+              session.setState("incoming_call", { callData: data.activeCall });
+              if (data.activeCall.callerInfo) {
+                onCallerConnectedRef.current?.(data.activeCall.callerInfo);
+              }
             }
           }
         } catch (e) {}
@@ -153,7 +165,7 @@ export const CallManager = ({ onCallerConnected }) => {
       stopTimer();
       stopRingtone();
     };
-  }, []); // Run once on mount!
+  }, [agentId]); // Re-subscribe if active agent changes
 
   const startTimer = () => {
     stopTimer();
@@ -193,7 +205,7 @@ export const CallManager = ({ onCallerConnected }) => {
     }
     setCallState("idle");
     setIncomingCallData(null);
-    toast.info("Call declined");
+    toast.info("Call declined", { id: "call-status" });
   };
 
   const handleHangup = () => {
@@ -334,8 +346,8 @@ export const CallManager = ({ onCallerConnected }) => {
               ? { left: `${dragPos.x}px`, top: `${dragPos.y}px`, right: "auto", bottom: "auto" }
               : undefined
           }
-          className={`fixed z-[100] w-[330px] sm:w-[360px] overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-2 ring-emerald-500/20 transition-all duration-75 ${
-            dragPos.x === null ? "top-20 right-6" : ""
+          className={`fixed z-[100] w-[calc(100vw-32px)] sm:w-[360px] max-w-[360px] overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-slate-950/95 p-3.5 sm:p-4 text-white shadow-2xl backdrop-blur-xl ring-2 ring-emerald-500/20 transition-all duration-75 ${
+            dragPos.x === null ? "top-16 sm:top-20 right-4 sm:right-6 left-4 sm:left-auto" : ""
           } ${isDragging ? "ring-emerald-400 select-none shadow-emerald-500/30" : ""}`}
         >
           {/* Top Row: Drag Handle, Status Badge & Duration Timer */}
