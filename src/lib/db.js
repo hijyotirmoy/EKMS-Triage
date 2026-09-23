@@ -186,20 +186,16 @@ export async function getCases(filters = {}) {
   if (ctx) {
     try {
       if (ctx.type === "admin") {
-        const snap = await ctx.db.collection("cases").orderBy("created_at", "desc").get();
-        if (!snap.empty) {
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
+        const snap = await ctx.db.collection("cases").get();
+        list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       } else {
-        const { collection, getDocs, query, orderBy } = await import("firebase/firestore");
-        const qRef = query(collection(ctx.db, "cases"), orderBy("created_at", "desc"));
-        const snap = await getDocs(qRef);
-        if (!snap.empty) {
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
+        const { collection, getDocs } = await import("firebase/firestore");
+        const snap = await getDocs(collection(ctx.db, "cases"));
+        list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       }
+      list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     } catch (e) {
-      // Use in-memory if Firestore rules block or offline
+      console.warn("Firestore fetch cases notice:", e.message);
     }
   }
 
@@ -240,6 +236,7 @@ export async function saveCase(caseData) {
       console.warn("Could not save case to Firestore:", e.message);
     }
   }
+  memoryCases = memoryCases.filter((c) => c.case_ref !== caseData.case_ref);
   memoryCases.unshift(caseData);
   return caseData;
 }
@@ -253,11 +250,15 @@ export async function deleteCase(caseRef) {
           .collection("cases")
           .where("case_ref", "==", caseRef)
           .get();
-        const batch = ctx.db.batch();
-        snap.forEach((doc) => batch.delete(doc.ref));
-        await batch.commit();
+        if (!snap.empty) {
+          const batch = ctx.db.batch();
+          snap.forEach((doc) => batch.delete(doc.ref));
+          await batch.commit();
+        } else {
+          await ctx.db.collection("cases").doc(caseRef).delete().catch(() => {});
+        }
       } else {
-        const { collection, query, where, getDocs, deleteDoc } = await import(
+        const { collection, query, where, getDocs, deleteDoc, doc } = await import(
           "firebase/firestore"
         );
         const q = query(
@@ -265,15 +266,19 @@ export async function deleteCase(caseRef) {
           where("case_ref", "==", caseRef)
         );
         const snap = await getDocs(q);
-        for (const docSnap of snap.docs) {
-          await deleteDoc(docSnap.ref);
+        if (!snap.empty) {
+          for (const docSnap of snap.docs) {
+            await deleteDoc(docSnap.ref);
+          }
+        } else {
+          await deleteDoc(doc(ctx.db, "cases", caseRef)).catch(() => {});
         }
       }
     } catch (e) {
       console.warn("Could not delete case from Firestore:", e.message);
     }
   }
-  memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef);
+  memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef && c.id !== caseRef);
   return true;
 }
 

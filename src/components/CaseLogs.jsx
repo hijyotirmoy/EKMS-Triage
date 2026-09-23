@@ -11,7 +11,7 @@ const inputCls =
 
 const PAGE_SIZE = 50;
 
-export const CaseLogs = ({ refreshKey }) => {
+export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   const [cases, setCases] = useState([]);
   const [urgency, setUrgency] = useState("all");
   const [q, setQ] = useState("");
@@ -26,7 +26,7 @@ export const CaseLogs = ({ refreshKey }) => {
 
   useEffect(() => {
     api
-      .get("/cases", { params: { urgency, q: q || undefined } })
+      .get("/cases", { params: { urgency, q: q || undefined, _t: Date.now() } })
       .then(({ data }) => setCases(data))
       .catch(() => setCases([]));
   }, [urgency, q, refreshKey]);
@@ -39,6 +39,7 @@ export const CaseLogs = ({ refreshKey }) => {
       setCases((prev) => prev.filter((c) => c.case_ref !== caseToDelete.case_ref));
       toast.success(`Case ${caseToDelete.case_ref} deleted successfully`);
       setCaseToDelete(null);
+      onCaseDeleted?.();
     } catch (err) {
       console.error("Failed to delete case:", err);
       toast.error("Failed to delete case. Please try again.");

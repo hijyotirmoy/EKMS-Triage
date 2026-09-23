@@ -1,19 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  Activity,
-  Mic,
-  MicOff,
-  Phone,
-  PhoneCall,
-  PhoneOff,
-  ShieldAlert,
-  Sparkles,
-  Volume2,
-} from "lucide-react";
+import { Activity, Languages, Mic, MicOff, Phone, PhoneCall, PhoneOff, ShieldAlert, Sparkles, Volume2 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
+import { SpeechStreamController } from "@/lib/speechRecognition";
+import { getFirestoreDb } from "@/lib/firebase";
+import { doc, updateDoc, arrayUnion } from "firebase/firestore";
 
 export default function IpCallerPage() {
   const [phone, setPhone] = useState("");
@@ -22,18 +15,116 @@ export default function IpCallerPage() {
   const [callState, setCallState] = useState("idle"); // 'idle' | 'calling' | 'ringing' | 'connected' | 'on_hold' | 'ended'
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [callerLang, setCallerLang] = useState("en-IN");
+  const [liveTranscript, setLiveTranscript] = useState("");
 
   const callSessionRef = useRef(null);
+  const speechCtrlRef = useRef(null);
+  const bChannelRef = useRef(null);
+  const scribeChannelRef = useRef(null);
   const timerRef = useRef(null);
-  const ringTimeoutRef = useRef(null);
+  const callerLangRef = useRef(callerLang);
+  useEffect(() => {
+    callerLangRef.current = callerLang;
+    speechCtrlRef.current?.setLanguage(callerLang);
+  }, [callerLang]);
 
+  const startSpeechRecognition = (callId) => {
+    if (speechCtrlRef.current) {
+      speechCtrlRef.current.stop();
+    }
+    const ctrl = new SpeechStreamController({
+      lang: callerLangRef.current || "en-IN",
+      onInterim: (text) => {
+        setLiveTranscript(text);
+        const activeCallId = callId || callSessionRef.current?.callId;
+        const msg = {
+          type: "transcript_interim",
+          callId: activeCallId,
+          speaker: "caller",
+          speakerName: "Caller (IP)",
+          text,
+          timestamp: Date.now(),
+        };
+        // Notify Agent that caller is actively speaking right now
+        bChannelRef.current?.postMessage({
+          type: "caller_speaking",
+          callId: activeCallId,
+          text,
+          active: true,
+          timestamp: Date.now(),
+        });
+        bChannelRef.current?.postMessage(msg);
+        scribeChannelRef.current?.postMessage(msg);
+        try {
+          localStorage.setItem("ekms_scribe_sync", JSON.stringify({ ...msg, _ts: Date.now() }));
+        } catch (e) {}
+        if (activeCallId) {
+          try {
+            const db = getFirestoreDb();
+            updateDoc(doc(db, "calls", activeCallId), {
+              interimTranscript: msg,
+              updatedAt: Date.now(),
+            }).catch(() => {});
+          } catch (e) {}
+        }
+      },
+      onFinal: (text) => {
+        setLiveTranscript("");
+        const activeCallId = callId || callSessionRef.current?.callId;
+        const msg = {
+          id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          type: "transcript_final",
+          callId: activeCallId,
+          speaker: "caller",
+          speakerName: "Caller (IP)",
+          text,
+          isFinal: true,
+          timestamp: Date.now(),
+        };
+        bChannelRef.current?.postMessage({
+          type: "caller_speaking",
+          callId: activeCallId,
+          text,
+          active: false,
+          timestamp: Date.now(),
+        });
+        bChannelRef.current?.postMessage(msg);
+        scribeChannelRef.current?.postMessage(msg);
+        try {
+          localStorage.setItem("ekms_scribe_sync", JSON.stringify({ ...msg, _ts: Date.now() }));
+        } catch (e) {}
+        if (activeCallId) {
+          try {
+            const db = getFirestoreDb();
+            updateDoc(doc(db, "calls", activeCallId), {
+              transcripts: arrayUnion(msg),
+              interimTranscript: null,
+              updatedAt: Date.now(),
+            }).catch(() => {});
+          } catch (e) {}
+        }
+      },
+    });
+    speechCtrlRef.current = ctrl;
+    ctrl.start();
+  };
+
+  // Main session lifecycle on mount
   useEffect(() => {
     // Set browser tab title
     document.title = "Triage Caller";
 
+    if (typeof window !== "undefined") {
+      try {
+        bChannelRef.current = new BroadcastChannel("ekms-call-channel");
+        scribeChannelRef.current = new BroadcastChannel("ekms-scribe-channel");
+      } catch (e) {}
+    }
+
     callSessionRef.current = new WebRtcCallSession({
       role: "caller",
-      onStateChange: (state) => {
+      onStateChange: (state, details) => {
         setCallState(state);
         if (state === "calling" || state === "ringing") {
           if (!ringTimeoutRef.current) {
@@ -49,6 +140,7 @@ export default function IpCallerPage() {
           }
           toast.success("Connected with Triage Operator! Speak now.", { id: "caller-status" });
           startTimer();
+          startSpeechRecognition(details?.callId || callSessionRef.current?.callId);
         } else if (state === "on_hold") {
           toast.warning("Call put on hold by Operator", { id: "caller-status" });
         } else if (state === "ended" || state === "idle") {
@@ -58,16 +150,51 @@ export default function IpCallerPage() {
           }
           if (state === "ended") toast.info("Call ended", { id: "caller-status" });
           stopTimer();
+          speechCtrlRef.current?.stop();
+          setLiveTranscript("");
         }
       },
     });
 
     return () => {
       if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
+      speechCtrlRef.current?.stop();
+      bChannelRef.current?.close();
+      scribeChannelRef.current?.close();
       callSessionRef.current?.endCall();
       stopTimer();
     };
   }, []);
+
+  // Ensure speech recognition remains active when caller tab is focused, tapped, or visible
+  useEffect(() => {
+    const handleCallerWakeup = () => {
+      if (callState === "connected") {
+        if (!speechCtrlRef.current || !speechCtrlRef.current.isListening) {
+          startSpeechRecognition(callSessionRef.current?.callId);
+        } else {
+          speechCtrlRef.current.ensureListening();
+        }
+      }
+    };
+
+    window.addEventListener("focus", handleCallerWakeup);
+    window.addEventListener("click", handleCallerWakeup);
+    document.addEventListener("visibilitychange", handleCallerWakeup);
+
+    const monitorInterval = setInterval(() => {
+      if (callState === "connected") {
+        speechCtrlRef.current?.ensureListening();
+      }
+    }, 1500);
+
+    return () => {
+      window.removeEventListener("focus", handleCallerWakeup);
+      window.removeEventListener("click", handleCallerWakeup);
+      document.removeEventListener("visibilitychange", handleCallerWakeup);
+      clearInterval(monitorInterval);
+    };
+  }, [callState]);
 
   const startTimer = () => {
     stopTimer();
@@ -131,10 +258,25 @@ export default function IpCallerPage() {
               <h1 className="text-sm sm:text-base font-bold text-white leading-none">EKMS Triage Caller</h1>
             </div>
           </div>
-          <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[10px] font-semibold text-emerald-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Operator Online
-          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-0.5 text-xs">
+              <Languages className="mr-1 h-3 w-3 text-slate-400" />
+              <select
+                value={callerLang}
+                onChange={(e) => setCallerLang(e.target.value)}
+                className="bg-transparent text-[11px] font-semibold text-white outline-none cursor-pointer"
+                title="Caller Spoken Language"
+              >
+                <option value="en-IN" className="bg-slate-900 text-white">English (India)</option>
+                <option value="hi-IN" className="bg-slate-900 text-white">Hinglish / हिंदी</option>
+                <option value="as-IN" className="bg-slate-900 text-white">Assamese / অসমীয়া</option>
+              </select>
+            </div>
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[10px] font-semibold text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Operator Online
+            </span>
+          </div>
         </div>
       </header>
 
@@ -277,6 +419,23 @@ export default function IpCallerPage() {
                 ))}
               </div>
             ) : null}
+
+            {/* Live speech feedback pill for caller */}
+            {callState === "connected" && (
+              <div className="mb-4 flex items-center justify-center max-w-full px-2">
+                {liveTranscript ? (
+                  <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-950/70 px-3.5 py-1 text-xs text-emerald-300 font-medium animate-pulse shadow-sm">
+                    <Mic className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <span className="line-clamp-1 italic">&ldquo;{liveTranscript}&rdquo;</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-3 py-0.5 text-[11px] text-slate-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Microphone Live · Speak your symptoms anytime</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Call Action Controls */}
             <div className="flex items-center gap-5 sm:gap-6">

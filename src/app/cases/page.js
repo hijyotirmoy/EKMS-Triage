@@ -11,7 +11,9 @@ export default function CasesPage() {
 
   return (
     <AppShell activePage="cases">
-      {({ refreshKey }) => <CaseLogs refreshKey={refreshKey} />}
+      {({ refreshKey, bump }) => (
+        <CaseLogs refreshKey={refreshKey} onCaseDeleted={bump} />
+      )}
     </AppShell>
   );
 }

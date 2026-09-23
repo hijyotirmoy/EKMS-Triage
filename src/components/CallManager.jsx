@@ -16,15 +16,21 @@ import {
 import { toast } from "sonner";
 import { playRingtone, stopRingtone, unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
 import { getFirestoreDb } from "@/lib/firebase";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { SpeechStreamController } from "@/lib/speechRecognition";
 
-export const CallManager = ({ agentId = "Agent 1", onCallerConnected }) => {
+export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpdate }) => {
   const [callState, setCallState] = useState("idle"); // 'idle' | 'incoming' | 'connected' | 'on_hold' | 'ended'
   const [incomingCallData, setIncomingCallData] = useState(null);
   const [activeCaller, setActiveCaller] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isOnHold, setIsOnHold] = useState(false);
+
+  // Live Scribe & Speech-to-Text State
+  const [transcripts, setTranscripts] = useState([]);
+  const [interimTranscript, setInterimTranscript] = useState(null);
+  const [agentLang, setAgentLang] = useState("en-IN");
 
   // Draggable window state
   const [dragPos, setDragPos] = useState({ x: null, y: null });
@@ -33,14 +39,223 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected }) => {
   const popupRef = useRef(null);
 
   const callSessionRef = useRef(null);
+  const speechCtrlRef = useRef(null);
+  const bChannelRef = useRef(null);
+  const scribeChannelRef = useRef(null);
+  const activeCallIdRef = useRef(null);
+  const callDocUnsubRef = useRef(null);
   const timerRef = useRef(null);
   const pollIntervalRef = useRef(null);
+  const lastCallerSpeechRef = useRef({ text: "", timestamp: 0, active: false });
   const onCallerConnectedRef = useRef(onCallerConnected);
+  const onCallUpdateRef = useRef(onCallUpdate);
 
-  // Keep callback ref updated without triggering re-initialization
+  // Keep callbacks updated
   useEffect(() => {
     onCallerConnectedRef.current = onCallerConnected;
   }, [onCallerConnected]);
+
+  useEffect(() => {
+    onCallUpdateRef.current = onCallUpdate;
+  }, [onCallUpdate]);
+
+  // Report call & transcript state to parent (AppShell & TriageConsole)
+  useEffect(() => {
+    onCallUpdateRef.current?.({
+      callState,
+      activeCaller,
+      callDuration,
+      transcripts,
+      interimTranscript,
+      agentLang,
+      setAgentLang: (lang) => {
+        setAgentLang(lang);
+        speechCtrlRef.current?.setLanguage(lang);
+      },
+      callId: activeCallIdRef.current,
+    });
+  }, [callState, activeCaller, callDuration, transcripts, interimTranscript, agentLang]);
+
+  // Start Agent's Speech Recognition stream - captures as Agent (You) on right side
+  const startAgentSpeech = (callId) => {
+    if (speechCtrlRef.current) speechCtrlRef.current.stop();
+    const ctrl = new SpeechStreamController({
+      lang: agentLang,
+      onInterim: (text) => {
+        const clean = text.trim();
+        const now = Date.now();
+        const lastCaller = lastCallerSpeechRef.current;
+
+        // Disambiguate: if caller is currently speaking or just spoke within 2.5s and text matches, skip echoing as agent
+        if (
+          now - lastCaller.timestamp < 2500 &&
+          (lastCaller.active ||
+            (lastCaller.text &&
+              (clean.toLowerCase().includes(lastCaller.text) ||
+                lastCaller.text.includes(clean.toLowerCase()))))
+        ) {
+          return;
+        }
+
+        const interimMsg = {
+          type: "transcript_interim",
+          speaker: "agent",
+          speakerName: "Agent (You)",
+          text: clean,
+          timestamp: Date.now(),
+        };
+        setInterimTranscript(interimMsg);
+        bChannelRef.current?.postMessage(interimMsg);
+        scribeChannelRef.current?.postMessage(interimMsg);
+        const curCallId = callId || activeCallIdRef.current;
+        if (curCallId) {
+          try {
+            const db = getFirestoreDb();
+            updateDoc(doc(db, "calls", curCallId), {
+              interimTranscript: interimMsg,
+              updatedAt: Date.now(),
+            }).catch(() => {});
+          } catch (e) {}
+        }
+      },
+      onFinal: (text) => {
+        const clean = text.trim();
+        const now = Date.now();
+        const lastCaller = lastCallerSpeechRef.current;
+
+        // If caller spoke within 3s and text overlaps or caller is active in other tab, suppress duplicate
+        if (
+          now - lastCaller.timestamp < 3000 &&
+          lastCaller.text &&
+          (clean.toLowerCase().includes(lastCaller.text) ||
+            lastCaller.text.includes(clean.toLowerCase()) ||
+            Math.abs(clean.length - lastCaller.text.length) < 6)
+        ) {
+          return; // Skip echoing caller's speech as agent
+        }
+
+        setInterimTranscript(null);
+        const finalMsg = {
+          id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          type: "transcript_final",
+          speaker: "agent",
+          speakerName: "Agent (You)",
+          text: clean,
+          isFinal: true,
+          timestamp: Date.now(),
+        };
+        setTranscripts((prev) => [...prev, finalMsg]);
+        bChannelRef.current?.postMessage(finalMsg);
+        scribeChannelRef.current?.postMessage(finalMsg);
+        const curCallId = callId || activeCallIdRef.current;
+        if (curCallId) {
+          try {
+            const db = getFirestoreDb();
+            updateDoc(doc(db, "calls", curCallId), {
+              transcripts: arrayUnion(finalMsg),
+              interimTranscript: null,
+              updatedAt: Date.now(),
+            }).catch(() => {});
+          } catch (e) {}
+        }
+      },
+    });
+    speechCtrlRef.current = ctrl;
+    ctrl.start();
+  };
+
+  // Cross-tab broadcast channel & Storage event listeners for 100% reliable caller sync
+  useEffect(() => {
+    const handleIncomingTranscript = (msg) => {
+      if (!msg) return;
+
+      // Caller active speaking broadcast notification
+      if (msg.type === "caller_speaking") {
+        lastCallerSpeechRef.current = {
+          text: (msg.text || "").toLowerCase().trim(),
+          timestamp: Date.now(),
+          active: !!msg.active,
+        };
+        return;
+      }
+
+      if (msg.speaker === "caller" || msg.type === "transcript_final" || msg.type === "transcript_interim") {
+        if (msg.speaker === "caller") {
+          lastCallerSpeechRef.current = {
+            text: (msg.text || "").toLowerCase().trim(),
+            timestamp: Date.now(),
+            active: msg.type === "transcript_interim",
+          };
+        }
+
+        if (msg.type === "transcript_interim" || msg.isFinal === false) {
+          if (msg.speaker === "caller") {
+            setInterimTranscript(msg);
+          }
+        } else if (msg.type === "transcript_final" || msg.isFinal === true) {
+          if (msg.speaker === "caller") {
+            setInterimTranscript((cur) => (cur?.speaker === "caller" ? null : cur));
+            setTranscripts((prev) => {
+              if (
+                prev.some(
+                  (t) =>
+                    t.id === msg.id ||
+                    (t.text === msg.text && Math.abs((t.timestamp || 0) - (msg.timestamp || 0)) < 1500)
+                )
+              ) {
+                return prev;
+              }
+              return [...prev, msg];
+            });
+          }
+        }
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      try {
+        const channel1 = new BroadcastChannel("ekms-call-channel");
+        bChannelRef.current = channel1;
+        channel1.onmessage = (event) => handleIncomingTranscript(event.data);
+
+        const channel2 = new BroadcastChannel("ekms-scribe-channel");
+        scribeChannelRef.current = channel2;
+        channel2.onmessage = (event) => handleIncomingTranscript(event.data);
+      } catch (e) {}
+
+      // Cross-tab window storage event listener (guaranteed delivery across tabs/browsers on same origin)
+      const onStorage = (event) => {
+        if (event.key === "ekms_scribe_sync" && event.newValue) {
+          try {
+            const parsed = JSON.parse(event.newValue);
+            handleIncomingTranscript(parsed);
+          } catch (e) {}
+        }
+      };
+      window.addEventListener("storage", onStorage);
+
+      return () => {
+        bChannelRef.current?.close();
+        scribeChannelRef.current?.close();
+        window.removeEventListener("storage", onStorage);
+      };
+    }
+  }, []);
+
+  // Ensure Agent's speech recognition stays alive on focus or interaction
+  useEffect(() => {
+    const handleAgentWakeup = () => {
+      if (callState === "connected") {
+        speechCtrlRef.current?.ensureListening();
+      }
+    };
+    window.addEventListener("focus", handleAgentWakeup);
+    window.addEventListener("click", handleAgentWakeup);
+    return () => {
+      window.removeEventListener("focus", handleAgentWakeup);
+      window.removeEventListener("click", handleAgentWakeup);
+    };
+  }, [callState]);
 
   useEffect(() => {
     const session = new WebRtcCallSession({
@@ -61,6 +276,41 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected }) => {
           startTimer();
           toast.success("Voice call connected! Audio is live.", { id: "call-status" });
 
+          const curId = details?.callId || incomingCallData?.id;
+          activeCallIdRef.current = curId;
+
+          // Clear old transcripts on brand new call connection
+          setTranscripts([]);
+          setInterimTranscript(null);
+
+          // Start agent voice transcription
+          startAgentSpeech(curId);
+
+          // Subscribe to remote caller's Firestore transcript chunks
+          if (curId) {
+            try {
+              const db = getFirestoreDb();
+              callDocUnsubRef.current = onSnapshot(doc(db, "calls", curId), (snap) => {
+                if (snap.exists()) {
+                  const data = snap.data();
+                  if (data.transcripts && Array.isArray(data.transcripts)) {
+                    setTranscripts((prev) => {
+                      const map = new Map();
+                      prev.forEach((t) => map.set(t.id, t));
+                      data.transcripts.forEach((t) => map.set(t.id, t));
+                      return Array.from(map.values()).sort(
+                        (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
+                      );
+                    });
+                  }
+                  if (data.interimTranscript && data.interimTranscript.speaker === "caller") {
+                    setInterimTranscript(data.interimTranscript);
+                  }
+                }
+              });
+            } catch (e) {}
+          }
+
           // Auto-fill Agent's intake form with caller phone/details via ref
           if (caller) {
             onCallerConnectedRef.current?.(caller);
@@ -71,11 +321,15 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected }) => {
         } else if (state === "ended") {
           setCallState("ended");
           stopTimer();
+          speechCtrlRef.current?.stop();
+          if (callDocUnsubRef.current) {
+            callDocUnsubRef.current();
+            callDocUnsubRef.current = null;
+          }
           toast.info("Call ended", { id: "call-status" });
           setTimeout(() => {
             setCallState("idle");
             setIncomingCallData(null);
-            setActiveCaller(null);
             setIsOnHold(false);
             setIsMuted(false);
             setDragPos({ x: null, y: null }); // Reset position for next call

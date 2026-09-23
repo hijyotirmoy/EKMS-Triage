@@ -3,6 +3,9 @@ import { getFacilities, saveCase } from "@/lib/db";
 import { resolveCallerLocation, rankNearestFacilities } from "@/lib/geo";
 import { evaluateTriage } from "@/lib/triageEngine";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function generateCaseRef() {
   const d = new Date();
   const yy = String(d.getFullYear()).slice(-2);

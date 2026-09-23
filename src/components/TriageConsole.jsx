@@ -1,12 +1,26 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, Sparkles, Crosshair, RotateCcw, UserCheck, History, CalendarClock, Navigation, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Loader2,
+  Sparkles,
+  Crosshair,
+  RotateCcw,
+  UserCheck,
+  History,
+  CalendarClock,
+  Navigation,
+  ChevronLeft,
+  ChevronRight,
+  MessageSquare,
+  Stethoscope,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { TriageResultPanel } from "./TriageResultPanel";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { UrgencyBadge } from "./UrgencyBadge";
+import { LiveScribeWindow } from "./LiveScribeWindow";
 
 const EMPTY = {
   caller_name: "",
@@ -33,10 +47,11 @@ const Field = ({ label, children, className = "" }) => (
   </div>
 );
 
-export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
+export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession }) => {
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [activeRightTab, setActiveRightTab] = useState("auto"); // 'auto' | 'scribe' | 'triage'
   const [ekmsContext, setEkmsContext] = useState(null);
   const [chatPresetTrigger, setChatPresetTrigger] = useState("");
   const [callerFoundInfo, setCallerFoundInfo] = useState(null);
@@ -151,6 +166,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
     );
   };
 
+  const handleInsertScribeToComplaint = (callerSpeech) => {
+    if (!callerSpeech) return;
+    setForm((f) => ({
+      ...f,
+      symptom_notes: f.symptom_notes
+        ? `${f.symptom_notes}\n${callerSpeech}`
+        : callerSpeech,
+    }));
+    toast.success("Transcribed speech inserted into complaint notes");
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (!form.caller_name || !form.caller_name.trim()) {
@@ -169,6 +195,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
       return toast.error("Please enter the caller's complaint notes in the chat area");
     }
     setLoading(true);
+    setActiveRightTab("triage");
     setResult(null);
     const payload = {
       ...form,
@@ -455,7 +482,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
         >
           {loading ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Triaging with Claude Sonnet 4.6…
+              <Loader2 className="h-4 w-4 animate-spin" /> Analyzing the case...
             </>
           ) : (
             <>
@@ -577,7 +604,95 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
         })()}
       </form>
 
-      <TriageResultPanel result={result} loading={loading} />
+      {/* Right Side: Live Scribe Window OR Triage Result Panel */}
+      {(() => {
+        const isCallActive =
+          callSession?.callState === "connected" ||
+          callSession?.callState === "on_hold";
+        const transcriptsCount = callSession?.transcripts?.length || 0;
+        const hasTranscripts = transcriptsCount > 0;
+        const hasInterim = Boolean(callSession?.interimTranscript);
+        const hasActiveScribe = isCallActive || hasTranscripts || hasInterim;
+
+        let currentRightView = activeRightTab;
+        if (currentRightView === "auto") {
+          if (result || loading) {
+            currentRightView = "triage";
+          } else if (hasActiveScribe) {
+            currentRightView = "scribe";
+          } else {
+            currentRightView = "triage";
+          }
+        }
+
+        const showToggleBar = hasActiveScribe || Boolean(result);
+
+        return (
+          <div className="flex flex-col">
+            {showToggleBar && (
+              <div className="mb-2.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-secondary/50 p-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setActiveRightTab("triage")}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
+                      currentRightView === "triage"
+                        ? "bg-background text-foreground shadow-xs border border-border/70"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Stethoscope className="h-3.5 w-3.5 text-primary" />
+                    Triage Outcome
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveRightTab("scribe")}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
+                      currentRightView === "scribe"
+                        ? "bg-background text-foreground shadow-xs border border-border/70"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                    Call Transcript {transcriptsCount > 0 ? `(${transcriptsCount})` : ""}
+                    {isCallActive && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+                    )}
+                  </button>
+                </div>
+
+                {isCallActive && (
+                  <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                    Call Live
+                  </span>
+                )}
+              </div>
+            )}
+
+            {currentRightView === "scribe" ? (
+              <LiveScribeWindow
+                transcripts={callSession?.transcripts || []}
+                interimTranscript={callSession?.interimTranscript || null}
+                isCallActive={isCallActive}
+                callDuration={callSession?.callDuration || 0}
+                activeCaller={
+                  callSession?.activeCaller ||
+                  incomingCaller || {
+                    caller_name: form.caller_name || "Caller",
+                    phone: form.phone,
+                  }
+                }
+                onInsertToComplaint={handleInsertScribeToComplaint}
+                currentLanguage={callSession?.agentLang || "en-IN"}
+                onLanguageChange={callSession?.setAgentLang}
+              />
+            ) : (
+              <TriageResultPanel result={result} loading={loading} />
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

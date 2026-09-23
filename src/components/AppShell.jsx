@@ -33,6 +33,7 @@ export function AppShell({ activePage = "home", children }) {
   const [stats, setStats] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [incomingCallerInfo, setIncomingCallerInfo] = useState(null);
+  const [callSession, setCallSession] = useState(null);
 
   // Authentication State
   const [currentAgent, setCurrentAgent] = useState(null);
@@ -123,14 +124,54 @@ export function AppShell({ activePage = "home", children }) {
     loadMeta();
   }, [loadMeta]);
 
-  useEffect(() => {
+  const loadStats = useCallback(() => {
     api
-      .get("/cases/stats")
+      .get(`/cases/stats?_t=${Date.now()}`)
       .then(({ data }) => setStats(data))
       .catch(() => {});
-  }, [refreshKey]);
+  }, []);
 
-  const bump = () => setRefreshKey((k) => k + 1);
+  const bump = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+    loadStats();
+  }, [loadStats]);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats, refreshKey]);
+
+  // Real-time Firestore cases listener: updates stats immediately when case is added or deleted
+  useEffect(() => {
+    let unsubscribe = null;
+    try {
+      const db = getFirestoreDb();
+      unsubscribe = onSnapshot(
+        collection(db, "cases"),
+        (snap) => {
+          const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
+          snap.docs.forEach((d) => {
+            const level = d.data().triage?.urgency_level;
+            if (level && by_urgency[level] !== undefined) {
+              by_urgency[level]++;
+            }
+          });
+          setStats({
+            total: snap.size,
+            by_urgency,
+          });
+        },
+        () => {
+          loadStats();
+        }
+      );
+    } catch (e) {
+      loadStats();
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [loadStats]);
 
   const handleCallerConnected = useCallback((info) => {
     setIncomingCallerInfo(info ? { ...info, _ts: Date.now() } : null);
@@ -404,6 +445,7 @@ export function AppShell({ activePage = "home", children }) {
       <CallManager
         agentId={currentAgent.agentId}
         onCallerConnected={handleCallerConnected}
+        onCallUpdate={setCallSession}
       />
 
       <main className="mx-auto max-w-[1500px] px-3.5 py-3 pb-12 sm:px-6 sm:py-4 sm:pb-16">
@@ -415,6 +457,7 @@ export function AppShell({ activePage = "home", children }) {
               loadMeta,
               incomingCallerInfo,
               currentAgent,
+              callSession,
             })
           : children}
       </main>

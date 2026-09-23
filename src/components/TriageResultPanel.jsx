@@ -17,10 +17,12 @@ import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 
 const Empty = () => (
-  <div className="panel grid-lines flex min-h-[520px] flex-col items-center justify-center p-8 text-center">
-    <Stethoscope className="mb-4 h-10 w-10 text-muted-foreground/50" strokeWidth={1.5} />
-    <h3 className="text-lg font-semibold">Triage output appears here</h3>
-    <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+  <div className="panel grid-lines flex min-h-[480px] flex-col items-center justify-start p-6 pt-8 sm:p-8 sm:pt-10 text-center">
+    <div className="mx-auto mb-3.5 flex h-13 w-13 items-center justify-center rounded-2xl bg-secondary/80 border border-border/60 text-muted-foreground shadow-2xs">
+      <Stethoscope className="h-6 w-6 text-primary/80" strokeWidth={1.75} />
+    </div>
+    <h3 className="text-base sm:text-lg font-bold text-foreground">Triage output appears here</h3>
+    <p className="mt-2 max-w-sm text-xs sm:text-sm text-muted-foreground leading-relaxed">
       Fill the intake form or load a sample call. The engine returns an urgency level, red flags,
       the facility type needed and the nearest ESIC / ESIS centres.
     </p>
@@ -28,9 +30,91 @@ const Empty = () => (
 );
 
 const Loading = () => (
-  <div className="panel flex min-h-[520px] flex-col items-center justify-center gap-3 p-8">
-    <Loader2 className="h-7 w-7 animate-spin text-primary" />
-    <p className="text-sm text-muted-foreground">Reading the complaint and scoring urgency…</p>
+  <div className="space-y-5 animate-in fade-in duration-300" data-testid="triage-skeleton">
+    {/* Main Outcome Card Skeleton */}
+    <div className="panel overflow-hidden border border-border/80 bg-card p-5 sm:p-6 shadow-sm">
+      {/* Top Shimmer Bar */}
+      <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500/40 via-primary/60 to-emerald-500/40 animate-pulse rounded-full" />
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-b border-border/50 pb-4">
+        <div className="space-y-2">
+          <div className="h-3 w-20 rounded bg-muted/70 animate-pulse" />
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-28 rounded-full bg-primary/25 animate-pulse" />
+            <div className="h-7 w-24 rounded-full bg-muted/60 animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-1.5 text-right">
+          <div className="h-3.5 w-32 rounded bg-muted/70 animate-pulse ml-auto" />
+          <div className="h-3 w-24 rounded bg-muted/50 animate-pulse ml-auto" />
+        </div>
+      </div>
+
+      {/* Summary Skeleton */}
+      <div className="mt-5 space-y-2.5">
+        <div className="h-3.5 w-24 rounded bg-muted/70 animate-pulse" />
+        <div className="h-4 w-full rounded bg-muted/50 animate-pulse" />
+        <div className="h-4 w-11/12 rounded bg-muted/50 animate-pulse" />
+        <div className="h-4 w-3/4 rounded bg-muted/40 animate-pulse" />
+      </div>
+
+      {/* Clinical Reasoning Box Skeleton */}
+      <div className="mt-5 rounded-xl border border-border/60 bg-secondary/30 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-primary/30 animate-pulse" />
+          <div className="h-3.5 w-36 rounded bg-muted/70 animate-pulse" />
+        </div>
+        <div className="h-3.5 w-full rounded bg-muted/40 animate-pulse" />
+        <div className="h-3.5 w-4/5 rounded bg-muted/40 animate-pulse" />
+      </div>
+
+      {/* Red Flags Skeleton Box */}
+      <div className="mt-5 rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-rose-500/30 animate-pulse" />
+          <div className="h-3.5 w-28 rounded bg-rose-500/20 animate-pulse" />
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <div className="h-6 w-36 rounded-full bg-rose-500/15 animate-pulse" />
+          <div className="h-6 w-44 rounded-full bg-rose-500/15 animate-pulse" />
+        </div>
+      </div>
+
+      {/* Recommended Action Banner Skeleton */}
+      <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="h-3.5 w-44 rounded bg-emerald-500/30 animate-pulse" />
+          <div className="h-5 w-24 rounded-full bg-emerald-500/20 animate-pulse" />
+        </div>
+        <div className="h-4 w-3/4 rounded bg-emerald-500/20 animate-pulse" />
+      </div>
+    </div>
+
+    {/* Nearest Facilities Card Skeleton */}
+    <div className="panel border border-border/80 bg-card p-5 sm:p-6 shadow-sm space-y-3.5">
+      <div className="flex items-center justify-between border-b border-border/50 pb-3">
+        <div className="flex items-center gap-2">
+          <div className="h-4 w-4 rounded bg-primary/30 animate-pulse" />
+          <div className="h-4 w-40 rounded bg-muted/70 animate-pulse" />
+        </div>
+        <div className="h-5 w-16 rounded-full bg-muted/60 animate-pulse" />
+      </div>
+
+      {/* 2 Facility items placeholder */}
+      {[1, 2].map((i) => (
+        <div key={i} className="flex items-start justify-between gap-3 rounded-xl border border-border/50 p-3.5 bg-secondary/20">
+          <div className="space-y-2 flex-1">
+            <div className="h-4 w-52 rounded bg-muted/70 animate-pulse" />
+            <div className="h-3 w-4/5 rounded bg-muted/50 animate-pulse" />
+            <div className="h-3 w-32 rounded bg-muted/40 animate-pulse" />
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <div className="h-5 w-16 rounded-full bg-muted/60 animate-pulse" />
+            <div className="h-7 w-20 rounded-md bg-primary/20 animate-pulse" />
+          </div>
+        </div>
+      ))}
+    </div>
   </div>
 );
 
