@@ -316,28 +316,29 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
 
       {/* Chat input area */}
       <div className="border-t border-border bg-secondary/30 p-2.5">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleUserSubmit();
-          }}
-          className="flex items-center gap-2"
-        >
+        <div className="flex items-center gap-2">
           <input
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleUserSubmit();
+              }
+            }}
             placeholder="Type caller's complaint / answer (English / हिंदी / Hinglish)..."
             className="flex-1 rounded-md border border-border/80 bg-background px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-emerald-500"
           />
           <button
-            type="submit"
+            type="button"
+            onClick={() => handleUserSubmit()}
             disabled={loading || !inputText.trim()}
             className="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-700 disabled:opacity-50"
             title="Send to EKMS AI"
           >
             <Send className="h-4 w-4" />
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
