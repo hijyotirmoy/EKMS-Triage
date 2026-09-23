@@ -8,6 +8,7 @@ import { TriageConsole } from "@/components/TriageConsole";
 import { CaseLogs } from "@/components/CaseLogs";
 import { FacilityDirectory } from "@/components/FacilityDirectory";
 import { DeveloperApi } from "@/components/DeveloperApi";
+import { CallManager } from "@/components/CallManager";
 
 const TABS = [
   { id: "triage-console", label: "Live intake & triage", icon: PhoneCall },
@@ -21,6 +22,7 @@ export default function Home() {
   const [meta, setMeta] = useState(null);
   const [stats, setStats] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [incomingCallerInfo, setIncomingCallerInfo] = useState(null);
 
   const loadMeta = useCallback(() => {
     api
@@ -81,6 +83,17 @@ export default function Home() {
             >
               Emergency 108
             </a>
+
+            <a
+              href="/caller"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800 transition-all duration-200 hover:bg-emerald-100 hover:shadow-xs"
+              title="Open IP Caller page in new tab/window to test online voice calling"
+            >
+              <PhoneCall className="h-3 w-3 text-emerald-600" />
+              IP Caller Portal
+            </a>
           </div>
         </div>
 
@@ -106,8 +119,17 @@ export default function Home() {
         </nav>
       </header>
 
+      {/* Real-time WebRTC Voice Call Manager for incoming IP calls */}
+      <CallManager onCallerConnected={(info) => setIncomingCallerInfo(info)} />
+
       <main className="mx-auto max-w-[1500px] px-5 py-6 sm:px-8 sm:py-8">
-        {tab === "triage-console" && <TriageConsole meta={meta} onCaseCreated={bump} />}
+        {tab === "triage-console" && (
+          <TriageConsole
+            meta={meta}
+            onCaseCreated={bump}
+            incomingCaller={incomingCallerInfo}
+          />
+        )}
         {tab === "case-logs" && <CaseLogs refreshKey={refreshKey} />}
         {tab === "facility-directory" && (
           <FacilityDirectory meta={meta} onImported={loadMeta} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Loader2, Sparkles, Crosshair, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -33,7 +33,7 @@ const Field = ({ label, children, className = "" }) => (
   </div>
 );
 
-export const TriageConsole = ({ meta, onCaseCreated }) => {
+export const TriageConsole = ({ meta, onCaseCreated, incomingCaller }) => {
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -41,6 +41,23 @@ export const TriageConsole = ({ meta, onCaseCreated }) => {
   const [chatPresetTrigger, setChatPresetTrigger] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Auto-fill form when caller connects via online voice call
+  useEffect(() => {
+    if (incomingCaller) {
+      setForm((f) => ({
+        ...f,
+        caller_name: incomingCaller.name || f.caller_name,
+        phone: incomingCaller.phone || f.phone,
+        city: incomingCaller.city || f.city,
+        district: incomingCaller.district || f.district,
+      }));
+      if (incomingCaller.symptoms) {
+        setChatPresetTrigger(incomingCaller.symptoms);
+      }
+      toast.success(`Active caller linked: ${incomingCaller.name || "Insured Person"}`);
+    }
+  }, [incomingCaller]);
 
   const applyPreset = (p) => {
     setForm({ ...EMPTY, ...p.data });

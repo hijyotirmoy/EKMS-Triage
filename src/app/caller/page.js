@@ -1,0 +1,275 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  Mic,
+  MicOff,
+  Phone,
+  PhoneCall,
+  PhoneOff,
+  ShieldAlert,
+  Sparkles,
+  Volume2,
+} from "lucide-react";
+import { toast, Toaster } from "sonner";
+import { WebRtcCallSession } from "@/lib/webrtc";
+
+export default function IpCallerPage() {
+  const [callerName, setCallerName] = useState("Ramesh Kalita");
+  const [phone, setPhone] = useState("9876543210");
+  const [city, setCity] = useState("Guwahati");
+  const [district, setDistrict] = useState("Kamrup Metropolitan");
+  const [symptoms, setSymptoms] = useState("Chhati me dard ho raha hai, pasina aa raha hai");
+
+  const [callState, setCallState] = useState("idle"); // 'idle' | 'calling' | 'ringing' | 'connected' | 'ended'
+  const [callDuration, setCallDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+
+  const callSessionRef = useRef(null);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    callSessionRef.current = new WebRtcCallSession({
+      role: "caller",
+      onStateChange: (state) => {
+        setCallState(state);
+        if (state === "connected") {
+          toast.success("Connected with Triage Operator! Speak now.");
+          startTimer();
+        } else if (state === "ended") {
+          toast.info("Call ended");
+          stopTimer();
+        }
+      },
+    });
+
+    return () => {
+      callSessionRef.current?.endCall();
+      stopTimer();
+    };
+  }, []);
+
+  const startTimer = () => {
+    stopTimer();
+    setCallDuration(0);
+    timerRef.current = setInterval(() => {
+      setCallDuration((d) => d + 1);
+    }, 1000);
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const formatTimer = (secs) => {
+    const m = String(Math.floor(secs / 60)).padStart(2, "0");
+    const s = String(secs % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  const handleStartCall = async () => {
+    if (!callerName.trim()) return toast.error("Please enter caller name");
+    try {
+      await callSessionRef.current.startCall({
+        name: callerName,
+        phone,
+        city,
+        district,
+        symptoms,
+      });
+    } catch (err) {
+      toast.error(err.message || "Failed to start call. Ensure microphone permissions are enabled.");
+    }
+  };
+
+  const handleEndCall = () => {
+    callSessionRef.current?.endCall();
+  };
+
+  const handleToggleMute = () => {
+    const muted = callSessionRef.current?.toggleMute();
+    setIsMuted(muted);
+    toast.info(muted ? "Microphone muted" : "Microphone unmuted");
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500/30">
+      <Toaster position="top-center" theme="dark" />
+
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md">
+        <div className="mx-auto flex max-w-xl items-center justify-between px-5 py-3.5">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="EKMS Logo" className="h-8 w-8 object-contain" />
+            <div>
+              <h1 className="text-sm font-bold text-white leading-none">EKMS Tele-Triage Helpline</h1>
+              <p className="mt-1 text-[11px] text-emerald-400 font-medium">
+                Insured Person (IP) Calling Portal · 24/7 Free Call
+              </p>
+            </div>
+          </div>
+          <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Operator Online
+          </span>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center p-5 sm:p-6">
+        {callState === "idle" || callState === "ended" ? (
+          /* Pre-Call Initiation Screen */
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-emerald-950/20 backdrop-blur-md">
+            <div className="text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/30">
+                <PhoneCall className="h-8 w-8 text-emerald-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Call ESIC / ESIS Helpline</h2>
+              <p className="mt-1.5 text-xs text-slate-400">
+                Connect directly with a call-centre triage operator via real-time online voice call.
+              </p>
+            </div>
+
+            <div className="mt-6 space-y-3.5 text-xs">
+              <div>
+                <label className="mb-1 block font-semibold text-slate-300">Your Full Name (IP / Worker)</label>
+                <input
+                  value={callerName}
+                  onChange={(e) => setCallerName(e.target.value)}
+                  placeholder="e.g. Ramesh Kalita"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800/80 px-3.5 py-2.5 text-white placeholder:text-slate-500 outline-none transition focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-300">Phone Number</label>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="98XXXXXXXX"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-800/80 px-3.5 py-2.5 text-white placeholder:text-slate-500 outline-none transition focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-300">City / Town</label>
+                  <input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Guwahati"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-800/80 px-3.5 py-2.5 text-white placeholder:text-slate-500 outline-none transition focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-slate-300">Primary Complaint / Symptoms</label>
+                <textarea
+                  rows={2}
+                  value={symptoms}
+                  onChange={(e) => setSymptoms(e.target.value)}
+                  placeholder="Explain what is happening..."
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800/80 px-3.5 py-2 text-white placeholder:text-slate-500 outline-none transition focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleStartCall}
+              className="mt-6 flex w-full items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:brightness-110 active:scale-[0.98]"
+            >
+              <Phone className="h-5 w-5 fill-current" />
+              Call Triage Operator (Free Online Call)
+            </button>
+
+            <p className="mt-4 text-center text-[11px] text-slate-500">
+              Microphone access required. Browser-to-browser encrypted voice communication.
+            </p>
+          </div>
+        ) : (
+          /* Active Call Screen (WhatsApp style) */
+          <div className="flex flex-col items-center justify-between rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-8 shadow-2xl min-h-[500px]">
+            {/* Top Status */}
+            <div className="text-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-semibold text-emerald-400">
+                <Volume2 className="h-3.5 w-3.5" />
+                {callState === "calling" && "Dialing Operator..."}
+                {callState === "ringing" && "Ringing on Operator Console..."}
+                {callState === "connected" && "Connected · Audio Live"}
+              </span>
+
+              <h3 className="mt-4 text-xl font-bold text-white">EKMS Triage Control Room</h3>
+              <p className="mt-1 text-xs text-slate-400">Operator: Assam Tele-Triage Desk</p>
+
+              {callState === "connected" && (
+                <p className="mt-2 text-2xl font-mono font-bold tracking-wider text-emerald-400">
+                  {formatTimer(callDuration)}
+                </p>
+              )}
+            </div>
+
+            {/* Avatar & Pulse Waveform Animation */}
+            <div className="relative my-8 flex items-center justify-center">
+              {/* Outer pulsing rings */}
+              <div className="absolute h-40 w-40 rounded-full bg-emerald-500/10 animate-ping" />
+              <div className="absolute h-32 w-32 rounded-full bg-emerald-500/20 animate-pulse" />
+
+              {/* Center avatar */}
+              <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 shadow-xl ring-4 ring-emerald-500/30">
+                <img src="/logo.png" alt="Triage Desk" className="h-12 w-12 object-contain" />
+              </div>
+            </div>
+
+            {/* Audio Wave Bars (When connected) */}
+            {callState === "connected" && (
+              <div className="mb-6 flex items-center gap-1.5">
+                {[12, 24, 18, 28, 16, 22, 14, 26, 20].map((h, i) => (
+                  <span
+                    key={i}
+                    style={{ height: `${h}px` }}
+                    className="w-1 rounded-full bg-emerald-400 animate-pulse"
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Call Action Controls */}
+            <div className="flex items-center gap-6">
+              {/* Mute Button */}
+              <button
+                onClick={handleToggleMute}
+                disabled={callState !== "connected"}
+                className={`flex h-14 w-14 items-center justify-center rounded-full transition-all duration-200 ${
+                  isMuted
+                    ? "bg-amber-500/20 text-amber-400 ring-2 ring-amber-500"
+                    : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                }`}
+                title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
+              >
+                {isMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+              </button>
+
+              {/* End Call Button */}
+              <button
+                onClick={handleEndCall}
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-white shadow-xl shadow-red-950/60 transition-all duration-200 hover:bg-red-700 hover:scale-105 active:scale-95"
+                title="End Call"
+              >
+                <PhoneOff className="h-7 w-7" />
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-800/80 px-5 py-4 text-center text-[11px] text-slate-500">
+        Emergency Services: For life-threatening emergencies, dial 108 immediately.
+      </footer>
+    </div>
+  );
+}
