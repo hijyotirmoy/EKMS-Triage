@@ -32,7 +32,7 @@ export async function GET(request) {
   if (callId) {
     const call = activeCalls.get(callId);
     if (!call) {
-      return NextResponse.json({ status: "ended" });
+      return NextResponse.json({ status: "pending" });
     }
     return NextResponse.json(call);
   }
@@ -70,8 +70,8 @@ export async function POST(request) {
     const current = activeCalls.get(callId);
     current.updatedAt = now;
 
-    if (action === "answer") {
-      current.answer = data.answer;
+    if (action === "accept" || action === "answer") {
+      if (data?.answer) current.answer = data.answer;
       current.status = "connected";
       return NextResponse.json({ success: true, call: current });
     }

@@ -13,10 +13,10 @@ import {
   Volume2,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
-import { WebRtcCallSession } from "@/lib/webrtc";
+import { unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
 
 export default function IpCallerPage() {
-  const [phone, setPhone] = useState("9876543210");
+  const [phone, setPhone] = useState("");
 
   const [callState, setCallState] = useState("idle"); // 'idle' | 'calling' | 'ringing' | 'connected' | 'on_hold' | 'ended'
   const [callDuration, setCallDuration] = useState(0);
@@ -24,25 +24,45 @@ export default function IpCallerPage() {
 
   const callSessionRef = useRef(null);
   const timerRef = useRef(null);
+  const ringTimeoutRef = useRef(null);
 
   useEffect(() => {
+    // Set browser tab title
+    document.title = "triage caller";
+
     callSessionRef.current = new WebRtcCallSession({
       role: "caller",
       onStateChange: (state) => {
         setCallState(state);
-        if (state === "connected") {
+        if (state === "calling" || state === "ringing") {
+          if (!ringTimeoutRef.current) {
+            ringTimeoutRef.current = setTimeout(() => {
+              callSessionRef.current?.endCall(true);
+              toast.error("No answer from operator (45s timeout). Call ended.");
+            }, 45000);
+          }
+        } else if (state === "connected") {
+          if (ringTimeoutRef.current) {
+            clearTimeout(ringTimeoutRef.current);
+            ringTimeoutRef.current = null;
+          }
           toast.success("Connected with Triage Operator! Speak now.");
           startTimer();
         } else if (state === "on_hold") {
           toast.warning("Call put on hold by Operator");
-        } else if (state === "ended") {
-          toast.info("Call ended");
+        } else if (state === "ended" || state === "idle") {
+          if (ringTimeoutRef.current) {
+            clearTimeout(ringTimeoutRef.current);
+            ringTimeoutRef.current = null;
+          }
+          if (state === "ended") toast.info("Call ended");
           stopTimer();
         }
       },
     });
 
     return () => {
+      if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
       callSessionRef.current?.endCall();
       stopTimer();
     };
@@ -72,9 +92,10 @@ export default function IpCallerPage() {
   const handleStartCall = async () => {
     if (!phone.trim()) return toast.error("Please enter your phone number");
     try {
+      unlockMobileAudio();
       await callSessionRef.current.startCall({
         phone: phone.trim(),
-        name: `IP Caller (${phone.trim()})`,
+        name: "",
       });
     } catch (err) {
       toast.error(err.message || "Failed to start call. Ensure microphone permissions are enabled.");
@@ -82,6 +103,10 @@ export default function IpCallerPage() {
   };
 
   const handleEndCall = () => {
+    if (ringTimeoutRef.current) {
+      clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = null;
+    }
     callSessionRef.current?.endCall();
   };
 
@@ -101,10 +126,7 @@ export default function IpCallerPage() {
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="EKMS Logo" className="h-8 w-8 object-contain" />
             <div>
-              <h1 className="text-sm font-bold text-white leading-none">EKMS Tele-Triage Helpline</h1>
-              <p className="mt-1 text-[11px] text-emerald-400 font-medium">
-                Insured Person (IP) Calling Portal · 24/7 Free Call
-              </p>
+              <h1 className="text-base font-bold text-white leading-none">EKMS Triage Caller</h1>
             </div>
           </div>
           <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
@@ -180,7 +202,7 @@ export default function IpCallerPage() {
               >
                 <Volume2 className="h-3.5 w-3.5" />
                 {callState === "calling" && "Dialing Operator..."}
-                {callState === "ringing" && "Ringing on Operator Console..."}
+                {callState === "ringing" && "Ringing Operator Console... (auto-cuts in 45s)"}
                 {callState === "connected" && "Connected · Audio Live"}
                 {callState === "on_hold" && "Call Placed On Hold by Operator"}
               </span>

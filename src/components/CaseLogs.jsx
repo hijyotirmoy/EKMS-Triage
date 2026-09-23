@@ -61,13 +61,14 @@ export const CaseLogs = ({ refreshKey }) => {
         </div>
       ) : (
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm" data-testid="case-log-table">
+          <table className="w-full min-w-[900px] text-left text-sm" data-testid="case-log-table">
             <thead>
               <tr className="border-b border-border/70 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="py-2 pr-3 font-semibold">Case</th>
                 <th className="py-2 pr-3 font-semibold">Caller</th>
                 <th className="py-2 pr-3 font-semibold">Complaint</th>
                 <th className="py-2 pr-3 font-semibold">Urgency</th>
+                <th className="py-2 pr-3 font-semibold">Navigation</th>
                 <th className="py-2 pr-3 font-semibold">Nearest</th>
                 <th className="py-2 font-semibold">Time</th>
               </tr>
@@ -82,17 +83,24 @@ export const CaseLogs = ({ refreshKey }) => {
                 >
                   <td className="mono py-3 pr-3 text-xs text-primary/90">{c.case_ref}</td>
                   <td className="py-3 pr-3">
-                    <p className="font-medium">{c.intake?.caller_name || "—"}</p>
-                    <p className="mono text-[11px] text-muted-foreground">{c.intake?.phone || ""}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-medium text-foreground">{c.intake?.caller_name || "—"}</p>
+                      {(c.intake?.age || c.intake?.sex) && (
+                        <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
+                          {[c.intake?.age ? `${c.intake.age}y` : null, c.intake?.sex].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mono text-[11px] text-muted-foreground">{c.intake?.phone || "—"}</p>
                   </td>
-                  <td className="max-w-[260px] py-3 pr-3">
-                    <p className="truncate text-muted-foreground">
+                  <td className="max-w-[280px] py-3 pr-3">
+                    <p className={open === c.case_ref ? "text-foreground font-medium text-xs leading-relaxed" : "truncate text-muted-foreground"}>
                       {open === c.case_ref ? c.intake?.symptom_notes : c.triage?.summary_en}
                     </p>
-                    {open === c.case_ref && (
-                      <p className="mt-2 text-xs leading-relaxed text-foreground/80">
-                        {c.triage?.reasoning}
-                      </p>
+                    {open === c.case_ref && c.triage?.reasoning && (
+                      <div className="mt-2 text-xs leading-relaxed text-foreground/80 border-t border-border/40 pt-1.5">
+                        <p>{c.triage?.reasoning}</p>
+                      </div>
                     )}
                   </td>
                   <td className="py-3 pr-3">
@@ -102,12 +110,25 @@ export const CaseLogs = ({ refreshKey }) => {
                       testId="case-log-urgency-badge"
                     />
                   </td>
+                  <td className="max-w-[280px] py-3 pr-3 text-xs leading-snug">
+                    <p
+                      className="line-clamp-2 text-foreground/90 font-medium"
+                      title={c.triage?.recommended_action || c.triage?.recommended_facility_type}
+                    >
+                      {c.triage?.recommended_action || c.triage?.recommended_facility_type || "—"}
+                    </p>
+                    {c.triage?.recommended_facility_type && c.triage?.recommended_action && (
+                      <span className="mt-0.5 block text-[10px] text-muted-foreground/80">
+                        {c.triage.recommended_facility_type}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-3 pr-3 text-xs text-muted-foreground">
                     {c.nearest_facilities?.[0]
                       ? `${c.nearest_facilities[0].name} · ${c.nearest_facilities[0].distance_km} km`
                       : "—"}
                   </td>
-                  <td className="mono py-3 text-[11px] text-muted-foreground">
+                  <td className="mono py-3 text-[11px] text-muted-foreground whitespace-nowrap">
                     {new Date(c.created_at).toLocaleString("en-IN", {
                       day: "2-digit",
                       month: "short",

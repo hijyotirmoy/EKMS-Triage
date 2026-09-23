@@ -126,3 +126,20 @@
 .pulse-emergency {
   animation: pulse-ring 1.8s ease-out infinite;
 }
+
+/* White card toaster close button */
+[data-sonner-toaster] [data-close-button] {
+  background: #f1f5f9 !important;
+  color: #64748b !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9999px !important;
+  transition: all 0.15s ease-in-out !important;
+  opacity: 0.9 !important;
+}
+
+[data-sonner-toaster] [data-close-button]:hover {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+  opacity: 1 !important;
+  transform: scale(1.05) !important;
+}

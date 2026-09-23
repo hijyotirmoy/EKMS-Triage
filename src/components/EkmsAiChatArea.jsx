@@ -1,25 +1,71 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Bot, Send, Loader2, RotateCcw, Sparkles, CheckCircle2, AlertCircle } from "lucide-react";
+import { forwardRef, useImperativeHandle, useEffect, useRef, useState } from "react";
+import { Bot, Send, Loader2, RotateCcw, Sparkles, CheckCircle2, HelpCircle, X } from "lucide-react";
+import { toast } from "sonner";
 
-export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }) => {
-  const [messages, setMessages] = useState([
-    {
-      id: "welcome",
-      sender: "bot",
-      text: "Namaste! Type caller's symptoms or complaint in English, Hindi or Hinglish to start EKMS AI adaptive questioning.",
-      options: [
-        "Chhati me dard ho raha hai (Chest Pain)",
-        "Tez bukhar aur khansi hai (Fever & Cough)",
-        "Kaam ke waqt chot lagi (Minor injury / Cut)",
-        "Kheti me spray dawai chali gayi (Pesticide exposure)",
-      ],
-    },
-  ]);
+const INITIAL_SYMPTOM_SHORTCUTS = [
+  {
+    icon: "❤️",
+    label: "Chest Pain",
+    text: "Bohot tej chhati me dard ho raha hai, baayein haath me dard aur thanda pasina aa raha hai.",
+  },
+  {
+    icon: "🌡️",
+    label: "Fever",
+    text: "Char din se tez bukhar hai, sookhi khansi aur badan dard hai.",
+  },
+  {
+    icon: "🤕",
+    label: "Headache",
+    text: "Subah se tez sar dard ho raha hai aur chakkar aa raha hai.",
+  },
+  {
+    icon: "🤢",
+    label: "Gastric / Abdominal Pain",
+    text: "Pet me tez dard ho raha hai aur ulti jaisa lag raha hai.",
+  },
+  {
+    icon: "🩺",
+    label: "Blood Pressure (High/Low)",
+    text: "Ghabrahat ho rahi hai, chakkar aa raha hai aur BP badha hua lag raha hai.",
+  },
+  {
+    icon: "🤧",
+    label: "Cough & Cold",
+    text: "Khansi aur sardi hai, gale me kharash aur halka bukhar hai.",
+  },
+  {
+    icon: "🫁",
+    label: "Breathlessness / Asthma",
+    text: "Achanak saans lene me bohot dikkat ho rahi hai aur seene se seeti ki aawaz aa rahi hai.",
+  },
+  {
+    icon: "⚡",
+    label: "Cut / Injury at work",
+    text: "Kaam ke waqt haath par chot aur cut lag gaya hai, khoon nikal raha tha.",
+  },
+  {
+    icon: "🧪",
+    label: "Pesticide Exposure",
+    text: "Kheti me spray karte waqt pesticide aankh aur sharir me chali gayi, jalan aur ulti ho rahi hai.",
+  },
+  {
+    icon: "🦿",
+    label: "Body Ache & Fatigue",
+    text: "Pure sharir me tez dard aur kamzori mehsoos ho rahi hai.",
+  },
+];
+
+export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
+  { onComplaintChange, onSyncFields, initialNotes },
+  ref
+) {
+  const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState("symptom");
+  const [selectedAssociatedOptions, setSelectedAssociatedOptions] = useState([]);
   const [triageState, setTriageState] = useState({
     symptom: null,
     severity: null,
@@ -28,11 +74,16 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
     condition: null,
   });
   const [sessionId] = useState(() => "session-" + Math.random().toString(36).substring(2, 9));
-  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
-  // Auto scroll
+  // Auto scroll ONLY inside the chat container, never jumping the page window down!
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [messages, loading]);
 
   // Handle external preset loaded
@@ -44,7 +95,6 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
 
   // Synchronize with parent intake form
   const notifyParent = (newMessages, newState) => {
-    // Generate clean combined symptom notes from user complaints and verified answers
     const userInputs = newMessages
       .filter((m) => m.sender === "user")
       .map((m) => m.text)
@@ -63,21 +113,6 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
       triageState: newState,
       chatHistory: newMessages,
     });
-
-    // Auto-sync severity slider and duration dropdown if matched
-    if (newState.duration && onSyncFields) {
-      onSyncFields("duration", newState.duration);
-    }
-    if (newState.severity && onSyncFields) {
-      const s = String(newState.severity).toLowerCase();
-      if (s.includes("crushing") || s.includes("severe") || s.includes("high") || s.includes("unbearable")) {
-        onSyncFields("severity_reported", 9);
-      } else if (s.includes("moderate")) {
-        onSyncFields("severity_reported", 6);
-      } else if (s.includes("mild")) {
-        onSyncFields("severity_reported", 3);
-      }
-    }
   };
 
   const handleUserSubmit = async (textToSend) => {
@@ -96,7 +131,7 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
     setLoading(true);
 
     try {
-      const historyPayload = updatedMsgs.slice(-6).map((m) => ({
+      const historyPayload = updatedMsgs.slice(-8).map((m) => ({
         role: m.sender === "user" ? "user" : "assistant",
         content: m.text,
       }));
@@ -110,6 +145,7 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
           history: historyPayload,
           sessionId,
           currentTriage: triageState,
+          currentStage: stage,
         }),
       });
 
@@ -137,12 +173,28 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
 
       setTriageState(nextState);
 
+      // Auto-sync severity and duration directly from the AI detection
+      if (data.detectedSeverity && onSyncFields) {
+        onSyncFields("severity_reported", data.detectedSeverity);
+      }
+      if (data.detectedDuration && onSyncFields) {
+        onSyncFields("duration", data.detectedDuration);
+      }
+
+      if (data.isComplete || data.stage === "complete") {
+        toast.success(
+          `AI auto-detected: Severity (${data.detectedSeverity}/10) & Duration ("${data.detectedDuration}"). You can adjust them if needed.`
+        );
+      }
+
       const botReply = {
         id: "bot-" + Date.now(),
         sender: "bot",
         text: data.agentScript || data.answer || "Please provide further details regarding other symptoms.",
         options: data.options || [],
+        probingQuestions: data.probingQuestions || [],
         stage: data.stage || null,
+        isMultiSelect: !!data.isMultiSelect,
         decision: data.decision || null,
       };
 
@@ -155,7 +207,13 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
         id: "bot-err-" + Date.now(),
         sender: "bot",
         text: "Understood. Can you state if there is any radiating pain, sweating, or fever?",
-        options: ["Yes, sweating & pain", "Mild fever", "No other symptoms"],
+        options: ["Cold sweating & clamminess", "Radiating pain to left arm", "None of these"],
+        probingQuestions: [
+          "Kya unhe saans lene mein takleef ho rahi hai? (Is there breathing difficulty?)",
+          "Kya wo hosh mein hain aur baat kar pa rahe hain? (Is caller fully conscious?)",
+          "Kya unhe koi pehle se dil ki bimari ya high BP hai? (History of cardiac disease or hypertension?)",
+        ],
+        isMultiSelect: true,
       };
       const finalMsgs = [...updatedMsgs, fallbackBotMsg];
       setMessages(finalMsgs);
@@ -165,74 +223,51 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    resetChat,
+  }));
+
   const resetChat = () => {
-    const welcome = [
-      {
-        id: "welcome-" + Date.now(),
-        sender: "bot",
-        text: "Chat cleared. Type caller's complaint notes to start a fresh adaptive triage questioning.",
-        options: [
-          "Chhati me dard ho raha hai (Chest Pain)",
-          "Tez bukhar aur khansi hai (Fever & Cough)",
-          "Kaam ke waqt chot lagi (Minor injury / Cut)",
-          "Kheti me spray dawai chali gayi (Pesticide exposure)",
-        ],
-      },
-    ];
-    setMessages(welcome);
+    setMessages([]);
     setStage("symptom");
+    setSelectedAssociatedOptions([]);
     const emptyState = { symptom: null, severity: null, duration: null, associated: [], condition: null };
     setTriageState(emptyState);
-    onComplaintChange?.("", { triageState: emptyState, chatHistory: welcome });
+    onComplaintChange?.("", { triageState: emptyState, chatHistory: [] });
   };
 
+  // 4 steps only (Assessment step removed as requested)
   const STAGES = [
     { id: "symptom", label: "1. Symptom" },
     { id: "severity", label: "2. Severity" },
     { id: "duration", label: "3. Duration" },
     { id: "associated", label: "4. Associated" },
-    { id: "navigation", label: "5. Assessment" },
   ];
+
+  const STAGE_ORDER = ["symptom", "severity", "duration", "associated", "complete"];
 
   return (
     <div className="rounded-lg border border-emerald-500/30 bg-card overflow-hidden shadow-sm">
-      {/* Header bar */}
-      <div className="flex items-center justify-between border-b border-border bg-emerald-50/40 px-3.5 py-2.5 dark:bg-emerald-950/20">
-        <div className="flex items-center gap-2.5">
-          <img src="/logo.png" alt="EKMS AI" className="h-5 w-5 object-contain" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold tracking-tight text-emerald-900 dark:text-emerald-300">
-              EKMS AI Adaptive Questioning
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
-            </span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={resetChat}
-          title="Restart Chat"
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-        >
-          <RotateCcw className="h-3 w-3" /> Reset
-        </button>
-      </div>
-
-      {/* Stepper bar */}
+      {/* 4-Step Progress Stepper Bar */}
       <div className="flex items-center justify-between gap-1 border-b border-border/50 bg-secondary/30 px-3 py-1.5 text-[10px] font-semibold">
         {STAGES.map((s) => {
-          const isActive = stage === s.id;
+          const currentIdx = STAGE_ORDER.indexOf(stage);
+          const thisIdx = STAGE_ORDER.indexOf(s.id);
+          const isPast = currentIdx > thisIdx;
+          const isCurrent = stage === s.id;
+
           return (
             <span
               key={s.id}
-              className={`rounded px-1.5 py-0.5 transition-colors ${
-                isActive
-                  ? "bg-emerald-500 text-white shadow-xs font-bold"
+              className={`flex items-center gap-1 rounded px-2 py-0.5 transition-colors ${
+                isCurrent
+                  ? "bg-emerald-600 text-white shadow-xs font-bold"
+                  : isPast
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-medium"
                   : "text-muted-foreground"
               }`}
             >
+              {isPast && <span className="font-bold">✓</span>}
               {s.label}
             </span>
           );
@@ -265,45 +300,160 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
         </div>
       )}
 
-      {/* Chat scroll box */}
-      <div className="max-h-[340px] min-h-[220px] space-y-3 overflow-y-auto p-3.5 text-xs sm:text-sm">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex flex-col ${m.sender === "user" ? "items-end" : "items-start"}`}
-          >
-            <div
-              className={`max-w-[88%] rounded-lg px-3.5 py-2.5 leading-relaxed ${
-                m.sender === "user"
-                  ? "bg-primary text-primary-foreground font-medium shadow-xs"
-                  : "border border-border/80 bg-secondary/40 text-foreground"
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                {m.sender === "bot" && (
-                  <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                )}
-                <span>{m.text}</span>
+      {/* Chat box - normally big and expands with conversation with no scroll bar showing */}
+      <div
+        ref={chatContainerRef}
+        className="min-h-[460px] space-y-3 p-4 text-xs sm:text-sm transition-all duration-300 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {messages.length === 0 && !loading && (
+          <div className="space-y-3">
+            <div className="max-w-[95%] rounded-xl border border-emerald-500/40 bg-emerald-50/60 p-3.5 text-foreground dark:bg-emerald-950/30 dark:border-emerald-800/60 shadow-xs">
+              <div className="flex items-start gap-2.5">
+                <Bot className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <div className="space-y-1 text-xs sm:text-sm">
+                  <p className="font-medium text-emerald-950 dark:text-emerald-200">
+                    <span className="font-bold">Ask the IP:</span> &ldquo;Hello, this is the ESIC Healthcare Assistance desk. How are you feeling today, and what primary health symptom or complaint are you experiencing?&rdquo;
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Render interactive quick-selection option chips */}
-            {m.sender === "bot" && m.options?.length > 0 && (
-              <div className="mt-2 flex max-w-[95%] flex-wrap gap-1.5 pl-2">
-                {m.options.map((opt, idx) => (
+            <div className="pl-0.5">
+              <div className="flex flex-wrap gap-2">
+                {INITIAL_SYMPTOM_SHORTCUTS.map((sc, idx) => (
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => handleUserSubmit(opt)}
-                    className="group flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-50/60 px-3 py-1 text-[11px] font-medium text-emerald-900 transition-all hover:-translate-y-0.5 hover:border-emerald-600 hover:bg-emerald-100 hover:shadow-xs dark:bg-emerald-950/40 dark:text-emerald-200"
+                    onClick={() => handleUserSubmit(sc.text)}
+                    className="group flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-secondary/50 px-3 py-1.5 text-xs font-medium text-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-600 hover:bg-emerald-50 hover:text-emerald-950 hover:shadow-xs dark:bg-secondary/30 dark:hover:bg-emerald-950/60 dark:hover:text-emerald-200"
                   >
-                    <span>{opt}</span>
+                    <span>{sc.icon}</span>
+                    <span>{sc.label}</span>
                   </button>
                 ))}
               </div>
-            )}
+            </div>
           </div>
-        ))}
+        )}
+
+        {messages.map((m, mIdx) => {
+          const isLatest = mIdx === messages.length - 1;
+          const isMulti = m.isMultiSelect || m.stage === "associated" || stage === "associated";
+
+          return (
+            <div
+              key={m.id}
+              className={`flex flex-col ${m.sender === "user" ? "items-end" : "items-start"}`}
+            >
+              <div
+                className={`max-w-[88%] rounded-lg px-3.5 py-2.5 leading-relaxed ${
+                  m.sender === "user"
+                    ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                    : "border border-border/80 bg-secondary/40 text-foreground"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {m.sender === "bot" && (
+                    <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  )}
+                  <span>{m.text}</span>
+                </div>
+              </div>
+
+              {/* Render interactive options on the latest bot message */}
+              {m.sender === "bot" && isLatest && m.options?.length > 0 && (
+                isMulti ? (
+                  /* Step 4 Associated: Multi-selection chips */
+                  <div className="mt-2.5 max-w-[98%] space-y-2 pl-2">
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                      Select all associated symptoms that apply:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {m.options.map((opt, idx) => {
+                        const isNone = opt.toLowerCase().includes("none");
+                        const isSelected = selectedAssociatedOptions.includes(opt);
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              if (isNone) {
+                                setSelectedAssociatedOptions([]);
+                                handleUserSubmit("None of these");
+                                return;
+                              }
+                              setSelectedAssociatedOptions((prev) =>
+                                prev.includes(opt)
+                                  ? prev.filter((item) => item !== opt)
+                                  : [...prev.filter((item) => !item.toLowerCase().includes("none")), opt]
+                              );
+                            }}
+                            className={`group flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-all ${
+                              isSelected
+                                ? "bg-emerald-600 text-white shadow-xs font-semibold ring-1 ring-emerald-500"
+                                : "border border-emerald-500/40 bg-emerald-50/70 text-emerald-900 transition-all hover:bg-emerald-100 hover:-translate-y-0.5 dark:bg-emerald-950/40 dark:text-emerald-200"
+                            }`}
+                          >
+                            <span>{isSelected ? "✓" : "+"}</span>
+                            <span>{opt}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Confirm submission button */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          const toSubmit =
+                            selectedAssociatedOptions.length > 0
+                              ? selectedAssociatedOptions.join(", ")
+                              : "None of these";
+                          setSelectedAssociatedOptions([]);
+                          handleUserSubmit(toSubmit);
+                        }}
+                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>
+                          {selectedAssociatedOptions.length > 0
+                            ? `Submit Selected (${selectedAssociatedOptions.length})`
+                            : "Submit Selected / Continue"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedAssociatedOptions([]);
+                          handleUserSubmit("None of these");
+                        }}
+                        className="rounded-lg border border-border bg-secondary/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                      >
+                        None of these
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Single select chips for Severity & Duration steps */
+                  <div className="mt-2 flex max-w-[95%] flex-wrap gap-1.5 pl-2">
+                    {m.options.map((opt, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleUserSubmit(opt)}
+                        className="group flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-50/60 px-3 py-1 text-[11px] font-medium text-emerald-900 transition-all hover:-translate-y-0.5 hover:border-emerald-600 hover:bg-emerald-100 hover:shadow-xs dark:bg-emerald-950/40 dark:text-emerald-200"
+                      >
+                        <span>{opt}</span>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          );
+        })}
 
         {loading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -311,7 +461,6 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
             <span>EKMS AI is analyzing symptoms and adapting question...</span>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Chat input area */}
@@ -342,4 +491,4 @@ export const EkmsAiChatArea = ({ onComplaintChange, onSyncFields, initialNotes }
       </div>
     </div>
   );
-};
+});

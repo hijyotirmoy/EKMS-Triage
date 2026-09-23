@@ -231,7 +231,9 @@ export async function getCases(filters = {}) {
       const matchPhone = c.intake?.phone?.toLowerCase().includes(query);
       const matchNotes = c.intake?.symptom_notes?.toLowerCase().includes(query);
       const matchRef = c.case_ref?.toLowerCase().includes(query);
-      if (!matchName && !matchPhone && !matchNotes && !matchRef) return false;
+      const matchAge = c.intake?.age != null && String(c.intake?.age).includes(query);
+      const matchSex = c.intake?.sex?.toLowerCase().includes(query);
+      if (!matchName && !matchPhone && !matchNotes && !matchRef && !matchAge && !matchSex) return false;
     }
     return true;
   });

@@ -60,7 +60,7 @@ export const PRESETS = [
     id: "chemical",
     testId: "intake-preset-chemical",
     title: "Pesticide exposure",
-    hint: "Occupational escalation",
+    hint: "Occupational",
     data: {
       caller_name: "Bipul Das",
       phone: "9864012345",
@@ -73,6 +73,25 @@ export const PRESETS = [
       city: "Jorhat",
       district: "Jorhat",
       pincode: "785004",
+    },
+  },
+  {
+    id: "breathlessness",
+    testId: "intake-preset-breathlessness",
+    title: "Breathlessness / Asthma",
+    hint: "Urgent respiratory",
+    data: {
+      caller_name: "Abdul Karim",
+      phone: "9435019876",
+      age: 52,
+      sex: "Male",
+      symptom_notes:
+        "Achanak saans lene me bohot dikkat ho rahi hai, seene me se seeti jaisi aawaz (wheezing) aa rahi hai. Bolne me bhi takleef hai.",
+      duration: "Less than 2 hours",
+      severity_reported: 8,
+      city: "Dibrugarh",
+      district: "Dibrugarh",
+      pincode: "786001",
     },
   },
 ];

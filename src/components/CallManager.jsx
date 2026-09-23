@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  GripHorizontal,
   Mic,
   MicOff,
   Pause,
@@ -13,7 +14,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { playRingtone, stopRingtone, WebRtcCallSession } from "@/lib/webrtc";
+import { playRingtone, stopRingtone, unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
 
 export const CallManager = ({ onCallerConnected }) => {
   const [callState, setCallState] = useState("idle"); // 'idle' | 'incoming' | 'connected' | 'on_hold' | 'ended'
@@ -23,9 +24,21 @@ export const CallManager = ({ onCallerConnected }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isOnHold, setIsOnHold] = useState(false);
 
+  // Draggable window state
+  const [dragPos, setDragPos] = useState({ x: null, y: null });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ mouseX: 0, mouseY: 0, boxX: 0, boxY: 0, width: 350, height: 200 });
+  const popupRef = useRef(null);
+
   const callSessionRef = useRef(null);
   const timerRef = useRef(null);
   const pollIntervalRef = useRef(null);
+  const onCallerConnectedRef = useRef(onCallerConnected);
+
+  // Keep callback ref updated without triggering re-initialization
+  useEffect(() => {
+    onCallerConnectedRef.current = onCallerConnected;
+  }, [onCallerConnected]);
 
   useEffect(() => {
     const session = new WebRtcCallSession({
@@ -34,17 +47,20 @@ export const CallManager = ({ onCallerConnected }) => {
         if (state === "incoming_call") {
           setCallState("incoming");
           setIncomingCallData(details.callData);
+          if (details.callData?.callerInfo) {
+            onCallerConnectedRef.current?.(details.callData.callerInfo);
+          }
         } else if (state === "connected") {
           setCallState("connected");
           setIsOnHold(false);
-          setActiveCaller(details.callerInfo || incomingCallData?.callerInfo);
+          const caller = details.callerInfo || incomingCallData?.callerInfo;
+          setActiveCaller(caller);
           startTimer();
           toast.success("Voice call connected! Audio is live.");
 
-          // Auto-fill Agent's intake form with caller phone/details
-          const caller = details.callerInfo || incomingCallData?.callerInfo;
+          // Auto-fill Agent's intake form with caller phone/details via ref
           if (caller) {
-            onCallerConnected?.(caller);
+            onCallerConnectedRef.current?.(caller);
           }
         } else if (state === "on_hold") {
           setCallState("on_hold");
@@ -52,14 +68,15 @@ export const CallManager = ({ onCallerConnected }) => {
         } else if (state === "ended") {
           setCallState("ended");
           stopTimer();
-          toast.info("Call terminated");
+          toast.info("Call ended");
           setTimeout(() => {
             setCallState("idle");
             setIncomingCallData(null);
             setActiveCaller(null);
             setIsOnHold(false);
             setIsMuted(false);
-          }, 1200);
+            setDragPos({ x: null, y: null }); // Reset position for next call
+          }, 800);
         }
       },
     });
@@ -75,6 +92,9 @@ export const CallManager = ({ onCallerConnected }) => {
           if (data && data.activeCall && data.activeCall.status === "ringing") {
             playRingtone("incoming");
             session.setState("incoming_call", { callData: data.activeCall });
+            if (data.activeCall.callerInfo) {
+              onCallerConnectedRef.current?.(data.activeCall.callerInfo);
+            }
           }
         } catch (e) {}
       }
@@ -86,7 +106,7 @@ export const CallManager = ({ onCallerConnected }) => {
       stopTimer();
       stopRingtone();
     };
-  }, [onCallerConnected]);
+  }, []); // Run once on mount!
 
   const startTimer = () => {
     stopTimer();
@@ -112,6 +132,7 @@ export const CallManager = ({ onCallerConnected }) => {
   const handleAccept = async () => {
     if (!incomingCallData) return;
     try {
+      unlockMobileAudio();
       await callSessionRef.current.acceptCall(incomingCallData);
     } catch (err) {
       toast.error(err.message || "Could not accept call. Please check microphone permission.");
@@ -132,28 +153,86 @@ export const CallManager = ({ onCallerConnected }) => {
     callSessionRef.current?.endCall();
   };
 
-  const handleToggleMute = () => {
+  const handleToggleMute = (e) => {
+    e.stopPropagation();
     const muted = callSessionRef.current?.toggleMute();
     setIsMuted(muted);
     toast.info(muted ? "Microphone muted" : "Microphone active");
   };
 
-  const handleToggleHold = () => {
+  const handleToggleHold = (e) => {
+    e.stopPropagation();
     const held = callSessionRef.current?.toggleHold();
     setIsOnHold(held);
     toast.info(held ? "Call placed on hold" : "Call resumed");
   };
 
+  // Draggable Window handlers
+  const handleDragStart = (e) => {
+    // Only primary mouse button or touch
+    if (e.button !== undefined && e.button !== 0) return;
+
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    const el = popupRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    dragStartRef.current = {
+      mouseX: clientX,
+      mouseY: clientY,
+      boxX: rect.left,
+      boxY: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+
+    setIsDragging(true);
+
+    const handleMouseMove = (moveEvent) => {
+      const curX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const curY = moveEvent.touches ? moveEvent.touches[0].clientY : moveEvent.clientY;
+
+      const deltaX = curX - dragStartRef.current.mouseX;
+      const deltaY = curY - dragStartRef.current.mouseY;
+
+      const newLeft = Math.max(
+        10,
+        Math.min(window.innerWidth - dragStartRef.current.width - 10, dragStartRef.current.boxX + deltaX)
+      );
+      const newTop = Math.max(
+        10,
+        Math.min(window.innerHeight - dragStartRef.current.height - 10, dragStartRef.current.boxY + deltaY)
+      );
+
+      setDragPos({ x: newLeft, y: newTop });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleMouseMove);
+      window.removeEventListener("touchend", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("touchmove", handleMouseMove, { passive: false });
+    window.addEventListener("touchend", handleMouseUp);
+  };
+
   const currentPhone =
     activeCaller?.phone ||
     incomingCallData?.callerInfo?.phone ||
-    "9876543210";
+    "";
 
   return (
     <>
       {/* 1. INCOMING CALL MODAL OVERLAY */}
       {callState === "incoming" && incomingCallData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-emerald-500/50 bg-card p-6 shadow-2xl ring-4 ring-emerald-500/20">
             {/* Header */}
             <div className="flex items-center gap-3">
@@ -197,23 +276,41 @@ export const CallManager = ({ onCallerConnected }) => {
         </div>
       )}
 
-      {/* 2. TOP-RIGHT ACTIVE CALL POP-UP WINDOW */}
+      {/* 2. TOP-RIGHT ACTIVE CALL POP-UP WINDOW (DRAGGABLE) */}
       {(callState === "connected" || callState === "on_hold") && (
         <aside
+          ref={popupRef}
           role="dialog"
           aria-label="Active Voice Call Controls"
-          className="fixed top-18 right-4 sm:right-6 z-50 w-[320px] sm:w-[350px] overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-900/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-in slide-in-from-top-3 duration-300"
+          style={
+            dragPos.x !== null
+              ? { left: `${dragPos.x}px`, top: `${dragPos.y}px`, right: "auto", bottom: "auto" }
+              : undefined
+          }
+          className={`fixed z-[100] w-[330px] sm:w-[360px] overflow-hidden rounded-2xl border-2 border-emerald-500/40 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-2 ring-emerald-500/20 transition-all duration-75 ${
+            dragPos.x === null ? "top-20 right-6" : ""
+          } ${isDragging ? "ring-emerald-400 select-none shadow-emerald-500/30" : ""}`}
         >
-          {/* Top Row: Live/Hold status & Duration Timer */}
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+          {/* Top Row: Drag Handle, Status Badge & Duration Timer */}
+          <div
+            onMouseDown={handleDragStart}
+            onTouchStart={handleDragStart}
+            className="flex items-center justify-between border-b border-slate-800 pb-2.5 cursor-grab active:cursor-grabbing select-none"
+            title="Click and drag to move window"
+          >
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-slate-400 hover:text-white transition">
+                <GripHorizontal className="h-3.5 w-3.5" />
+                <span className="text-[9px] uppercase font-bold tracking-wider">Move</span>
+              </div>
+
               {isOnHold ? (
-                <span className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-950/60 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                  <Pause className="h-2.5 w-2.5" /> Call On Hold
+                <span className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-950/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                  <Pause className="h-2.5 w-2.5" /> On Hold
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/60 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   Live Audio
                 </span>
               )}
@@ -238,7 +335,7 @@ export const CallManager = ({ onCallerConnected }) => {
               </div>
               <div>
                 <p className="text-[11px] font-semibold text-slate-400 leading-none">
-                  IP Caller
+                  IP Caller Mobile
                 </p>
                 <p className="mt-1 font-mono text-sm font-bold text-white leading-none">
                   +91 {currentPhone}
@@ -271,7 +368,7 @@ export const CallManager = ({ onCallerConnected }) => {
               className={`flex items-center justify-center gap-1.5 rounded-xl py-2 px-2 text-xs font-bold transition ${
                 isMuted
                   ? "border border-amber-500 bg-amber-500/20 text-amber-300"
-                  : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                  : "bg-slate-800 text-slate-200 hover:bg-slate-700 active:scale-95"
               }`}
               title={isMuted ? "Unmute your microphone" : "Mute your microphone"}
             >
@@ -286,7 +383,7 @@ export const CallManager = ({ onCallerConnected }) => {
               className={`flex items-center justify-center gap-1.5 rounded-xl py-2 px-2 text-xs font-bold transition ${
                 isOnHold
                   ? "border border-amber-500 bg-amber-500 text-slate-950 font-extrabold"
-                  : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                  : "bg-slate-800 text-slate-200 hover:bg-slate-700 active:scale-95"
               }`}
               title={isOnHold ? "Resume call" : "Put call on hold"}
             >
@@ -297,7 +394,10 @@ export const CallManager = ({ onCallerConnected }) => {
             {/* 3. Cut (Hang up) Button */}
             <button
               type="button"
-              onClick={handleHangup}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleHangup();
+              }}
               className="flex items-center justify-center gap-1.5 rounded-xl bg-red-600 py-2 px-2 text-xs font-bold text-white shadow-md shadow-red-950/50 transition hover:bg-red-700 active:scale-95"
               title="Hang up call"
             >
