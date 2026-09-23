@@ -23,6 +23,7 @@ export default function IpCallerPage() {
   const bChannelRef = useRef(null);
   const scribeChannelRef = useRef(null);
   const timerRef = useRef(null);
+  const ringTimeoutRef = useRef(null);
   const callerLangRef = useRef(callerLang);
   useEffect(() => {
     callerLangRef.current = callerLang;
