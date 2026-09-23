@@ -83,6 +83,7 @@ export class WebRtcCallSession {
     this.callId = null;
     this.state = "idle"; // 'idle' | 'calling' | 'ringing' | 'connected' | 'ended'
     this.isMuted = false;
+    this.isOnHold = false;
     this.pollInterval = null;
 
     // Cross-tab Broadcast Channel
@@ -170,18 +171,19 @@ export class WebRtcCallSession {
       audioEl = document.createElement("audio");
       audioEl.id = "webrtc-remote-audio";
       audioEl.autoplay = true;
+      audioEl.playsInline = true;
       document.body.appendChild(audioEl);
     }
+    audioEl.muted = false;
+    audioEl.volume = 1.0;
     audioEl.srcObject = stream;
     audioEl.play().catch(() => {
-      // Audio autoplay policy fallback
-      window.addEventListener(
-        "click",
-        () => {
-          audioEl.play().catch(() => {});
-        },
-        { once: true }
-      );
+      // Audio autoplay policy fallback: unlock on first document click
+      const unlockAudio = () => {
+        audioEl.play().catch(() => {});
+        window.removeEventListener("click", unlockAudio);
+      };
+      window.addEventListener("click", unlockAudio, { once: true });
     });
   }
 
@@ -296,12 +298,30 @@ export class WebRtcCallSession {
         try {
           await this.peerConnection.addIceCandidate(new RTCIceCandidate(msg.data.candidate));
         } catch (e) {}
+      } else if (msg.action === "hold") {
+        this.setState("on_hold", { callId: this.callId });
+      } else if (msg.action === "resume") {
+        this.setState("connected", { callId: this.callId });
       }
     }
 
-    if (this.role === "agent" && msg.action === "initiate" && this.state === "idle") {
-      playRingtone("incoming");
-      this.setState("incoming_call", { callData: msg.data ? { ...msg.data, id: msg.callId } : null });
+    if (this.role === "agent") {
+      if (msg.action === "initiate" && (this.state === "idle" || this.state === "ended")) {
+        playRingtone("incoming");
+        this.setState("incoming_call", { callData: msg.data ? { ...msg.data, id: msg.callId } : null });
+      } else if (msg.callId === this.callId) {
+        if (msg.action === "hangup" || msg.action === "reject") {
+          this.endCall(false);
+        } else if (msg.action === "candidate" && msg.data?.candidate && this.peerConnection) {
+          try {
+            await this.peerConnection.addIceCandidate(new RTCIceCandidate(msg.data.candidate));
+          } catch (e) {}
+        } else if (msg.action === "hold") {
+          this.setState("on_hold", { callId: this.callId });
+        } else if (msg.action === "resume") {
+          this.setState("connected", { callId: this.callId });
+        }
+      }
     }
   }
 
@@ -346,6 +366,25 @@ export class WebRtcCallSession {
       return this.isMuted;
     }
     return false;
+  }
+
+  toggleHold() {
+    this.isOnHold = !this.isOnHold;
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !this.isOnHold && !this.isMuted;
+      });
+    }
+    const audioEl = document.getElementById("webrtc-remote-audio");
+    if (audioEl) {
+      audioEl.muted = this.isOnHold;
+    }
+    this.sendSignal({
+      action: this.isOnHold ? "hold" : "resume",
+      callId: this.callId,
+    });
+    this.setState(this.isOnHold ? "on_hold" : "connected");
+    return this.isOnHold;
   }
 
   endCall(notifyRemote = true) {

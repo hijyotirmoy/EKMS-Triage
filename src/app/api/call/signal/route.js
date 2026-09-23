@@ -85,6 +85,16 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
+    if (action === "hold") {
+      current.onHold = true;
+      return NextResponse.json({ success: true, onHold: true });
+    }
+
+    if (action === "resume") {
+      current.onHold = false;
+      return NextResponse.json({ success: true, onHold: false });
+    }
+
     if (action === "hangup" || action === "reject") {
       current.status = "ended";
       setTimeout(() => activeCalls.delete(callId), 5000);

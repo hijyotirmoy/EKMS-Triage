@@ -76,13 +76,6 @@ export default function Home() {
             <span className="mono rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
               {meta?.facility_count ?? "—"} facilities
             </span>
-            <a
-              href="tel:108"
-              data-testid="header-emergency-108"
-              className="rounded-full border border-red-300 bg-red-50 px-3 py-1 text-[11px] font-bold text-red-700 transition-colors duration-200 hover:bg-red-100"
-            >
-              Emergency 108
-            </a>
 
             <a
               href="/caller"
