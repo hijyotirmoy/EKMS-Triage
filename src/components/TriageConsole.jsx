@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api } from "../lib/api";
 import { PRESETS } from "./presets";
 import { TriageResultPanel } from "./TriageResultPanel";
+import { EkmsAiChatArea } from "./EkmsAiChatArea";
 
 const EMPTY = {
   caller_name: "",
@@ -36,11 +37,14 @@ export const TriageConsole = ({ meta, onCaseCreated }) => {
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [ekmsContext, setEkmsContext] = useState(null);
+  const [chatPresetTrigger, setChatPresetTrigger] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const applyPreset = (p) => {
     setForm({ ...EMPTY, ...p.data });
+    setChatPresetTrigger(p.data.symptom_notes);
     setResult(null);
     toast.success(`Loaded sample call: ${p.title}`);
   };
@@ -60,7 +64,9 @@ export const TriageConsole = ({ meta, onCaseCreated }) => {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (form.symptom_notes.trim().length < 3) return toast.error("Enter the complaint notes first");
+    if (!form.symptom_notes || form.symptom_notes.trim().length < 3) {
+      return toast.error("Please enter the caller's complaint notes in the EKMS AI chat area");
+    }
     setLoading(true);
     setResult(null);
     const payload = {
@@ -69,6 +75,7 @@ export const TriageConsole = ({ meta, onCaseCreated }) => {
       severity_reported: Number(form.severity_reported),
       latitude: form.latitude === "" ? null : Number(form.latitude),
       longitude: form.longitude === "" ? null : Number(form.longitude),
+      ekms_ai_context: ekmsContext,
       source_app: "console",
     };
     Object.keys(payload).forEach((k) => payload[k] === "" && delete payload[k]);
@@ -172,16 +179,25 @@ export const TriageConsole = ({ meta, onCaseCreated }) => {
           </Field>
         </div>
 
-        <Field label="Complaint notes (English / हिंदी / Hinglish)" className="mt-4">
-          <textarea
-            data-testid="intake-form-symptoms"
-            rows={5}
-            className={`${inputCls} resize-y leading-relaxed`}
-            value={form.symptom_notes}
-            onChange={set("symptom_notes")}
-            placeholder="Chhati me dard ho raha hai, pasina aa raha hai..."
+        <div className="mt-4">
+          <label className="field-label flex items-center justify-between">
+            <span>Complaint Notes &amp; Adaptive AI Questioning (EKMS AI)</span>
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+              Interactive Copilot
+            </span>
+          </label>
+          <EkmsAiChatArea
+            initialNotes={chatPresetTrigger}
+            onComplaintChange={(compiledNotes, ctx) => {
+              setForm((f) => ({ ...f, symptom_notes: compiledNotes }));
+              setEkmsContext(ctx);
+            }}
+            onSyncFields={(field, val) => {
+              setForm((f) => ({ ...f, [field]: val }));
+            }}
           />
-        </Field>
+        </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Duration">

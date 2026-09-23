@@ -96,6 +96,39 @@ export const TriageResultPanel = ({ result, loading }) => {
             </p>
           </div>
 
+          {result.ekms_ai_context?.triageState && (
+            <div className="mt-5 rounded-md border border-emerald-500/30 bg-emerald-50/40 p-4 dark:bg-emerald-950/20">
+              <div className="mb-2 flex items-center gap-2">
+                <img src="/logo.png" alt="EKMS AI" className="h-4 w-4 object-contain" />
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                  EKMS AI Adaptive Findings
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {result.ekms_ai_context.triageState.symptom && (
+                  <span className="rounded border border-emerald-500/20 bg-background/80 px-2 py-1 font-medium text-emerald-900 dark:text-emerald-200">
+                    Symptom: <strong>{result.ekms_ai_context.triageState.symptom}</strong>
+                  </span>
+                )}
+                {result.ekms_ai_context.triageState.severity && (
+                  <span className="rounded border border-blue-500/20 bg-background/80 px-2 py-1 font-medium text-blue-900 dark:text-blue-200">
+                    Severity: <strong>{result.ekms_ai_context.triageState.severity}</strong>
+                  </span>
+                )}
+                {result.ekms_ai_context.triageState.duration && (
+                  <span className="rounded border border-amber-500/20 bg-background/80 px-2 py-1 font-medium text-amber-900 dark:text-amber-200">
+                    Duration: <strong>{result.ekms_ai_context.triageState.duration}</strong>
+                  </span>
+                )}
+                {result.ekms_ai_context.triageState.condition && (
+                  <span className="rounded border border-purple-500/30 bg-background/80 px-2 py-1 font-bold text-purple-900 dark:text-purple-200">
+                    Suspected Condition: <strong>{result.ekms_ai_context.triageState.condition}</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {t.red_flags?.length > 0 && (
             <div className="mt-5 rounded-md border border-red-200 bg-red-50 p-4">
               <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700">
