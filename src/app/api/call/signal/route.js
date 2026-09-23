@@ -169,10 +169,10 @@ export async function POST(request) {
         try {
           const field =
             data.role === "caller" ? "callerCandidates" : "calleeCandidates";
-          await updateDoc(docRef, {
+          await setDoc(docRef, {
             [field]: arrayUnion(data.candidate),
             updatedAt: now,
-          });
+          }, { merge: true });
         } catch (e) {
           console.warn("Firestore candidate update error:", e.message);
         }
@@ -187,6 +187,27 @@ export async function POST(request) {
             current.calleeCandidates.push(data.candidate);
           }
         }
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === "transcript") {
+      if (data?.transcript) {
+        try {
+          if (data.transcript.isFinal) {
+            await setDoc(
+              docRef,
+              { transcripts: arrayUnion(data.transcript), updatedAt: now },
+              { merge: true }
+            );
+          } else {
+            await setDoc(
+              docRef,
+              { interimTranscript: data.transcript, updatedAt: now },
+              { merge: true }
+            );
+          }
+        } catch (e) {}
       }
       return NextResponse.json({ success: true });
     }

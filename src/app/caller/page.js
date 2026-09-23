@@ -6,7 +6,7 @@ import { toast, Toaster } from "sonner";
 import { unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
 import { SpeechStreamController } from "@/lib/speechRecognition";
 import { getFirestoreDb } from "@/lib/firebase";
-import { doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, updateDoc, setDoc, arrayUnion } from "firebase/firestore";
 
 export default function IpCallerPage() {
   const [phone, setPhone] = useState("");
@@ -63,9 +63,16 @@ export default function IpCallerPage() {
         if (activeCallId) {
           try {
             const db = getFirestoreDb();
-            updateDoc(doc(db, "calls", activeCallId), {
+            setDoc(doc(db, "calls", activeCallId), {
               interimTranscript: msg,
               updatedAt: Date.now(),
+            }, { merge: true }).catch(() => {});
+          } catch (e) {}
+          try {
+            fetch("/api/call/signal", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "transcript", callId: activeCallId, data: { transcript: msg } }),
             }).catch(() => {});
           } catch (e) {}
         }
@@ -98,10 +105,17 @@ export default function IpCallerPage() {
         if (activeCallId) {
           try {
             const db = getFirestoreDb();
-            updateDoc(doc(db, "calls", activeCallId), {
+            setDoc(doc(db, "calls", activeCallId), {
               transcripts: arrayUnion(msg),
               interimTranscript: null,
               updatedAt: Date.now(),
+            }, { merge: true }).catch(() => {});
+          } catch (e) {}
+          try {
+            fetch("/api/call/signal", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "transcript", callId: activeCallId, data: { transcript: msg } }),
             }).catch(() => {});
           } catch (e) {}
         }

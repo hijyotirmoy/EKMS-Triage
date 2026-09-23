@@ -47,8 +47,71 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   const timerRef = useRef(null);
   const pollIntervalRef = useRef(null);
   const lastCallerSpeechRef = useRef({ text: "", timestamp: 0, active: false });
+  const callerSpeakingUntilRef = useRef(0);
+  const remoteAnalyserRef = useRef(null);
+  const vadIntervalRef = useRef(null);
   const onCallerConnectedRef = useRef(onCallerConnected);
   const onCallUpdateRef = useRef(onCallUpdate);
+
+  // Setup Web Audio VAD on incoming caller stream to identify caller voice
+  const setupRemoteAudioAnalysis = (stream) => {
+    if (!stream) return;
+    try {
+      cleanupRemoteAudio();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+
+      remoteAnalyserRef.current = { ctx, source, analyser };
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
+      vadIntervalRef.current = setInterval(() => {
+        if (!remoteAnalyserRef.current?.analyser) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        let maxVal = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          if (dataArray[i] > maxVal) maxVal = dataArray[i];
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+
+        // When remote caller audio energy is detected (voice arriving over WebRTC)
+        if (avg > 3 || maxVal > 18) {
+          // Incoming caller voice is active! Hold caller attribution window for 2.5s
+          callerSpeakingUntilRef.current = Date.now() + 2500;
+          lastCallerSpeechRef.current = {
+            text: "",
+            timestamp: Date.now(),
+            active: true,
+          };
+        }
+      }, 50);
+    } catch (err) {
+      console.warn("Remote audio analysis notice:", err);
+    }
+  };
+
+  const cleanupRemoteAudio = () => {
+    if (vadIntervalRef.current) {
+      clearInterval(vadIntervalRef.current);
+      vadIntervalRef.current = null;
+    }
+    if (remoteAnalyserRef.current) {
+      try {
+        remoteAnalyserRef.current.source?.disconnect();
+        remoteAnalyserRef.current.ctx?.close();
+      } catch (e) {}
+      remoteAnalyserRef.current = null;
+    }
+  };
 
   // Keep callbacks updated
   useEffect(() => {
@@ -76,33 +139,25 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     });
   }, [callState, activeCaller, callDuration, transcripts, interimTranscript, agentLang]);
 
-  // Start Agent's Speech Recognition stream - captures as Agent (You) on right side
+  // Start live speech stream - automatically attributes speech to Caller (IP) or Agent (You)
   const startAgentSpeech = (callId) => {
     if (speechCtrlRef.current) speechCtrlRef.current.stop();
     const ctrl = new SpeechStreamController({
       lang: agentLang,
       onInterim: (text) => {
         const clean = text.trim();
+        if (!clean) return;
         const now = Date.now();
-        const lastCaller = lastCallerSpeechRef.current;
-
-        // Disambiguate: if caller is currently speaking or just spoke within 2.5s and text matches, skip echoing as agent
-        if (
-          now - lastCaller.timestamp < 2500 &&
-          (lastCaller.active ||
-            (lastCaller.text &&
-              (clean.toLowerCase().includes(lastCaller.text) ||
-                lastCaller.text.includes(clean.toLowerCase()))))
-        ) {
-          return;
-        }
+        const isCallerVoice = now < callerSpeakingUntilRef.current;
+        const speaker = isCallerVoice ? "caller" : "agent";
+        const speakerName = isCallerVoice ? "Caller (IP)" : "Agent (You)";
 
         const interimMsg = {
           type: "transcript_interim",
-          speaker: "agent",
-          speakerName: "Agent (You)",
+          speaker,
+          speakerName,
           text: clean,
-          timestamp: Date.now(),
+          timestamp: now,
         };
         setInterimTranscript(interimMsg);
         bChannelRef.current?.postMessage(interimMsg);
@@ -120,31 +175,35 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       },
       onFinal: (text) => {
         const clean = text.trim();
+        if (!clean) return;
         const now = Date.now();
-        const lastCaller = lastCallerSpeechRef.current;
-
-        // If caller spoke within 3s and text overlaps or caller is active in other tab, suppress duplicate
-        if (
-          now - lastCaller.timestamp < 3000 &&
-          lastCaller.text &&
-          (clean.toLowerCase().includes(lastCaller.text) ||
-            lastCaller.text.includes(clean.toLowerCase()) ||
-            Math.abs(clean.length - lastCaller.text.length) < 6)
-        ) {
-          return; // Skip echoing caller's speech as agent
-        }
+        const isCallerVoice = now < callerSpeakingUntilRef.current;
+        const speaker = isCallerVoice ? "caller" : "agent";
+        const speakerName = isCallerVoice ? "Caller (IP)" : "Agent (You)";
 
         setInterimTranscript(null);
         const finalMsg = {
-          id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: `${speaker === "caller" ? "c" : "a"}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           type: "transcript_final",
-          speaker: "agent",
-          speakerName: "Agent (You)",
+          speaker,
+          speakerName,
           text: clean,
           isFinal: true,
-          timestamp: Date.now(),
+          timestamp: now,
         };
-        setTranscripts((prev) => [...prev, finalMsg]);
+        setTranscripts((prev) => {
+          if (
+            prev.some(
+              (t) =>
+                t.id === finalMsg.id ||
+                (t.text.toLowerCase() === finalMsg.text.toLowerCase() &&
+                  Math.abs((t.timestamp || 0) - finalMsg.timestamp) < 1800)
+            )
+          ) {
+            return prev;
+          }
+          return [...prev, finalMsg];
+        });
         bChannelRef.current?.postMessage(finalMsg);
         scribeChannelRef.current?.postMessage(finalMsg);
         const curCallId = callId || activeCallIdRef.current;
@@ -176,11 +235,15 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           timestamp: Date.now(),
           active: !!msg.active,
         };
+        if (msg.active) {
+          callerSpeakingUntilRef.current = Date.now() + 2200;
+        }
         return;
       }
 
       if (msg.speaker === "caller" || msg.type === "transcript_final" || msg.type === "transcript_interim") {
         if (msg.speaker === "caller") {
+          callerSpeakingUntilRef.current = Date.now() + 2200;
           lastCallerSpeechRef.current = {
             text: (msg.text || "").toLowerCase().trim(),
             timestamp: Date.now(),
@@ -261,6 +324,9 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     const session = new WebRtcCallSession({
       role: "agent",
       agentId: agentId || "Agent 1",
+      onRemoteStream: (stream) => {
+        setupRemoteAudioAnalysis(stream);
+      },
       onStateChange: (state, details) => {
         if (state === "incoming_call") {
           setCallState("incoming");
@@ -282,6 +348,11 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           // Clear old transcripts on brand new call connection
           setTranscripts([]);
           setInterimTranscript(null);
+
+          // Setup incoming caller voice stream detection
+          if (session.remoteStream) {
+            setupRemoteAudioAnalysis(session.remoteStream);
+          }
 
           // Start agent voice transcription
           startAgentSpeech(curId);
@@ -322,6 +393,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           setCallState("ended");
           stopTimer();
           speechCtrlRef.current?.stop();
+          cleanupRemoteAudio();
           if (callDocUnsubRef.current) {
             callDocUnsubRef.current();
             callDocUnsubRef.current = null;
@@ -418,6 +490,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       session.endCall();
       stopTimer();
       stopRingtone();
+      cleanupRemoteAudio();
     };
   }, [agentId]); // Re-subscribe if active agent changes
 
