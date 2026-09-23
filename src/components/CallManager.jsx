@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { playRingtone, stopRingtone, unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
+import { getFirestoreDb } from "@/lib/firebase";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 
 export const CallManager = ({ onCallerConnected }) => {
   const [callState, setCallState] = useState("idle"); // 'idle' | 'incoming' | 'connected' | 'on_hold' | 'ended'
@@ -83,7 +85,47 @@ export const CallManager = ({ onCallerConnected }) => {
 
     callSessionRef.current = session;
 
-    // Periodic check for remote calls initiated from other devices/browsers
+    // 1. Direct Real-Time Firestore listener for incoming calls across devices/browsers
+    let unsubscribeIncoming = null;
+    try {
+      const db = getFirestoreDb();
+      const q = query(
+        collection(db, "calls"),
+        where("status", "==", "ringing")
+      );
+      unsubscribeIncoming = onSnapshot(
+        q,
+        (snapshot) => {
+          if (session.state === "idle" || session.state === "ended") {
+            const now = Date.now();
+            for (const change of snapshot.docChanges()) {
+              if (change.type === "added" || change.type === "modified") {
+                const callData = change.doc.data();
+                if (
+                  callData &&
+                  callData.status === "ringing" &&
+                  now - (callData.updatedAt || callData.createdAt || 0) < 60000
+                ) {
+                  playRingtone("incoming");
+                  session.setState("incoming_call", { callData });
+                  if (callData.callerInfo) {
+                    onCallerConnectedRef.current?.(callData.callerInfo);
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        },
+        (err) => {
+          console.warn("Firestore incoming calls listener notice:", err.message);
+        }
+      );
+    } catch (e) {
+      console.warn("Could not set up Firestore listener in CallManager:", e.message);
+    }
+
+    // 2. Periodic check fallback for remote calls
     pollIntervalRef.current = setInterval(async () => {
       if (session.state === "idle") {
         try {
@@ -101,6 +143,11 @@ export const CallManager = ({ onCallerConnected }) => {
     }, 2000);
 
     return () => {
+      if (unsubscribeIncoming) {
+        try {
+          unsubscribeIncoming();
+        } catch (e) {}
+      }
       clearInterval(pollIntervalRef.current);
       session.endCall();
       stopTimer();

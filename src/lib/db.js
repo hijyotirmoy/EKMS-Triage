@@ -75,11 +75,7 @@ let memoryCases = [
 
 // Helper to check if Firebase is configured
 export function isFirebaseConfigured() {
-  return Boolean(
-    (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY) ||
-      (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
-        process.env.NEXT_PUBLIC_FIREBASE_API_KEY)
-  );
+  return true; // Configured via default Firebase credentials in @/lib/firebase
 }
 
 let firestoreInstance = null;
@@ -87,7 +83,6 @@ let firestoreType = null; // 'admin' | 'web'
 
 async function getFirestoreContext() {
   if (firestoreInstance) return { db: firestoreInstance, type: firestoreType };
-  if (!isFirebaseConfigured()) return null;
 
   try {
     // 1. Attempt Admin SDK first if private key provided
@@ -107,26 +102,11 @@ async function getFirestoreContext() {
       return { db: firestoreInstance, type: firestoreType };
     }
 
-    // 2. Client Web SDK
-    if (
-      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
-      process.env.NEXT_PUBLIC_FIREBASE_API_KEY
-    ) {
-      const { initializeApp, getApps } = await import("firebase/app");
-      const { getFirestore } = await import("firebase/firestore");
-      const firebaseConfig = {
-        apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-        authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-        messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-        appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-      };
-      const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-      firestoreInstance = getFirestore(app);
-      firestoreType = "web";
-      return { db: firestoreInstance, type: firestoreType };
-    }
+    // 2. Client Web SDK via centralized Firebase instance
+    const { getFirestoreDb } = await import("@/lib/firebase");
+    firestoreInstance = getFirestoreDb();
+    firestoreType = "web";
+    return { db: firestoreInstance, type: firestoreType };
   } catch (err) {
     console.warn("Firebase initialization notice:", err.message);
   }
