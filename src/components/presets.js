@@ -1,0 +1,78 @@
+export const PRESETS = [
+  {
+    id: "chest-pain",
+    testId: "intake-preset-chest-pain",
+    title: "Chest pain (Hinglish)",
+    hint: "Emergency pattern",
+    data: {
+      caller_name: "Ramesh Kalita",
+      phone: "9876543210",
+      age: 48,
+      sex: "Male",
+      symptom_notes:
+        "Bohot tej chhati me dard ho raha hai, baayein haath me jhanjhanahat hai aur thanda pasina aa raha hai. Saans lene me bhi dikkat.",
+      duration: "Less than 2 hours",
+      severity_reported: 9,
+      city: "Guwahati",
+      district: "Kamrup Metropolitan",
+      pincode: "781022",
+    },
+  },
+  {
+    id: "fever",
+    testId: "intake-preset-fever",
+    title: "Fever + cough (Hindi)",
+    hint: "Worker camp, 4 days",
+    data: {
+      caller_name: "Sunita Devi",
+      phone: "9811223344",
+      age: 32,
+      sex: "Female",
+      symptom_notes:
+        "चार दिन से तेज़ बुखार है, सूखी खाँसी और बदन दर्द भी है। कल रात कँपकँपी के साथ बुखार आया था।",
+      duration: "4-7 days",
+      severity_reported: 6,
+      city: "Tinsukia",
+      district: "Tinsukia",
+      pincode: "786125",
+    },
+  },
+  {
+    id: "minor-cut",
+    testId: "intake-preset-minor-cut",
+    title: "Minor cut at work",
+    hint: "Low acuity",
+    data: {
+      caller_name: "Arjun Singh",
+      phone: "9711002233",
+      age: 26,
+      sex: "Male",
+      symptom_notes:
+        "Kaam ke waqt haath par choti si kharash aa gayi. Thoda khoon nikla tha par ab ruk gaya hai. Dard bhi kam hai.",
+      duration: "Less than 2 hours",
+      severity_reported: 3,
+      city: "Silchar",
+      district: "Cachar",
+      pincode: "788003",
+    },
+  },
+  {
+    id: "chemical",
+    testId: "intake-preset-chemical",
+    title: "Pesticide exposure",
+    hint: "Occupational escalation",
+    data: {
+      caller_name: "Bipul Das",
+      phone: "9864012345",
+      age: 39,
+      sex: "Male",
+      symptom_notes:
+        "Kheti me spray karte waqt dawai aankh aur muh me chali gayi. Ab chakkar aa raha hai, ulti jaisa lag raha hai aur aankh me jalan hai.",
+      duration: "Less than 2 hours",
+      severity_reported: 7,
+      city: "Jorhat",
+      district: "Jorhat",
+      pincode: "785004",
+    },
+  },
+];
