@@ -13,6 +13,20 @@ export const CLINICAL_DOMAINS = {
   FATIGUE: "fatigue",
   ALLERGY: "allergy",
   ENT_EYE: "ent_eye",
+  ONCOLOGY: "oncology",
+  DIABETES: "diabetes",
+  RENAL: "renal",
+  HEPATIC: "hepatic",
+  INFECTIOUS: "infectious",
+  NEUROLOGICAL: "neurological",
+  ORTHOPEDIC: "orthopedic",
+  SURGICAL: "surgical",
+  GYNECOLOGY: "gynecology",
+  DERMATOLOGY: "dermatology",
+  DENTAL: "dental",
+  PSYCHIATRIC: "psychiatric",
+  VOMITING: "vomiting",
+  LEG_PAIN: "leg_pain",
   GENERAL: "general",
 };
 
@@ -28,6 +42,20 @@ export const DOMAIN_LABELS = {
   [CLINICAL_DOMAINS.FATIGUE]: "Systemic Fatigue / Heat Exhaustion / Musculoskeletal",
   [CLINICAL_DOMAINS.ALLERGY]: "Allergic Reaction / Dermatological Distress",
   [CLINICAL_DOMAINS.ENT_EYE]: "Acute ENT / Ocular Emergency",
+  [CLINICAL_DOMAINS.ONCOLOGY]: "Oncological Condition / Cancer Care",
+  [CLINICAL_DOMAINS.DIABETES]: "Endocrine / Diabetes Fluctuation",
+  [CLINICAL_DOMAINS.RENAL]: "Renal / Kidney / Urological Disorder",
+  [CLINICAL_DOMAINS.HEPATIC]: "Hepato-Biliary / Jaundice / Liver Disease",
+  [CLINICAL_DOMAINS.INFECTIOUS]: "Tropical / Acute Infectious Illness",
+  [CLINICAL_DOMAINS.NEUROLOGICAL]: "Acute Neurological / Stroke / Seizure",
+  [CLINICAL_DOMAINS.ORTHOPEDIC]: "Orthopedic / Joint / Musculoskeletal",
+  [CLINICAL_DOMAINS.SURGICAL]: "Acute Surgical / Abdominal Condition",
+  [CLINICAL_DOMAINS.GYNECOLOGY]: "Maternal / Gynecological Health",
+  [CLINICAL_DOMAINS.DERMATOLOGY]: "Dermatological / Skin Disorder",
+  [CLINICAL_DOMAINS.DENTAL]: "Dental / Oral Emergency",
+  [CLINICAL_DOMAINS.PSYCHIATRIC]: "Mental Health / Crisis Assessment",
+  [CLINICAL_DOMAINS.VOMITING]: "Acute Gastroenteritis / Vomiting Disorder",
+  [CLINICAL_DOMAINS.LEG_PAIN]: "Lower Limb Distress / Deep Vein Thrombosis / Trauma",
   [CLINICAL_DOMAINS.GENERAL]: "General Medical Complaint",
 };
 
@@ -42,10 +70,10 @@ export const DOMAIN_LABELS = {
 export function detectClinicalDomain(allText = "", currentTriage = {}) {
   // 0. If domain is already firmly established in currentTriage, preserve it unless explicitly overwritten
   if (currentTriage.domain && Object.values(CLINICAL_DOMAINS).includes(currentTriage.domain)) {
-    // If prompt is just a stage answer (severity rating, duration, etc.), retain established domain!
+    // If prompt is a stage answer (severity, medication, duration, etc.), retain established domain!
     const p = (allText || "").toLowerCase();
     const isStageAnswer =
-      p.includes("high grade") ||
+      p.includes("high") ||
       p.includes("moderate") ||
       p.includes("mild") ||
       p.includes("severe") ||
@@ -56,7 +84,20 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
       p.includes("today") ||
       p.includes("hour") ||
       p.includes("week") ||
-      p.includes("month");
+      p.includes("month") ||
+      p.includes("med") ||
+      p.includes("dawai") ||
+      p.includes("medicine") ||
+      p.includes("tablet") ||
+      p.includes("paracetamol") ||
+      p.includes("dolo") ||
+      p.includes("crocin") ||
+      p.includes("antibiotic") ||
+      p.includes("painkiller") ||
+      p.includes("yes") ||
+      p.includes("no") ||
+      p.includes("none") ||
+      p.includes("nahi");
 
     if (isStageAnswer && currentTriage.domain !== CLINICAL_DOMAINS.GENERAL) {
       return currentTriage.domain;
@@ -87,6 +128,21 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     (has(/\bghabrahat\b/i) && has(/\bpasina\b/i))
   ) {
     return CLINICAL_DOMAINS.CARDIAC;
+  }
+
+  // 2a. Vomiting / Acute Nausea / Gastroenteritis
+  if (
+    has(/\b(vomit|vomiting|ulti|throwing up|emesis|nausea|food poison)\b/i) &&
+    !has(/\b(chest|chhati|heart|seena)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.VOMITING;
+  }
+
+  // 2b. Leg Pain / Calf Pain / DVT / Lower Limb Distress
+  if (
+    has(/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg|calf muscle|sciatica)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.LEG_PAIN;
   }
 
   // 3. Trauma / Cut / Laceration / Fracture / Bleeding
@@ -159,6 +215,90 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     return CLINICAL_DOMAINS.RESPIRATORY;
   }
 
+  // 13. Oncology / Cancer / Malignancy / Tumor / Chemotherapy
+  if (
+    has(/\b(cancer|tumor|tumour|oncolog|malignan|carcinoma|leukemia|lymphoma|chemo|chemotherapy|sarcoma|melanoma|metastasis|lump|biopsy|myeloma)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.ONCOLOGY;
+  }
+
+  // 14. Endocrine / Diabetes / Sugar Crisis
+  if (
+    has(/\b(diabet|sugar|hypoglycem|hyperglycem|ketoacidosis|dka|insulin|glucometer)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.DIABETES;
+  }
+
+  // 15. Renal / Kidney Stones / Urological / UTI
+  if (
+    has(/\b(kidney|renal|pathri|stone|dialysis|creatinine|urinary|urine|peshab|micturition|nephro|hematuria|bladder)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.RENAL;
+  }
+
+  // 16. Hepato-Biliary / Jaundice / Liver Disease
+  if (
+    has(/\b(jaundice|peelia|hepat|liver|cirrhosis|bilirubin|sgpt|sgot|ascites)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.HEPATIC;
+  }
+
+  // 17. Acute Tropical / Specific Infections (Dengue, Malaria, Typhoid, TB, Pneumonia)
+  if (
+    has(/\b(dengue|malaria|typhoid|tuberculosis|tb|pneumonia|cholera|chikungunya|sepsis|infection)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.INFECTIOUS;
+  }
+
+  // 18. Acute Neurological / Stroke / Seizures / Paralysis
+  if (
+    has(/\b(stroke|paralysis|lakwa|seizure|mirgi|epilepsy|daura|fits|convulsion|unconscious|behoshi|coma|slurred speech|facial droop|neuropathy)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.NEUROLOGICAL;
+  }
+
+  // 19. Orthopedic / Arthritis / Fractures / Severe Musculoskeletal
+  if (
+    has(/\b(arthritis|gathiya|fracture|haddi|bone|joint|sciatica|spondylitis|slip disc|sprain|ligament|kamar dard)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.ORTHOPEDIC;
+  }
+
+  // 20. Acute Surgical / Appendicitis / Hernia
+  if (
+    has(/\b(appendix|appendicitis|hernia|gallstone|piles|bawasir|fistula|fissure|abscess|bowel obstruction)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.SURGICAL;
+  }
+
+  // 21. Maternal / Pregnancy / Gynecological Health
+  if (
+    has(/\b(pregnant|pregnancy|garbh|delivery|labor pain|miscarriage|period|menstrual|bleeding per vagin|pv bleeding)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.GYNECOLOGY;
+  }
+
+  // 22. Dermatological / Severe Skin Disorders / Skin Swelling & Infection
+  if (
+    has(/\b(swelling|skin swelling|sujan|soojan|edema|swollen|cellulitis|boil|abscess|blister|furuncle|psoriasis|eczema|fungal|ringworm|dad|khaj|twacha)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.DERMATOLOGY;
+  }
+
+  // 23. Dental / Tooth Emergency
+  if (
+    has(/\b(tooth|teeth|dant|gum|dant dard|cavity|dental)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.DENTAL;
+  }
+
+  // 24. Mental Health / Crisis
+  if (
+    has(/\b(depression|panic|anxiety|suicid|mental|psych|hallucination)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.PSYCHIATRIC;
+  }
+
   return CLINICAL_DOMAINS.GENERAL;
 }
 
@@ -169,7 +309,7 @@ export function extractSeverityAndDuration(allText = "") {
   const lower = allText.toLowerCase();
 
   // Duration Detection
-  let detectedDuration = "Today";
+  let detectedDuration = null;
   if (
     lower.includes("less than 2 hours") ||
     lower.includes("< 2") ||
@@ -234,7 +374,7 @@ export function extractSeverityAndDuration(allText = "") {
   }
 
   // Severity Detection (1-10)
-  let detectedSeverity = 5;
+  let detectedSeverity = null;
   if (
     lower.includes("crushing") ||
     lower.includes("squeezing") ||
@@ -289,26 +429,874 @@ export function extractSeverityAndDuration(allText = "") {
 }
 
 /**
+ * Returns disease-adaptive medication probing questions and selectable options.
+ */
+export function getMedicationQuestionData(domain, currentTriage = {}) {
+  const activeCondition = currentTriage.symptom || "your condition";
+
+  switch (domain) {
+    case CLINICAL_DOMAINS.CARDIAC:
+      return {
+        agentScript:
+          "Ask the IP: 'Are you taking any regular medications for blood pressure, heart, or blood thinners (Aspirin/Sorbitrate), or did you take any medicine for this chest discomfort?'",
+        options: [
+          "No medications taken",
+          "Yes — Blood Pressure / Heart medicine (Sorbitrate / Aspirin)",
+          "Yes — Acidity / Gas medicine (Antacid / Pantocid)",
+          "Yes — Painkiller / Paracetamol",
+          "Yes — Other regular daily medicines",
+        ],
+        probingQuestions: [
+          "Kya emergency mein Sorbitrate (zubaan ke neeche) ya Aspirin li hai? (Did you take Sorbitrate sublingual or Aspirin?)",
+          "Kya rozana BP ya cholesterol ki dawa chal rahi hai aur aaj li thi? (Are you on daily BP/cholesterol meds and did you take them today?)",
+          "Kya dawai lene ke baad seene ke dard mein thoda aaram aaya? (Did the chest pain reduce after taking the medicine?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.RESPIRATORY:
+      return {
+        agentScript:
+          "Ask the IP: 'Are you using any inhaler, nebulizer, asthalin, or taking any allergy/asthma medicines?'",
+        options: [
+          "No medications taken",
+          "Yes — Inhaler / Puff (Asthalin / Budecort / Foracort)",
+          "Yes — Nebulizer / Steam treatment",
+          "Yes — Cough syrup / Antibiotics",
+          "Yes — Allergy tablet (Cetirizine / Montair-LC)",
+          "Yes — Other medicines",
+        ],
+        probingQuestions: [
+          "Inhaler ke kitne puffs liye aur kya usse saans lene mein aaram mila? (How many puffs were taken and did breathing improve?)",
+          "Kya regular asthma/allergy ki koi dawa rozana chalti hai? (Do you take daily maintenance inhalers or allergy pills?)",
+          "Pichle 4 ghante mein koi cough syrup ya goli li hai? (Any cough syrup or oral tablet taken in last 4 hours?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.DIABETES:
+      return {
+        agentScript:
+          "Ask the IP: 'Are you taking insulin injections or regular diabetes tablets (like Metformin), or did you take any sweet/glucose?'",
+        options: [
+          "No medications taken",
+          "Yes — Insulin injection (Regular / Lantus)",
+          "Yes — Diabetes tablets (Metformin / Glimepiride)",
+          "Yes — Sugar / Glucose / Sweet juice taken",
+          "Yes — Blood pressure or other regular meds",
+        ],
+        probingQuestions: [
+          "Kya aaj subah insulin ya tablet li thi aur kya theek se khana khaya tha? (Did you take morning insulin/tablets and have a meal on time?)",
+          "Kya chakkar aane par cheeni, gur ya meetha paani diya gaya? (Was sugar, jaggery, or sweet water given for dizziness?)",
+          "Aakhri baar blood sugar kab aur kitna check kiya tha? (When and what was the last measured blood sugar reading?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.BP_CRISIS:
+      return {
+        agentScript:
+          "Ask the IP: 'Are you taking regular high blood pressure medicines, and did you take your BP tablet today?'",
+        options: [
+          "No medications taken / Not diagnosed before",
+          "Yes — Regular BP medicine taken today (Telmisartan / Amlodipine)",
+          "Yes — Missed BP medicine for 1-2 days",
+          "Yes — Emergency BP tablet (Clonidine / Sorbitrate)",
+          "Yes — Other regular medications",
+        ],
+        probingQuestions: [
+          "Kya aaj BP ki dawai time par li thi ya chhut gayi? (Did you take the BP pill on time today or miss it?)",
+          "Kya doctor ne pehle se koi specific BP medicine likhi hai? (Which specific BP medicine has the doctor prescribed?)",
+          "Kya koi nayi dawai ya dard ki goli (NSAID) li thi jisse BP badh gaya ho? (Any new medicine or painkiller taken that might spike BP?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.FEVER:
+      return {
+        agentScript:
+          "Ask the IP: 'Have you taken Paracetamol (Crocin/Dolo) or any antibiotics for this fever?'",
+        options: [
+          "No medications taken",
+          "Yes — Paracetamol / Dolo / Crocin 650mg",
+          "Yes — Antibiotics (Amoxicillin / Azithromycin / Cefixime)",
+          "Yes — Painkiller / Combiflam / Ibuprofen",
+          "Yes — Cough / Cold / Antiallergic medicine",
+        ],
+        probingQuestions: [
+          "Paracetamol lene ke kitni der baad bukhar kam hota hai? (How long after taking Paracetamol does fever come down?)",
+          "Aakhri baar bukhar ki dawai kitne baje li thi? (What exact time was the last antipyretic dose taken?)",
+          "Kya kisi dawai se pehle reaction ya allergy hui hai? (Any known drug allergy to sulfa or penicillin?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.ABDOMINAL:
+      return {
+        agentScript:
+          "Ask the IP: 'Have you taken any antacid, gas medicine, painkiller, or ORS for this stomach problem?'",
+        options: [
+          "No medications taken",
+          "Yes — Antacid / Gas medicine (Pantocid / Omez / Digene)",
+          "Yes — Antispasmodic painkiller (Meftal-Spas / Cyclopam)",
+          "Yes — ORS / Electrolyte solution / Electral",
+          "Yes — Loose motions medicine (Norflox / Sporlac)",
+          "Yes — Other medicines",
+        ],
+        probingQuestions: [
+          "Dawai lene ke baad kya ulti ho gayi ya pet dard kam hua? (Did vomiting occur after taking medicine, or did cramps subside?)",
+          "Kya patient ne ORS ghol ya nimbu-paani peena shuru kiya hai? (Has ORS or lemon-salt water hydration started?)",
+          "Kya pehle se koi regular dawa (jaise BP, sugar ya arthritis) chal rahi hai? (Any daily chronic medications for BP, sugar, or arthritis?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.HEADACHE:
+      return {
+        agentScript:
+          "Ask the IP: 'Have you taken any painkiller, migraine medicine, or BP tablet for this headache?'",
+        options: [
+          "No medications taken",
+          "Yes — Painkiller (Paracetamol / Combiflam / Saridon)",
+          "Yes — Migraine specific medicine (Vasograin / Rizatriptan)",
+          "Yes — Blood pressure tablet",
+          "Yes — Other regular medicines",
+        ],
+        probingQuestions: [
+          "Kya dawai lene ke baad sar dard mein aaram aaya ya dard waise hi bana hua hai? (Did the headache improve or remain unchanged after medication?)",
+          "Aap mahine mein kitni baar sar dard ke liye goli lete hain? (How frequently per month do you take headache pills?)",
+          "Kya koi neend ya ghabrahat ki dawai chal rahi hai? (Any medication for anxiety or sleep?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.TRAUMA:
+      return {
+        agentScript:
+          "Ask the IP: 'Have you taken any painkiller, antiseptic, or received a Tetanus (TT) injection for this injury?'",
+        options: [
+          "No medications / First aid not yet done",
+          "Yes — Tetanus toxoid (TT) injection within last 6 months",
+          "Yes — Painkiller taken (Paracetamol / Diclofenac / Tramadol)",
+          "Yes — Antiseptic applied & bandage tied",
+          "Yes — Blood thinner medicines (Aspirin / Clopidogrel / Warfarin)",
+        ],
+        probingQuestions: [
+          "Pichle 5 saal mein kya Tetanus (TT) ka injection laga tha? (Was a Tetanus toxoid injection received in the last 5 years?)",
+          "Kya patient khoon patla karne wali dawai (Aspirin/Blood thinner) lete hain? (Is the patient on blood thinners that increase bleeding risk?)",
+          "Kya zakhm par koi antiseptic malham lagaya gaya hai? (Was any antiseptic ointment or dressing applied?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.PESTICIDE:
+      return {
+        agentScript:
+          "Ask the IP: 'Was any first aid, antidote, vomiting induction, or water wash done after the chemical exposure?'",
+        options: [
+          "No first aid / No medicines given yet",
+          "Yes — Thorough skin wash with soap & fresh clothes changed",
+          "Yes — Patient made to vomit (Note: do not induce if drowsy)",
+          "Yes — Given milk / charcoal / water to drink",
+          "Yes — Immediate Atropine / emergency injection given at local clinic",
+        ],
+        probingQuestions: [
+          "Kya patient ke kapde badal kar pure sharir ko sabun aur taaze paani se dhoya gaya? (Were clothes changed and entire body washed with soap and water?)",
+          "Kya unhe koi gharelu cheez (doodh/tel) pilayi gayi? (Was any home remedy or fluid forcefully ingested?)",
+          "Kya nazdeeki clinic mein koi injection (Atropine/Pralidoxime) lagaya gaya? (Was any antidote injection given at a local clinic?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.ONCOLOGY:
+      return {
+        agentScript:
+          "Ask the IP: 'What oncology, chemotherapy, or pain medications (such as Tramadol or Morphine) are currently prescribed?'",
+        options: [
+          "No oncology medicines taken currently",
+          "Yes — Prescribed cancer painkillers (Tramadol / Morphine / Fentanyl patch)",
+          "Yes — Active chemotherapy tablets or recent IV chemo infusion",
+          "Yes — Steroids / Antiemetic (Ondansetron / Dexamethasone)",
+          "Yes — Antibiotics / Neutropenic prophylaxis",
+          "Yes — Other routine medicines",
+        ],
+        probingQuestions: [
+          "Aakhri baar chemotherapy ya immunotherapy session kab hua tha? (When was the last chemotherapy or immunotherapy cycle?)",
+          "Kya prescribed painkiller lene se dard mein aaram mil raha hai? (Is the prescribed analgesic providing adequate pain relief?)",
+          "Kya bukhar aane par doctor dwara batai gayi emergency antibiotic li gayi hai? (Was any emergency antibiotic taken for fever?)",
+        ],
+      };
+    case CLINICAL_DOMAINS.RENAL:
+      return {
+        agentScript:
+          "Ask the IP: 'Are you taking any kidney medicines, urine infection antibiotics, or pain relief tablets?'",
+        options: [
+          "No medications taken",
+          "Yes — Painkiller / Antispasmodic for stone pain",
+          "Yes — Urine infection antibiotic (Nitrofurantoin / Ciprofloxacin)",
+          "Yes — Regular dialysis or kidney prescription",
+          "Yes — Water pills / Diuretics (Torsemide / Furosemide)",
+          "Yes — Blood pressure / diabetes medicines",
+        ],
+        probingQuestions: [
+          "Kya kidney stones ke dard ke liye koi injection ya goli li hai? (Has any antispasmodic injection or tablet been taken for stone colic?)",
+          "Kya patient regular dialysis par hain aur aakhri dialysis kab hua tha? (Is the patient on maintenance hemodialysis, and when was the last session?)",
+          "Kya rozana chalne wali BP ya kidney ki dawa aaj li gayi thi? (Were regular BP or renal medications taken today?)",
+        ],
+      };
+    default:
+      return {
+        agentScript:
+          `Ask the IP: 'Are you currently taking any regular medications, or did you take any medicine for ${activeCondition}?'`,
+        options: [
+          "No medications taken",
+          "Yes — Painkiller / Paracetamol",
+          "Yes — Blood Pressure / Heart medicine",
+          "Yes — Diabetes / Insulin",
+          "Yes — Antibiotics or other prescribed medicine",
+          "Yes — Other regular daily medicines",
+        ],
+        probingQuestions: [
+          "Kya is takleef ke liye pichle 2-4 ghante mein koi dawai li hai aur uska naam kya hai? (Did you take any medicine in the last 2-4 hours, and what is its name?)",
+          "Kya rozana chalne wali koi dawai (BP, Sugar, Thyroid) chhut gayi hai? (Did you miss any daily scheduled doses of BP/Sugar/Thyroid?)",
+          "Kya kisi dawai se pehle allergy ya reaction hua tha? (Any known drug allergy or adverse reaction?)",
+        ],
+      };
+  }
+}
+
+/**
+ * Comprehensive Disease-Specific Clinical Probing Protocols (5 Steps per disease)
+ * Guides the operator through detailed red flags, clinical character, hydration, and history
+ * before completing intake.
+ */
+export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
+  const activeCondition = currentTriage.symptom || "your condition";
+
+  switch (domain) {
+    case CLINICAL_DOMAINS.VOMITING:
+      return [
+        {
+          id: "vomit_q1",
+          title: "Frequency & Duration",
+          question: "When did the vomiting start, and roughly how many times has the patient vomited in the last few hours?",
+          options: [
+            "Started today — Vomited 1 to 2 times (Early stage)",
+            "Started today — Frequent / continuous vomiting (>5 times, cannot stop)",
+            "Started 1-2 days ago — Frequent episodes with nausea",
+            "Ongoing for several days / intermittent episodes",
+          ],
+        },
+        {
+          id: "vomit_q2",
+          title: "Content (Crucial)",
+          question: "Is there any blood in the vomit, or does it look like dark coffee grounds?",
+          options: [
+            "Contains bright red blood or dark coffee-ground material (High Emergency)",
+            "Greenish-yellow bile with intense bitter taste",
+            "Clear stomach fluid, water, or undigested food",
+            "No blood or black particles visible",
+          ],
+        },
+        {
+          id: "vomit_q3",
+          title: "Associated Symptoms",
+          question: "Is the patient experiencing severe abdominal pain, chest pain, or a high fever?",
+          options: [
+            "Severe acute abdominal pain / rigid cramping (Emergency)",
+            "Chest pain, pressure, or palpitations",
+            "High fever (>101°F) with chills and severe shivering",
+            "Mild stomach discomfort / nausea only (No severe pain or fever)",
+          ],
+        },
+        {
+          id: "vomit_q4",
+          title: "Hydration Status",
+          question: "Are they able to keep small sips of water down, or are they bringing everything back up? When did they last pass urine?",
+          options: [
+            "Severe dehydration: Unable to keep even water/ORS down, no urine in 8+ hours",
+            "Moderate: Vomits if eating solids, but keeping small sips of ORS/water",
+            "Mild: Able to drink fluids and passed normal urine recently",
+            "Feeling very dizzy / faint upon standing up",
+          ],
+        },
+        {
+          id: "vomit_q5",
+          title: "Medical History",
+          question: "Is the patient pregnant, diabetic, or currently taking any new medications?",
+          options: [
+            "Pregnant patient (Severe hyperemesis / morning sickness)",
+            "Diabetic on insulin/tablets (Risk of DKA / ketoacidosis)",
+            "Took anti-vomiting tablet (Ondansetron / Domperidone / Vomikind)",
+            "Started drinking ORS / electrolyte water",
+            "No pregnancy, diabetes, or medications taken",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.LEG_PAIN:
+      return [
+        {
+          id: "leg_q1",
+          title: "Trauma Check",
+          question: "Did the patient fall, twist the leg, or have an accident? If so, are they completely unable to put any weight on it?",
+          options: [
+            "Recent trauma / fall / twist — Completely unable to put any weight on it (Suspected Fracture)",
+            "Direct trauma / injury — Able to walk with moderate limp",
+            "No trauma or accident — Pain started spontaneously",
+            "Minor sports sprain / muscle pull",
+          ],
+        },
+        {
+          id: "leg_q2",
+          title: "Clot/DVT Check (Critical)",
+          question: "Is the pain mostly in the calf muscle? Is one leg suddenly swollen, red, and warm to the touch compared to the other?",
+          options: [
+            "One leg / calf is suddenly swollen, red, and warm to the touch (Critical DVT warning)",
+            "Pain in calf muscle without swelling, redness, or heat",
+            "Both legs equally swollen around ankles (Fluid retention / Edema)",
+            "No calf swelling, redness, or heat",
+          ],
+        },
+        {
+          id: "leg_q3",
+          title: "Circulation Check",
+          question: "Is the painful leg or foot feeling very cold, numb, or turning pale or blue?",
+          options: [
+            "Painful leg / foot is feeling very cold, numb, or turning pale / blue (Vascular Emergency)",
+            "Tingling / pins-and-needles sensation in foot or toes",
+            "Normal warmth and healthy skin color in foot and toes",
+            "Mild heaviness or throbbing in leg",
+          ],
+        },
+        {
+          id: "leg_q4",
+          title: "Infection Check",
+          question: "Does the patient also have a high fever along with a red, swollen area on the leg?",
+          options: [
+            "High fever along with an expanding red, swollen, hot area on leg (Cellulitis warning)",
+            "Open cut, insect bite, or ulcer draining pus / fluid",
+            "Mild rash or itch on leg without fever",
+            "No fever, wound, or red swollen skin",
+          ],
+        },
+        {
+          id: "leg_q5",
+          title: "Nerve/Chronic Check",
+          question: "Is it a shooting pain that travels from the lower back down the leg, or is this a long-term joint pain (like arthritis)?",
+          options: [
+            "Shooting electric pain traveling from lower back down the leg (Sciatica / Slip Disc)",
+            "Long-term knee or hip joint pain (Osteoarthritis / Gathiya)",
+            "Severe nocturnal calf cramps after physical work",
+            "Acute localized bone or muscle tenderness",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.CARDIAC:
+      return [
+        {
+          id: "card_q1",
+          title: "Pain Nature & Intensity",
+          question: "How would you describe the chest pain? Is it a heavy crushing pressure, tightness, squeezing, or burning?",
+          options: [
+            "Heavy crushing pressure / squeezing weight on chest (High Emergency)",
+            "Sharp stabbing pain that worsens on taking a deep breath",
+            "Burning retrosternal sensation (Acid reflux / Acidity)",
+            "Dull muscular ache across chest wall",
+          ],
+        },
+        {
+          id: "card_q2",
+          title: "Pain Radiation",
+          question: "Does the chest pain radiate or travel anywhere — such as to your left arm, shoulder, jaw, neck, or back?",
+          options: [
+            "Radiating to left arm, left shoulder, neck, or jaw (High Cardiac Red Flag)",
+            "Radiating directly through to the back between shoulder blades",
+            "Localized to one specific spot on chest (tender to touch)",
+            "No radiation to arm, neck, or back",
+          ],
+        },
+        {
+          id: "card_q3",
+          title: "Emergency Autonomic Red Flags",
+          question: "Is there cold profuse sweating, shortness of breath, extreme dizziness, or nausea?",
+          options: [
+            "Cold profuse sweating with severe anxiety / clamminess (Red Flag)",
+            "Severe breathlessness / gasping on lying flat",
+            "Dizziness, lightheadedness, or feeling of passing out",
+            "No cold sweating, severe breathlessness, or dizziness",
+          ],
+        },
+        {
+          id: "card_q4",
+          title: "Onset & Duration",
+          question: "When exactly did the chest pain start, and did it come on suddenly during rest or physical exertion?",
+          options: [
+            "Started less than 30 minutes ago (Acute sudden onset)",
+            "1 to 2 hours ago (Persistent)",
+            "Started today during physical work / walking",
+            "Coming and going over past few days / weeks",
+          ],
+        },
+        {
+          id: "card_q5",
+          title: "Medication & Medical History",
+          question: "Have you taken Sorbitrate, Aspirin, or BP medicines, and is there any past history of heart attack, stent, or high BP?",
+          options: [
+            "Took Sorbitrate under tongue / Dispersible Aspirin",
+            "Known heart patient (Previous stent / bypass / heart attack)",
+            "Taking regular Blood Pressure / Diabetes medications",
+            "Took antacid / gas tablet (pain did not relieve)",
+            "No heart history and no medicines taken",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.FEVER:
+      return [
+        {
+          id: "fev_q1",
+          title: "Temperature & Shivering",
+          question: "How high is the fever, and is it accompanied by severe chills, rigors, or uncontrollable shivering?",
+          options: [
+            "High Grade (>102°F) with intense chills & shivering (Kapkapi)",
+            "Moderate fever (100.5°F - 102°F) with body ache",
+            "Mild low-grade fever (99°F - 100°F) manageable",
+            "Intermittent fever spikes coming and going in cycles",
+          ],
+        },
+        {
+          id: "fev_q2",
+          title: "Red Flags & Neurological Check",
+          question: "Is there any severe headache with stiff neck, photophobia, confusion, delirium, or red spots on the skin?",
+          options: [
+            "Stiff neck, severe headache, confusion, or light sensitivity (Meningitis warning)",
+            "Red spots or bleeding from gums/nose (Dengue hemorrhagic warning)",
+            "Extreme drowsiness or fainting upon standing",
+            "No neck stiffness, confusion, or skin rashes",
+          ],
+        },
+        {
+          id: "fev_q3",
+          title: "Duration & Onset",
+          question: "How many days has the fever been present, and is anyone else sick in your family or locality?",
+          options: [
+            "Started today (Sudden high spike)",
+            "Past 2 - 3 days (Continuous)",
+            "Past 4 - 7 days (Persistent high fever)",
+            "More than a week / recurring fever",
+          ],
+        },
+        {
+          id: "fev_q4",
+          title: "Medication Response",
+          question: "Have you taken Paracetamol (Crocin/Dolo) or any antibiotics for this fever, and did the fever come down?",
+          options: [
+            "Took Paracetamol / Dolo 650mg — fever did not come down",
+            "Took Paracetamol / Dolo 650mg — fever reduced temporarily",
+            "Taking prescribed antibiotics / other medicines",
+            "No medications taken yet",
+          ],
+        },
+        {
+          id: "fev_q5",
+          title: "Associated Symptoms",
+          question: "Are you experiencing productive cough, burning urination, repeated vomiting, or severe loose motions?",
+          options: [
+            "Persistent vomiting and unable to retain water/ORS",
+            "Burning sensation and pain during urination (UTI)",
+            "Chest congestion with yellow/green phlegm (Pneumonia)",
+            "Severe body and joint pain without other symptoms",
+            "None of these companion symptoms",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.ABDOMINAL:
+      return [
+        {
+          id: "abd_q1",
+          title: "Location & Pain Character",
+          question: "Where is the abdominal pain located, and is it sharp, cramping/colicky, or a constant dull ache?",
+          options: [
+            "Right lower abdomen pain (Appendicitis warning)",
+            "Upper center / right upper stomach pain radiating to back (Gallbladder/Gastric)",
+            "Severe cramping pain coming and going in waves (Colic / Obstruction)",
+            "Generalized diffuse abdominal discomfort",
+          ],
+        },
+        {
+          id: "abd_q2",
+          title: "Peritoneal & Rigidity Check",
+          question: "Is the abdomen rigid/hard like a board, and does the pain get unbearable when walking, coughing, or pressing gently?",
+          options: [
+            "Abdomen is rock-hard, rigid, and agonizing on gentle touch (Acute Peritonitis)",
+            "Pain worsens noticeably with every cough, bump, or step",
+            "Abdomen is soft to touch despite pain",
+            "Bloated feeling with excess gas",
+          ],
+        },
+        {
+          id: "abd_q3",
+          title: "Bowel & Obstruction Check",
+          question: "Have you had repeated vomiting, blood in vomit, inability to pass gas or stool, or dark black tarry stools?",
+          options: [
+            "Unable to pass gas or stool with repeated vomiting (Bowel Obstruction)",
+            "Blood in vomit or dark black tarry stool (Bleeding GI warning)",
+            "Watery loose motions / diarrhea multiple times",
+            "Normal bowel movements and passing gas easily",
+          ],
+        },
+        {
+          id: "abd_q4",
+          title: "Duration & Progression",
+          question: "When did the stomach pain start, and has it become progressively worse in the last few hours?",
+          options: [
+            "Started suddenly <4 hours ago (Acute severe pain)",
+            "Started today — progressively getting worse",
+            "Started 1 to 2 days ago",
+            "Long-standing recurrent stomach pain",
+          ],
+        },
+        {
+          id: "abd_q5",
+          title: "Medication & Hydration",
+          question: "Have you taken any antacid, painkiller (Meftal/Cyclopam), or ORS, and are you able to retain fluids?",
+          options: [
+            "Took antacid / Pantocid / Digene (No relief)",
+            "Took antispasmodic painkiller (Meftal-Spas / Cyclopam)",
+            "Able to drink water and ORS",
+            "Cannot drink anything — throws up immediately",
+            "No medicines taken",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.RESPIRATORY:
+      return [
+        {
+          id: "resp_q1",
+          title: "Breathing Effort & Speech",
+          question: "Can the patient speak full sentences without gasping, or are they struggling for breath at rest?",
+          options: [
+            "Cannot speak more than 2 words without gasping for air (High Emergency)",
+            "Can speak short sentences with noticeable breathlessness",
+            "Short of breath only when walking or climbing stairs",
+            "Breathing normally at rest, but persistent cough",
+          ],
+        },
+        {
+          id: "resp_q2",
+          title: "Cyanosis & Wheezing Check",
+          question: "Are the lips, tongue, or fingertips turning bluish, or is there loud audible wheezing or whistling from the chest?",
+          options: [
+            "Lips or fingertips are turning blue/gray (Cyanosis Emergency)",
+            "Audible wheezing or whistling sound during breathing",
+            "Noisy stridor / harsh sound in throat when breathing in",
+            "No blue color, wheezing, or stridor",
+          ],
+        },
+        {
+          id: "resp_q3",
+          title: "Onset & Triggers",
+          question: "Did the breathing trouble start suddenly (asthma attack/allergy) or build up over days with cough and cold?",
+          options: [
+            "Sudden acute attack (<1 hour) after dust/cold air/allergen",
+            "Started today and progressively getting harder to breathe",
+            "Building up over 2-3 days with wet cough and phlegm",
+            "Chronic long-term shortness of breath (COPD/Asthma)",
+          ],
+        },
+        {
+          id: "resp_q4",
+          title: "Inhaler & Medication Check",
+          question: "Has the patient used an inhaler (Asthalin/Budecort), nebulizer, or taken any breathing medicines?",
+          options: [
+            "Used inhaler / nebulizer — No relief in breathing",
+            "Used inhaler — Partial relief, but still breathless",
+            "Has regular asthma/COPD inhaler, but ran out",
+            "No inhaler or breathing medicines available",
+          ],
+        },
+        {
+          id: "resp_q5",
+          title: "Cardiac & Infection Red Flags",
+          question: "Is there severe chest pain, high fever with green phlegm, or sudden swelling in both feet/ankles?",
+          options: [
+            "Chest tightness or chest pain accompanying breathlessness",
+            "High fever with thick yellow/green phlegm or coughing blood",
+            "Both ankles/feet swollen (Congestive heart failure warning)",
+            "Dry hacking cough without fever or chest pain",
+            "None of these companion symptoms",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.HEADACHE:
+      return [
+        {
+          id: "head_q1",
+          title: "Onset & Severity",
+          question: "Did the headache hit suddenly like a thunderclap (worst headache of life) or has it been a throbbing ache?",
+          options: [
+            "Sudden thunderclap onset — Worst headache of my life (Emergency SAH)",
+            "Severe throbbing one-sided pain with sensitivity to light (Migraine)",
+            "Constant band-like tightness around forehead and neck (Tension)",
+            "Mild to moderate dull ache",
+          ],
+        },
+        {
+          id: "head_q2",
+          title: "FAST Neurological Check",
+          question: "Is there any facial droop, arm weakness or numbness, slurred speech, or sudden vision loss?",
+          options: [
+            "Sudden facial droop, arm weakness, or slurred speech (FAST Positive Emergency)",
+            "Sudden loss of vision or double vision in one or both eyes",
+            "Tingling or numbness in fingertips/face",
+            "No weakness, facial droop, or speech difficulty",
+          ],
+        },
+        {
+          id: "head_q3",
+          title: "Meningitis & Increased ICP Check",
+          question: "Is there a high fever with painful stiff neck (unable to touch chin to chest), or projectile vomiting?",
+          options: [
+            "High fever with severe stiff neck and sensitivity to light (Meningitis warning)",
+            "Repeated projectile vomiting without nausea",
+            "Mild nausea without vomiting or fever",
+            "No fever, stiff neck, or vomiting",
+          ],
+        },
+        {
+          id: "head_q4",
+          title: "Duration & Head Trauma",
+          question: "How long has this headache lasted, and was there any recent head injury, fall, or accident?",
+          options: [
+            "Started within last 1 to 2 hours (Acute)",
+            "Recent head trauma, fall, or blow to the head",
+            "Started 1 to 2 days ago",
+            "Recurrent chronic headache over several months",
+          ],
+        },
+        {
+          id: "head_q5",
+          title: "Medication & Blood Pressure",
+          question: "Have you taken any painkiller (Paracetamol/Combiflam) or BP medicine, and what was your last BP reading?",
+          options: [
+            "Took painkiller (Paracetamol/Saridon/Combiflam) — No relief",
+            "Known high BP patient — BP was elevated today (>160/100)",
+            "Took migraine specific medication (Vasograin/Triptan)",
+            "Normal blood pressure / Not checked",
+            "No medications taken",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.DERMATOLOGY:
+      return [
+        {
+          id: "derm_q1",
+          title: "Infection & Cellulitis Check",
+          question: "Is the skin swelling bright red, hot to touch, throbbing, or spreading rapidly in size?",
+          options: [
+            "Bright red, hot to touch, throbbing & spreading rapidly (Cellulitis warning)",
+            "Localized boil / abscess with pus formation and throbbing pain",
+            "Moderate localized swelling without heat or spreading redness",
+            "Mild painless swelling / bump",
+          ],
+        },
+        {
+          id: "derm_q2",
+          title: "Airway & Anaphylaxis Check",
+          question: "Is there any swelling on the lips, face, eyelids, or tongue, or difficulty in swallowing or breathing?",
+          options: [
+            "Swelling of lips, tongue, or face with breathing difficulty (Anaphylaxis Emergency)",
+            "Widespread itchy hives / red welts across whole body",
+            "Swelling localized only to arm, leg, hand, or foot",
+            "No facial or throat swelling and breathing is completely normal",
+          ],
+        },
+        {
+          id: "derm_q3",
+          title: "Wound & Trigger Check",
+          question: "Is there an open cut, insect/bee sting, or an abscess draining pus or foul-smelling fluid?",
+          options: [
+            "Abscess or wound actively draining pus, yellow fluid, or blood",
+            "Started after an insect bite, bee sting, or garden exposure",
+            "Followed a cut, puncture wound, or scrape at work",
+            "Intact skin with no visible cuts, bites, or fluid drainage",
+          ],
+        },
+        {
+          id: "derm_q4",
+          title: "Duration & Spread",
+          question: "When did the swelling or rash first appear, and has it grown larger in the last few hours or days?",
+          options: [
+            "Started suddenly today (<6 hours) and expanding rapidly",
+            "Started 1 to 2 days ago — progressively increasing",
+            "Persisting for 3 to 7 days",
+            "Chronic lesion present for weeks",
+          ],
+        },
+        {
+          id: "derm_q5",
+          title: "Fever & Medication Check",
+          question: "Is there high fever with shivering, and have you taken any antiallergic, painkiller, or antibiotic?",
+          options: [
+            "High fever (>101°F) with shivering (Systemic infection warning)",
+            "Took antiallergic medicine (Cetirizine / Avil / Allegra)",
+            "Took painkiller or antibiotic",
+            "Applied antiseptic ointment or ice pack",
+            "No fever and no medicines taken",
+          ],
+        },
+      ];
+
+    case CLINICAL_DOMAINS.TRAUMA:
+      return [
+        {
+          id: "trauma_q1",
+          title: "Bleeding & Wound Severity",
+          question: "Is there active spurting bleeding that does not stop with direct pressure, or a deep open wound?",
+          options: [
+            "Active severe bleeding / Spurting blood (High Trauma Emergency)",
+            "Deep cut / laceration requiring stitches",
+            "Minor surface scrape or abrasion with stopped bleeding",
+            "Blunt contusion / bruise without skin break",
+          ],
+        },
+        {
+          id: "trauma_q2",
+          title: "Bone & Deformity Check",
+          question: "Is there visible bone deformity, bone piercing skin (open fracture), or complete inability to move limb?",
+          options: [
+            "Visible bone deformity or bone protruding through skin (Open Fracture)",
+            "Severe pain and inability to bear weight or move limb",
+            "Swelling and tenderness, but able to move fingers/toes",
+            "No bone deformity or inability to move",
+          ],
+        },
+        {
+          id: "trauma_q3",
+          title: "Head & Spine Injury Check",
+          question: "Was there a blow to the head, loss of consciousness, confusion, vomiting, or severe neck pain?",
+          options: [
+            "Loss of consciousness, amnesia, or repeated vomiting (Head Trauma)",
+            "Severe neck or spine pain (Do not move patient)",
+            "Mild headache without dizziness or loss of consciousness",
+            "No head, neck, or spine impact",
+          ],
+        },
+        {
+          id: "trauma_q4",
+          title: "Time of Injury",
+          question: "Exactly when did the injury or accident occur?",
+          options: [
+            "Less than 30 minutes ago (Fresh trauma)",
+            "1 to 3 hours ago",
+            "Earlier today (4-8 hours ago)",
+            "Yesterday or earlier",
+          ],
+        },
+        {
+          id: "trauma_q5",
+          title: "First Aid & Tetanus Check",
+          question: "Has pressure bandage or clean dressing been applied, and did you have a Tetanus (TT) injection in the last 5 years?",
+          options: [
+            "Pressure dressing applied and bleeding controlled",
+            "Tetanus (TT) injection taken within last 6 months",
+            "No Tetanus shot in over 5 years / Never taken",
+            "Took painkiller (Paracetamol/Tramadol)",
+            "No first aid done yet",
+          ],
+        },
+      ];
+
+    default:
+      return [
+        {
+          id: "gen_q1",
+          title: "Severity & Daily Function",
+          question: `Regarding ${activeCondition}, how severe is the distress right now — is it unbearable, moderate, or mild?`,
+          options: [
+            "High / Severe distress — Unable to perform normal activities or resting in bed",
+            "Moderate distress — Significant pain or discomfort but manageable",
+            "Mild distress — Early stage symptoms / Seeking guidance",
+            `Urgent specialist opinion needed for ${activeCondition}`,
+          ],
+        },
+        {
+          id: "gen_q2",
+          title: "Emergency Red Flags Check",
+          question: "Are you experiencing any shortness of breath, chest pain, high fever, or dizziness with this condition?",
+          options: [
+            "Shortness of breath or chest pain",
+            "High fever with severe shivering",
+            "Extreme dizziness or feeling faint",
+            "No breathing difficulty, chest pain, or high fever",
+          ],
+        },
+        {
+          id: "gen_q3",
+          title: "Duration & Onset",
+          question: "How long have you had this condition, and did it start suddenly or develop gradually?",
+          options: [
+            "Started today (Sudden / Recent)",
+            "Past 2 - 3 days",
+            "Past 4 - 7 days",
+            "More than a week / chronic",
+          ],
+        },
+        {
+          id: "gen_q4",
+          title: "Medication & Treatment",
+          question: "Have you taken any prescription medicines, painkillers, or home remedies for this, and did they provide relief?",
+          options: [
+            "Took painkiller / OTC medicine — Temporary or no relief",
+            "Taking regular prescription medicines (BP, Sugar, etc.)",
+            "Tried home remedies without improvement",
+            "No medications taken yet",
+          ],
+        },
+        {
+          id: "gen_q5",
+          title: "Associated Health Difficulties",
+          question: "Are you having difficulty eating, drinking fluids, sleeping, or walking comfortably?",
+          options: [
+            "Unable to eat or drink fluids normally",
+            "Difficulty walking or bearing weight",
+            "Disturbed sleep due to continuous pain",
+            "Able to eat, drink, and move comfortably",
+          ],
+        },
+      ];
+  }
+}
+
+/**
+ * Generates 3 distinct, disease-specific clinical probing questions.
+ * Each question has its own tailored set of 4-5 selectable answers that appear directly below it.
+ */
+export function getDiseaseProbingQuestions(domain, currentTriage = {}, stage = "severity") {
+  return getDiseaseProbingProtocol(domain, currentTriage);
+}
+
+/**
  * Returns condition-specific, step-specific data:
  * - agentScript
  * - options
  * - probingQuestions (Hindi + English)
  * - isMultiSelect
  */
-export function getClinicalQuestionData({
+function _internalGetClinicalQuestionData({
   domain,
   stage,
   prompt = "",
   history = [],
   currentTriage = {},
 }) {
+  const diseaseProbing = getDiseaseProbingQuestions(domain, currentTriage, stage);
+  const activeCondition = currentTriage.symptom || "your condition";
+
   if (stage === "complete") {
     return {
       agentScript:
         'Ask the IP: "Please wait for a moment while I review your details and locate the nearest ESIS facility."',
       options: [],
       probingQuestions: [],
+      probingQuestionsWithAnswers: [],
       isComplete: true,
+    };
+  }
+
+  if (stage === "medication") {
+    const medData = getMedicationQuestionData(domain, currentTriage);
+    return {
+      ...medData,
+      probingQuestionsWithAnswers: diseaseProbing,
     };
   }
 
@@ -1066,18 +2054,368 @@ export function getClinicalQuestionData({
     }
 
     // -------------------------------------------------------------------------
-    // 11. ENT / EYE / GENERAL DEFAULT
+    // ONCOLOGY (Cancer / Tumor / Chemotherapy)
     // -------------------------------------------------------------------------
-    default: {
+    case CLINICAL_DOMAINS.ONCOLOGY: {
       if (stage === "severity") {
         return {
           agentScript:
-            "Ask the IP: 'Can you describe how intense this pain or symptom is, and does it prevent normal activity?'",
+            "Ask the IP: 'Which type or stage of cancer is diagnosed, and how severe is the current distress (such as unbearable pain, chemo fever, or severe vomiting)?'",
           options: [
-            "Extremely severe — unable to function or bear pain",
-            "Severe — distressing and worsening",
-            "Moderate — uncomfortable but manageable",
-            "Mild — noticeable but functioning",
+            "High / Unbearable pain (Immediate pain relief needed)",
+            "High fever (>101°F) during chemotherapy (Neutropenic emergency)",
+            "Severe breathlessness / Inability to retain food",
+            "Moderate pain / Ongoing oncology care",
+            "Mild / Seeking ESIS referral & routine prescription",
+          ],
+          probingQuestions: [
+            "Kya chemotherapy chal rahi hai aur pichle 2-3 dino mein tez bukhar aaya hai? (Is patient on active chemotherapy with fever?)",
+            "Kya dard ki dawai (Painkiller/Morphine) se aaram mil raha hai? (Is breakthrough pain relieved by prescribed analgesics?)",
+            "Kya munh ya mal ke raste khoon aa raha hai? (Any bleeding from mouth, vomit, or stool?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Kitne din se yeh takleef zyada badh gayi hai? (When did these acute cancer-related symptoms or pain worsen?)'",
+          options: [
+            "Less than 2 hours (Sudden acute flare / Crisis)",
+            "Today (Since morning)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "4-7 days",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Kya patient chal-phir pa rahe hain ya bilkul bistar par hain? (Is caller bedbound or ambulatory?)",
+            "Pichla chemo ya radiation session kab hua tha? (When was the last chemotherapy or radiation session?)",
+            "Kya ESIC tie-up hospital mein regular oncologist se contact hua hai? (Have they consulted their treating oncologist?)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion complications? (Select all that apply)'",
+          options: [
+            "High fever with chills (Chemo risk)",
+            "Bleeding from mouth, vomit or stool",
+            "Severe dehydration / Continuous vomiting",
+            "Severe weakness / Unable to walk",
+            "Extreme bone or body ache",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya platelet ya hemoglobin bohot kam hone ki history hai? (Any recent lab report showing severe anemia or low platelets?)",
+            "Kya dehydration ke lakshan hain? (Are there signs of severe dehydration?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // DIABETES (Blood Sugar / DKA)
+    // -------------------------------------------------------------------------
+    case CLINICAL_DOMAINS.DIABETES: {
+      if (stage === "severity") {
+        return {
+          agentScript:
+            "Ask the IP: 'How high or low is the blood sugar level, and are there signs like confusion, heavy sweating, or drowsiness?'",
+          options: [
+            "Very High Sugar (>300 mg/dL) with drowsiness / rapid breathing (DKA risk)",
+            "Critically Low Sugar (<60 mg/dL) with shaking & cold sweat (Hypoglycemia)",
+            "Moderate elevation (180-250 mg/dL) with excess thirst/urination",
+            "Mild / Routine diabetic follow-up",
+          ],
+          probingQuestions: [
+            "Kya glucometer se abhi sugar check ki gayi hai? (What was the exact glucometer reading?)",
+            "Kya patient behosh ho rahe hain ya baat samajh pa rahe hain? (Is patient conscious and coherent?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Kitne der ya dino se sugar fluctuate ho rahi hai? (How long have you had this sugar issue or symptoms?)'",
+          options: [
+            "Less than 2 hours (Sudden collapse / Tremors)",
+            "Today (A few hours)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Kya insulin ya diabetic dawai time par li gayi thi? (Was regular insulin or oral medication taken?)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion symptoms? (Select all that apply)'",
+          options: [
+            "Confusion or unresponsiveness",
+            "Rapid deep breathing with fruity odor",
+            "Continuous vomiting / Can't take oral insulin",
+            "Non-healing foot wound / Ulcer",
+            "Blurry vision / Extreme dizziness",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya pairon mein koi zakham ya sujan hai? (Any non-healing diabetic foot ulcer or cellulitis?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // RENAL (Kidney Stone / Flank Pain / UTI)
+    // -------------------------------------------------------------------------
+    case CLINICAL_DOMAINS.RENAL: {
+      if (stage === "severity") {
+        return {
+          agentScript:
+            "Ask the IP: 'How intense is the kidney or back pain, and can you pass urine normally?'",
+          options: [
+            "Severe unbearable flank colic radiating to groin",
+            "Complete inability to pass urine (Acute urinary retention)",
+            "Severe burning with high fever & chills (Pyelonephritis)",
+            "Moderate dull aching flank/back pain",
+            "Mild burning during urination",
+          ],
+          probingQuestions: [
+            "Kya pishab mein laal rang ka khoon (hematuria) dikh raha hai? (Is visible blood present in urine?)",
+            "Kya pichle 12 ghante se pishab bilkul band hai? (Has there been complete anuria for >12 hours?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Kab se yeh pet ya kamar dard aur peshab mein takleef ho rahi hai? (When did the kidney/urinary symptoms start?)'",
+          options: [
+            "Less than 2 hours (Sudden excruciating colic)",
+            "Today (Started few hours ago)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "4-7 days",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Pehle kabhi pathri (kidney stone) ya sonography karwayi thi? (Any prior ultrasound or history of renal calculi?)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion symptoms? (Select all that apply)'",
+          options: [
+            "Visible red blood in urine (Hematuria)",
+            "High fever with violent shivering",
+            "Persistent vomiting / Nausea",
+            "Swelling in feet and face (Edema)",
+            "Known history of kidney stones (Pathri)",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya chehre ya pairo par sujan hai? (Is there facial puffiness or pedal edema?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // HEPATIC / TROPICAL (Jaundice / Liver / Dengue / Malaria)
+    // -------------------------------------------------------------------------
+    case CLINICAL_DOMAINS.HEPATIC:
+    case CLINICAL_DOMAINS.INFECTIOUS: {
+      if (stage === "severity") {
+        return {
+          agentScript:
+            "Ask the IP: 'Is there yellowing of eyes, dark urine, or high fever with intense shivering or abdominal swelling?'",
+          options: [
+            "Severe jaundice with confusion / drowsiness (Acute liver failure risk)",
+            "High grade fever (>102°F) with shivering & bleeding spots (Dengue/Malaria)",
+            "Moderate yellow eyes/skin with nausea & loss of appetite",
+            "Mild yellowing / Early onset symptoms",
+          ],
+          probingQuestions: [
+            "Kya patient behki baatein kar rahe hain ya neend bohot zyada aa rahi hai? (Signs of hepatic encephalopathy?)",
+            "Kya masoodon ya naak se khoon aa raha hai? (Any bleeding tendencies?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Kitne dino se peelia ya bukhar ki shikayat hai? (How many days has jaundice or fever lasted?)'",
+          options: [
+            "Less than 2 hours (Sudden onset)",
+            "Today (A few hours)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "4-7 days (Progressive worsening)",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Kya pichle 2 dino mein LFT ya CBC report karwayi hai? (Any recent liver function or platelet test?)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion symptoms? (Select all that apply)'",
+          options: [
+            "Dark yellow/cola-colored urine",
+            "Severe right side abdominal pain (Liver area)",
+            "Bleeding from nose, gums, or skin spots",
+            "Swollen belly / Fluid accumulation (Ascites)",
+            "Clay-colored pale stool",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya pet mein paani bharne (ascites) jaisi sujan hai? (Is there abdominal distension?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // NEUROLOGICAL (Stroke / Seizure / Paralysis)
+    // -------------------------------------------------------------------------
+    case CLINICAL_DOMAINS.NEUROLOGICAL: {
+      if (stage === "severity") {
+        return {
+          agentScript:
+            "Ask the IP: 'Is there sudden facial droop, arm weakness, slurred speech, active seizure, or loss of consciousness?'",
+          options: [
+            "High Emergency: Sudden face droop / Arm weakness / Slurred speech",
+            "High Emergency: Active seizure / Fits / Unconscious",
+            "Severe thunderclap headache with vomiting",
+            "Moderate weakness / Dizziness / Tingling",
+            "Mild numbness / Manageable",
+          ],
+          probingQuestions: [
+            "Kya patient muskurane par chehra tedha ho raha hai ya dono haath uthane par ek gir raha hai? (FAST test positive?)",
+            "Kya daura padte waqt munh se jhaag ya aankhen upar hui thi? (Any frothing or tonic-clonic convulsions?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Yeh lakshan kitne baje ya kitni der pehle shuru hue? (Exactly when did the neurological weakness or seizure occur?)'",
+          options: [
+            "Less than 30 minutes (Golden Window)",
+            "1 to 3 hours (Urgent Thrombolysis Window)",
+            "Today (3 to 6 hours)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Kya turant CT scan aur emergency hospital le jane ki tayyari hai? (Immediate emergency hospital transfer needed!)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion symptoms? (Select all that apply)'",
+          options: [
+            "Loss of vision or double vision",
+            "Inability to speak or understand words",
+            "Loss of bladder/bowel control",
+            "Difficulty swallowing or choking",
+            "Confusion or memory loss",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya pehle kabhi lakwa ya daure ki shikayat rahi hai? (Any past history of TIA, stroke, or epilepsy?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // ORTHOPEDIC / SURGICAL (Fracture / Severe Arthritis / Appendicitis / Hernia)
+    // -------------------------------------------------------------------------
+    case CLINICAL_DOMAINS.ORTHOPEDIC:
+    case CLINICAL_DOMAINS.SURGICAL: {
+      if (stage === "severity") {
+        return {
+          agentScript:
+            "Ask the IP: 'Can the patient bear weight or move the limb, or is there rigid acute abdominal tenderness / painful bulge?'",
+          options: [
+            "Severe unbearable pain / Visible bone fracture / Unable to walk",
+            "Severe sharp localized abdominal pain (Appendicitis / Strangulated Hernia)",
+            "Moderate swelling and movement pain",
+            "Mild ache / Discomfort",
+          ],
+          probingQuestions: [
+            "Kya haddi twacha se bahar aa gayi hai (Open fracture)? (Any open bone protrusion?)",
+            "Kya pet pathar jaisa katha ho gaya hai? (Is abdomen rigid and board-like?)",
+          ],
+        };
+      }
+      if (stage === "duration") {
+        return {
+          agentScript:
+            "Ask the IP: 'Kab se yeh dard ya takleef hai? (When did this acute injury or pain start?)'",
+          options: [
+            "Less than 2 hours (Sudden trauma / Colic)",
+            "Today (Started a few hours ago)",
+            "1 day (Started yesterday)",
+            "2-3 days",
+            "4-7 days",
+            "More than a week",
+          ],
+          probingQuestions: [
+            "Kya chot lagne ke baad turant sujan aa gayi thi? (Did rapid swelling occur post-injury?)",
+          ],
+        };
+      }
+      if (stage === "associated") {
+        return {
+          agentScript:
+            "Ask the IP: 'Are you experiencing any of these companion symptoms? (Select all that apply)'",
+          options: [
+            "Numbness or coldness in fingers/toes",
+            "Visible bone deformity or inability to move limb",
+            "High fever with shivering",
+            "Continuous vomiting and unable to pass gas",
+            "None of these",
+          ],
+          probingQuestions: [
+            "Kya pairo ki ungliyon mein samvedna mehsoos ho rahi hai? (Any neurovascular deficit?)",
+          ],
+        };
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // GYNECOLOGY / DERMATOLOGY / DENTAL / PSYCHIATRIC / GENERAL DEFAULT
+    // -------------------------------------------------------------------------
+    default: {
+      const activeCondition = currentTriage.symptom || "your condition";
+      if (stage === "severity") {
+        return {
+          agentScript:
+            `Ask the IP: 'Regarding ${activeCondition}, could you please describe how severe the symptoms are right now, and whether there are any emergency difficulties?'`,
+          options: [
+            "High / Severe distress (Affecting breathing, consciousness or unbearable pain)",
+            "Moderate distress (Pain or discomfort manageable with medication)",
+            "Mild distress (Early stage / Stable / Seeking ESIS guidance)",
+            `Urgent specialist consultation required for ${activeCondition}`,
           ],
           probingQuestions: [
             "Kya yeh takleef achanak bohot tezi se shuru hui ya dheere-dheere badhi? (Did this symptom start suddenly and rapidly or gradually?)",
@@ -1197,6 +2535,92 @@ export function getClinicalQuestionData({
 }
 
 /**
+  * Exported function serving disease-specific, clickable probing questions with selectable options
+  * across all disease domains and adaptive probing stages.
+  */
+export function getClinicalQuestionData(params = {}) {
+  const {
+    domain = "general",
+    stage = "symptom",
+    prompt = "",
+    history = [],
+    currentTriage = {},
+  } = params;
+
+  if (stage === "complete") {
+    return {
+      agentScript:
+        'Ask the IP: "Please wait for a moment while I review your details and locate the nearest ESIS facility."',
+      options: [],
+      probingQuestions: [],
+      probingQuestionsWithAnswers: [],
+      isComplete: true,
+      stage: "complete",
+    };
+  }
+
+  // Symptom clarification stage: when caller input has not identified a known symptom
+  if (stage === "symptom") {
+    const sympResult = _internalGetClinicalQuestionData(params);
+    const diseaseProbing = getDiseaseProbingProtocol(domain, currentTriage);
+    return {
+      ...sympResult,
+      probingQuestionsWithAnswers: diseaseProbing || [],
+      probingQuestions: (diseaseProbing || []).map((q) => q.question),
+    };
+  }
+
+  // Adaptive Disease-Specific 5-step probing protocol
+  const targetDomain = domain || currentTriage.domain || "general";
+  const protocol = getDiseaseProbingProtocol(targetDomain, currentTriage);
+
+  let stepIdx = 0;
+  if (typeof currentTriage.probingStepIndex === "number") {
+    stepIdx = currentTriage.probingStepIndex;
+  } else if (typeof params.probingStepIndex === "number") {
+    stepIdx = params.probingStepIndex;
+  } else if (stage && String(stage).startsWith("probing_")) {
+    stepIdx = parseInt(String(stage).replace("probing_", ""), 10) || 0;
+  } else if (stage === "severity") {
+    stepIdx = 0;
+  } else if (stage === "duration") {
+    stepIdx = 1;
+  } else if (stage === "associated") {
+    stepIdx = 2;
+  } else if (stage === "medication") {
+    stepIdx = 4;
+  }
+
+  if (stepIdx >= protocol.length) {
+    return {
+      agentScript:
+        'Ask the IP: "Please wait for a moment while I review your details and locate the nearest ESIS facility."',
+      options: [],
+      probingQuestions: [],
+      probingQuestionsWithAnswers: [],
+      isComplete: true,
+      stage: "complete",
+    };
+  }
+
+  const currentStep = protocol[stepIdx] || protocol[0];
+
+  return {
+    agentScript: `Ask the IP: "${currentStep.question}"`,
+    title: currentStep.title || "",
+    question: currentStep.question,
+    options: currentStep.options || [],
+    probingQuestionsWithAnswers: protocol,
+    probingQuestions: protocol.map((p) => p.question),
+    stepIndex: stepIdx,
+    totalSteps: protocol.length,
+    isComplete: false,
+    stage: `probing_${stepIdx}`,
+    isMultiSelect: false,
+  };
+}
+
+/**
  * Real-Time Clinical NLP Entity Extractor
  * Extracts primary symptom, companion symptoms, duration, severity, and disease classification
  * from raw speech / conversational text in English, Hindi, and Hinglish.
@@ -1224,9 +2648,31 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
   const domain = detectClinicalDomain(text, currentTriage);
   const conditionLabel = DOMAIN_LABELS[domain] || "General Medical Complaint";
 
-  // 2. Identify Primary Symptom keywords
+  // 2. Identify Primary Symptom keywords & Recognized Diseases
   let primarySymptom = null;
-  if (/\b(fever|bukhar|temperature|pyrexia|feverish|garam sharir|chills)\b/i.test(text)) {
+  if (/\b(cancer|tumor|tumour|oncolog|malignan|carcinoma|leukemia|lymphoma|chemo|chemotherapy|sarcoma|melanoma|metastasis|lump|biopsy|myeloma)\b/i.test(text)) {
+    primarySymptom = "Cancer / Oncology";
+  } else if (/\b(diabet|sugar|hypoglycem|hyperglycem|ketoacidosis|dka|insulin)\b/i.test(text)) {
+    primarySymptom = "Diabetes / Blood Sugar";
+  } else if (/\b(kidney|renal|pathri|stone|dialysis|creatinine|urinary|urine|peshab|micturition|nephro)\b/i.test(text)) {
+    primarySymptom = "Kidney Stone / Renal Issue";
+  } else if (/\b(jaundice|peelia|hepat|liver|cirrhosis|bilirubin)\b/i.test(text)) {
+    primarySymptom = "Jaundice / Liver Complaint";
+  } else if (/\b(dengue|malaria|typhoid|tuberculosis|tb|pneumonia|cholera|chikungunya|sepsis)\b/i.test(text)) {
+    primarySymptom = "Infection (Dengue/Malaria/Typhoid/TB)";
+  } else if (/\b(stroke|paralysis|lakwa|seizure|mirgi|epilepsy|daura|fits|convulsion|unconscious|behoshi|coma)\b/i.test(text)) {
+    primarySymptom = "Stroke / Seizure / Neurological";
+  } else if (/\b(arthritis|gathiya|fracture|haddi|bone|joint|sciatica|spondylitis|slip disc)\b/i.test(text)) {
+    primarySymptom = "Joint Pain / Arthritis / Fracture";
+  } else if (/\b(appendix|appendicitis|hernia|gallstone|piles|bawasir|fistula)\b/i.test(text)) {
+    primarySymptom = "Surgical / Appendicitis / Hernia";
+  } else if (/\b(pregnant|pregnancy|garbh|delivery|labor pain|miscarriage|period|menstrual)\b/i.test(text)) {
+    primarySymptom = "Maternal / Gynecological Health";
+  } else if (/\b(tooth|teeth|dant|gum|dant dard)\b/i.test(text)) {
+    primarySymptom = "Dental / Tooth Pain";
+  } else if (/\b(depression|panic|anxiety|suicid|mental)\b/i.test(text)) {
+    primarySymptom = "Mental Health / Anxiety Crisis";
+  } else if (/\b(fever|bukhar|temperature|pyrexia|feverish|garam sharir|chills)\b/i.test(text)) {
     primarySymptom = "Fever";
   } else if (/\b(chest|chhati|seena|heart|cardiac|angina|left arm|pressure on chest|heavy chest)\b/i.test(text)) {
     primarySymptom = "Chest Pain / Pressure";
@@ -1246,14 +2692,31 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     primarySymptom = "Blood Pressure Fluctuation";
   } else if (/\b(weak|weakness|kamzori|kamjori|thakan|fatigue|body ache|badan dard)\b/i.test(text)) {
     primarySymptom = "Weakness & Body Ache";
-  } else if (/\b(vomit|vomiting|ulti|nausea|ji machlana)\b/i.test(text)) {
+  } else if (/\b(vomit|vomiting|ulti|nausea|ji machlana|throwing up)\b/i.test(text)) {
     primarySymptom = "Vomiting / Nausea";
-  } else if (/\b(rash|khujli|itching|allergy|daane|rashes)\b/i.test(text)) {
-    primarySymptom = "Skin Rash / Allergy";
+  } else if (/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg)\b/i.test(text)) {
+    primarySymptom = "Leg Pain / Lower Limb";
+  } else if (/\b(swelling|skin swelling|sujan|soojan|edema|swollen|cellulitis|abscess|boil|blister)\b/i.test(text)) {
+    primarySymptom = "Skin Swelling";
+  } else if (/\b(rash|khujli|itching|allergy|daane|rashes|psoriasis|eczema)\b/i.test(text)) {
+    primarySymptom = "Skin Rash / Allergy / Dermatological";
   } else if (/\b(burn|jal gaya|aag se jala|burns)\b/i.test(text)) {
     primarySymptom = "Burn Injury";
   } else if (/\b(eye|aankh|ear|kaan|throat|gala|vision)\b/i.test(text)) {
     primarySymptom = "ENT / Eye Emergency";
+  }
+
+  // Universal Fallback: If no keyword regex matched, accept any non-small-talk medical disease input
+  if (!primarySymptom && currentStage === "symptom") {
+    const cleanWord = text.replace(/[^a-zA-Z0-9\s]/g, "").trim();
+    const isSmallTalk = /\b(hi|hello|hey|test|ok|okay|yes|haan|no|nahi|thanks|thank you|good morning)\b/i.test(cleanWord);
+    if (cleanWord.length >= 3 && !isSmallTalk) {
+      primarySymptom = cleanWord
+        .split(" ")
+        .slice(0, 4)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
   }
 
   // 3. Identify Companion / Associated Symptoms
@@ -1456,18 +2919,18 @@ export function detectSeverityAnswer(rawText = "", options = []) {
   // 1. Direct match with any of the options
   for (const opt of options) {
     const optLow = opt.toLowerCase();
-    if (optLow === lower || optLow.includes(lower) || (lower.length > 3 && optLow.startsWith(lower))) {
-      if (/high|severe|crushing|extreme/i.test(opt)) {
+    if (optLow === lower || lower.includes(optLow) || optLow.includes(lower) || (lower.length > 3 && optLow.startsWith(lower))) {
+      if (/high|severe|crushing|extreme|emergency|danger|critical|unbearable|cellulitis|abscess|warning|unable|anaphylaxis|poison|bleeding/i.test(opt)) {
         label = "High";
         score = 9;
-      } else if (/mild|low/i.test(opt)) {
+      } else if (/mild|low|painless|minor|early/i.test(opt)) {
         label = "Mild";
         score = 3;
-      } else if (/moderate|medium|intermittent/i.test(opt)) {
+      } else if (/moderate|medium|intermittent|manageable|localized/i.test(opt)) {
         label = "Moderate";
         score = 6;
       } else {
-        label = opt;
+        label = "Moderate";
         score = 6;
       }
       break;
@@ -1528,10 +2991,16 @@ export function detectDurationAnswer(rawText = "", options = []) {
   const trimmed = rawText.trim();
   const lower = trimmed.toLowerCase();
 
-  // 1. Direct match with options
+  // Guard: If input is purely a symptom/disease word, never treat as duration!
+  if (/^(fever|bukhar|chest pain|headache|cough|rash|swelling|skin swelling|dard|injury|trauma|cancer|stone|pathri|sugar|bp)\b/i.test(lower) && !lower.includes("day") && !lower.includes("hour") && !lower.includes("week") && !lower.includes("month") && !lower.includes("since") && !lower.includes("kal") && !lower.includes("aaj")) {
+    return null;
+  }
+
+  // 1. Direct match with true duration options
   for (const opt of options) {
     const optLow = opt.toLowerCase();
-    if (optLow === lower || optLow.includes(lower) || (lower.length > 3 && optLow.startsWith(lower))) {
+    const isDurationOption = /\b(hour|hours|ghante?|day|days|din|week|weeks|hafte?|month|months|mahine?|today|yesterday|sudden|< 2|< 1|recent|just|morning|subah|kal|parso|chronic|since)\b/i.test(optLow);
+    if (isDurationOption && (optLow === lower || lower.includes(optLow) || optLow.includes(lower) || (lower.length > 3 && optLow.startsWith(lower)))) {
       return opt;
     }
   }
@@ -1642,4 +3111,65 @@ export function detectAssociatedAnswer(rawText = "", options = [], companionSymp
 
   return null;
 }
+
+/**
+ * Validates and extracts Medication answer.
+ * Identifies:
+ * - isNo: user says no medications or clicks 'No medications taken'
+ * - isBareYes: user just says 'Yes' / 'Haan' without specifying drug -> need to prompt what medicines
+ * - text: clean string of medication details if provided
+ */
+export function detectMedicationAnswer(rawText = "", options = []) {
+  if (!rawText || typeof rawText !== "string") return null;
+  const trimmed = rawText.trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. Negative response (No medications taken)
+  if (
+    /^(no|none|nahi|na|nahin|not taking|never|kuch nahi|koi nahi|no medication|no medicines|no medicines taken|nil|not yet)\b/i.test(lower) ||
+    lower === "no medications taken" ||
+    lower === "no medications" ||
+    lower === "none" ||
+    lower === "nahi li" ||
+    lower.includes("kuch nahi li")
+  ) {
+    return { isYes: false, isNo: true, isBareYes: false, text: "None / No medications taken" };
+  }
+
+  // 2. Bare Yes (User confirmed taking medicine but hasn't said what yet)
+  const isBareYes =
+    /^(yes|haan|ha|ji|yes taking|taking meds|dawai li hai|li hai|medicine li hai)\b/i.test(lower) &&
+    !lower.includes("paracetamol") &&
+    !lower.includes("bp") &&
+    !lower.includes("pressure") &&
+    !lower.includes("sugar") &&
+    !lower.includes("insulin") &&
+    !lower.includes("pain") &&
+    !lower.includes("sorbitrate") &&
+    !lower.includes("inhaler") &&
+    !lower.includes("antibiotic") &&
+    !lower.includes("tablet") &&
+    !lower.includes("crocin") &&
+    !lower.includes("dolo") &&
+    !lower.includes("pan") &&
+    !lower.includes("ome") &&
+    !lower.includes("aspirin") &&
+    lower.length < 18;
+
+  if (isBareYes) {
+    return { isYes: true, isNo: false, isBareYes: true, text: "Yes" };
+  }
+
+  // 3. Matched against selectable options
+  for (const opt of options) {
+    if (opt.toLowerCase().includes("no medication")) continue;
+    if (lower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(lower)) {
+      return { isYes: true, isNo: false, isBareYes: false, text: opt };
+    }
+  }
+
+  // 4. Freeform medication response (e.g. "Paracetamol 650", "Metformin 500mg", "took Sorbitrate")
+  return { isYes: true, isNo: false, isBareYes: false, text: trimmed };
+}
+
 

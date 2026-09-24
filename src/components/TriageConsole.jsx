@@ -203,7 +203,33 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
 
       const newSpeech = newItems.map((t) => t.text).join(" ").trim();
       if (newSpeech) {
+        // Feed into AI chat adaptive engine
         chatRef.current?.processLiveSpeech?.(newSpeech);
+
+        // Auto-extract clinical entities and sync with intake form in real-time
+        const nlp = extractClinicalEntities(newSpeech);
+        if (nlp.hasClinicalContent) {
+          const cleanNotes = nlp.cleanKeywords
+            ? `[NLP Findings: ${nlp.cleanKeywords} | Condition: ${nlp.conditionLabel || "Clinical Assessment"}]`
+            : newSpeech;
+
+          setForm((f) => ({
+            ...f,
+            symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanNotes)
+              ? f.symptom_notes
+              : f.symptom_notes ? `${f.symptom_notes}\n${cleanNotes}` : cleanNotes,
+            duration: nlp.detectedDuration || f.duration,
+            severity_reported: nlp.detectedSeverity || f.severity_reported,
+          }));
+        } else {
+          // Keep all spoken voice transcribed into symptom notes even if purely conversational
+          setForm((f) => ({
+            ...f,
+            symptom_notes: f.symptom_notes && f.symptom_notes.includes(newSpeech)
+              ? f.symptom_notes
+              : f.symptom_notes ? `${f.symptom_notes}\n${newSpeech}` : newSpeech,
+          }));
+        }
       }
     }
   }, [callSession?.transcripts]);
@@ -216,19 +242,29 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     if (!interimText || interimText.length < 2) return;
     if (interimText === lastProcessedInterimRef.current) return;
 
-    // Check if the current spoken speech can answer the current triage step
-    const canAnswer = chatRef.current?.canAnswerCurrentStage?.(interimText);
-    if (canAnswer) {
+    // Check recent speech context (last final transcript + current interim)
+    // so multi-part answers like "fever" + "for 3 days" or "very" + "much" are caught instantly
+    const transcripts = callSession?.transcripts || [];
+    const recentTail = transcripts.slice(-2).map((t) => t.text).join(" ");
+    const combinedSpeech = recentTail ? `${recentTail} ${interimText}` : interimText;
+
+    const targetSpeech = chatRef.current?.canAnswerCurrentStage?.(interimText)
+      ? interimText
+      : chatRef.current?.canAnswerCurrentStage?.(combinedSpeech)
+      ? combinedSpeech
+      : null;
+
+    if (targetSpeech) {
       clearTimeout(interimSpeechTimeoutRef.current);
-      // Ultra-fast 100ms debounce to allow compound words like "very much" or "2-3 days" to assemble
+      // Ultra-fast 40ms debounce to allow compound words like "very much" to assemble
       interimSpeechTimeoutRef.current = setTimeout(() => {
         lastProcessedInterimRef.current = interimText;
-        chatRef.current?.processLiveSpeech?.(interimText);
-      }, 100);
+        chatRef.current?.processLiveSpeech?.(targetSpeech);
+      }, 40);
     }
 
     return () => clearTimeout(interimSpeechTimeoutRef.current);
-  }, [callSession?.interimTranscript?.text]);
+  }, [callSession?.interimTranscript?.text, callSession?.transcripts]);
 
   const handleInsertScribeToComplaint = (callerSpeech) => {
     if (!callerSpeech || !callerSpeech.trim()) return;
@@ -264,11 +300,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     if (!form.phone || !form.phone.trim()) {
       return toast.error("Phone number is mandatory. Please enter or receive a caller phone.");
     }
-    if (!form.age || isNaN(Number(form.age)) || Number(form.age) <= 0) {
-      return toast.error("Age is mandatory. Please enter a valid age.");
-    }
-    if (!form.sex || form.sex === "" || form.sex === "Not stated") {
-      return toast.error("Sex is mandatory. Please select Male, Female, or Other.");
+    if (form.age && (isNaN(Number(form.age)) || Number(form.age) <= 0)) {
+      return toast.error("Please enter a valid age.");
     }
     if (!form.symptom_notes || form.symptom_notes.trim().length < 3) {
       return toast.error("Please enter the caller's complaint notes in the chat area");
@@ -405,16 +438,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               placeholder="98XXXXXXXX"
             />
           </Field>
-          <Field
-            label={
-              <span className="flex items-center gap-1">
-                Age <span className="text-red-500 font-bold">*</span>
-              </span>
-            }
-          >
+          <Field label="Age">
             <input
               data-testid="intake-form-age"
-              required
               type="number"
               min="0"
               max="120"
@@ -424,16 +450,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               placeholder="42"
             />
           </Field>
-          <Field
-            label={
-              <span className="flex items-center gap-1">
-                Sex <span className="text-red-500 font-bold">*</span>
-              </span>
-            }
-          >
+          <Field label="Sex">
             <select
               data-testid="intake-form-sex"
-              required
               className={inputCls}
               value={form.sex}
               onChange={set("sex")}
@@ -482,37 +501,6 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           </Field>
         </div>
 
-        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-          <Field label="Latitude (optional)">
-            <input
-              data-testid="intake-form-latitude"
-              className={inputCls}
-              value={form.latitude}
-              onChange={set("latitude")}
-              placeholder="26.1445"
-            />
-          </Field>
-          <Field label="Longitude (optional)">
-            <input
-              data-testid="intake-form-longitude"
-              className={inputCls}
-              value={form.longitude}
-              onChange={set("longitude")}
-              placeholder="91.7362"
-            />
-          </Field>
-          <div className="flex flex-col justify-end">
-            <button
-              type="button"
-              data-testid="intake-form-use-gps"
-              onClick={useGps}
-              className="flex h-[38px] items-center gap-2 rounded-md border border-border/70 px-3 text-xs font-semibold text-muted-foreground transition-colors duration-200 hover:border-primary/60 hover:text-primary"
-            >
-              <Crosshair className="h-3.5 w-3.5" /> GPS
-            </button>
-          </div>
-        </div>
-
         {/* 3. Complaint Notes & Adaptive Questioning */}
         <div className="mt-4">
           <label className="field-label mb-2 block">Complaint Notes &amp; Adaptive Questioning</label>
@@ -535,35 +523,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           />
         </div>
 
-        {/* 4. Duration & Severity */}
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <Field label="Duration">
-            <select
-              data-testid="intake-form-duration"
-              className={inputCls}
-              value={form.duration}
-              onChange={set("duration")}
-            >
-              <option value="">Not stated</option>
-              {(meta?.durations || []).map((d) => (
-                <option key={d}>{d}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label={`Severity reported — ${form.severity_reported}/10`}>
-            <input
-              data-testid="intake-form-severity-slider"
-              type="range"
-              min="1"
-              max="10"
-              value={form.severity_reported}
-              onChange={set("severity_reported")}
-              className="mt-3 w-full accent-primary"
-            />
-          </Field>
-        </div>
-
-        {/* 5. Run Triage CTA */}
+        {/* Run Triage CTA */}
         <button
           type="submit"
           data-testid="intake-form-submit-button"

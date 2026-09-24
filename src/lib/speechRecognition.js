@@ -18,6 +18,7 @@ export class SpeechStreamController {
     this.shouldRestart = false;
     this.restartTimeout = null;
     this.isStarting = false;
+    this.pendingInterim = "";
   }
 
   isSupported() {
@@ -40,6 +41,7 @@ export class SpeechStreamController {
     }
     this.isListening = false;
     this.isStarting = false;
+    this.pendingInterim = "";
   }
 
   _createAndStart() {
@@ -74,6 +76,8 @@ export class SpeechStreamController {
           if (item.isFinal) {
             const clean = transcript.trim();
             if (clean) {
+              this.pendingInterim = "";
+              this.onInterim?.("");
               this.onFinal?.(clean);
             }
           } else {
@@ -81,6 +85,7 @@ export class SpeechStreamController {
           }
         }
         if (interimTranscript) {
+          this.pendingInterim = interimTranscript;
           // Zero-delay interim emission as letters and words are spoken
           this.onInterim?.(interimTranscript);
         }
@@ -98,16 +103,23 @@ export class SpeechStreamController {
       };
 
       rec.onend = () => {
+        // Commit any lingering interim speech before restarting to prevent dropped words in manual mode
+        if (this.pendingInterim && this.pendingInterim.trim()) {
+          const finalSpurt = this.pendingInterim.trim();
+          this.pendingInterim = "";
+          this.onInterim?.("");
+          this.onFinal?.(finalSpurt);
+        }
         this.isListening = false;
         this.isStarting = false;
         if (this.shouldRestart) {
           clearTimeout(this.restartTimeout);
-          // 80ms safe delay gives Windows/Chrome audio driver time to cleanly release mic before restart
+          // 35ms ultra-fast restart delay gives audio driver time to cycle without perceptible gap
           this.restartTimeout = setTimeout(() => {
             if (this.shouldRestart) {
               this._createAndStart();
             }
-          }, 80);
+          }, 35);
         }
       };
 

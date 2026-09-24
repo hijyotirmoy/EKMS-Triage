@@ -41,7 +41,7 @@ const ICE_SERVERS = {
 let audioCtx = null;
 let ringOscillator = null;
 
-// Audio unlock helper for iOS Safari and Android Chrome
+// Audio unlock helper for iOS Safari, Firefox, and Android Chrome
 export function unlockMobileAudio() {
   if (typeof window === "undefined") return;
   try {
@@ -59,7 +59,7 @@ export function unlockMobileAudio() {
       audioEl.setAttribute("webkit-playsinline", "true");
       document.body.appendChild(audioEl);
     }
-    if (audioEl) {
+    if (audioEl && audioEl.paused) {
       audioEl.play().catch(() => {});
     }
   } catch (e) {}
@@ -326,6 +326,13 @@ export class WebRtcCallSession {
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
+    // Bidirectional audio transceiver ensures SDP is properly negotiated across Safari, iOS, and Firefox
+    try {
+      pc.addTransceiver("audio", { direction: "sendrecv" });
+    } catch (e) {
+      console.warn("Could not add audio transceiver:", e);
+    }
+
     // Add local audio tracks
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => {
@@ -333,13 +340,20 @@ export class WebRtcCallSession {
       });
     }
 
-    // Remote audio track received
+    // Remote audio track received (handles empty streams array on Firefox/Safari & unmute on mobile)
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        this.remoteStream = event.streams[0];
-        this.onRemoteStream?.(this.remoteStream);
-        this.playRemoteAudio(this.remoteStream);
+      let stream = event.streams?.[0];
+      if (!stream) {
+        stream = new MediaStream([event.track]);
       }
+      this.remoteStream = stream;
+      this.onRemoteStream?.(this.remoteStream);
+      this.playRemoteAudio(this.remoteStream);
+
+      // On iOS Safari / mobile Chrome, incoming tracks initially start muted until RTP packets arrive
+      event.track.onunmute = () => {
+        this.playRemoteAudio(this.remoteStream || stream);
+      };
     };
 
     // Send local ICE candidates to Firestore, BroadcastChannel, and HTTP
@@ -372,6 +386,9 @@ export class WebRtcCallSession {
       if (pc.connectionState === "connected") {
         stopRingtone();
         this.setState("connected", { callId: this.callId });
+        if (this.remoteStream) {
+          this.playRemoteAudio(this.remoteStream);
+        }
       }
     };
 
@@ -380,7 +397,14 @@ export class WebRtcCallSession {
   }
 
   playRemoteAudio(stream) {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !stream) return;
+
+    // Resume Web Audio context
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+
     let audioEl = document.getElementById("webrtc-remote-audio");
     if (!audioEl) {
       audioEl = document.createElement("audio");
@@ -393,24 +417,28 @@ export class WebRtcCallSession {
     }
     audioEl.muted = false;
     audioEl.volume = 1.0;
-    audioEl.srcObject = stream;
-
-    const playPromise = audioEl.play();
-    if (playPromise !== undefined) {
-      playPromise.catch((err) => {
-        console.warn(
-          "Mobile browser audio autoplay paused until user tap. Setting unlock listener.",
-          err
-        );
-        const unlock = () => {
-          audioEl.play().catch(() => {});
-          window.removeEventListener("click", unlock);
-          window.removeEventListener("touchstart", unlock);
-        };
-        window.addEventListener("click", unlock, { once: true });
-        window.addEventListener("touchstart", unlock, { once: true });
-      });
+    if (audioEl.srcObject !== stream) {
+      audioEl.srcObject = stream;
     }
+
+    const tryPlay = () => {
+      const p = audioEl.play();
+      if (p !== undefined) {
+        p.catch((err) => {
+          console.warn("Mobile browser audio autoplay paused until user tap. Setting unlock listener.", err);
+          const unlock = () => {
+            if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+            audioEl.play().catch(() => {});
+          };
+          window.addEventListener("click", unlock, { once: true, passive: true });
+          window.addEventListener("touchstart", unlock, { once: true, passive: true });
+          window.addEventListener("pointerdown", unlock, { once: true, passive: true });
+          window.addEventListener("keydown", unlock, { once: true, passive: true });
+        });
+      }
+    };
+
+    tryPlay();
   }
 
   // Real-time Firestore snapshot listener for active call
@@ -597,6 +625,9 @@ export class WebRtcCallSession {
           new RTCSessionDescription(msg.data.answer)
         );
         await this.drainPendingCandidates();
+        if (this.remoteStream) {
+          this.playRemoteAudio(this.remoteStream);
+        }
       } catch (e) {
         console.warn("Set answer description failed:", e);
       }

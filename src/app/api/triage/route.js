@@ -27,13 +27,27 @@ export async function POST(request) {
       );
     }
 
-    // 1. Resolve location & rank nearest facilities
+    // 1. Perform clinical triage evaluation
+    const triage = await evaluateTriage(intake);
+
+    const isSevere =
+      triage.urgency_level === "Emergency" ||
+      triage.urgency_level === "Urgent" ||
+      Number(intake.severity_reported) >= 7 ||
+      (triage.urgency_score && triage.urgency_score >= 7);
+
+    // If case is severe, always route to hospital first
+    if (isSevere) {
+      triage.recommended_facility_type = "Nearest ESIC Hospital / Emergency Casualty";
+      if (!triage.recommended_action || !triage.recommended_action.toLowerCase().includes("hospital")) {
+        triage.recommended_action = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
+      }
+    }
+
+    // 2. Resolve location & rank nearest facilities (always nearest from pincode, hospital first if severe)
     const facilities = await getFacilities();
     const resolved_location = resolveCallerLocation(intake, facilities);
-    const nearest_facilities = rankNearestFacilities(resolved_location, facilities, 5);
-
-    // 2. Perform clinical triage evaluation
-    const triage = await evaluateTriage(intake);
+    const nearest_facilities = rankNearestFacilities(resolved_location, facilities, 5, isSevere);
 
     const latency_ms = Date.now() - startTime;
     const case_ref = generateCaseRef();

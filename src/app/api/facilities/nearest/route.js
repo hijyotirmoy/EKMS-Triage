@@ -16,7 +16,11 @@ export async function GET(request) {
     facilities
   );
 
-  const nearest = rankNearestFacilities(callerLoc, facilities, 5);
+  const isSevere =
+    searchParams.get("severe") === "true" ||
+    Number(searchParams.get("severity") || 0) >= 7;
+
+  const nearest = rankNearestFacilities(callerLoc, facilities, 5, isSevere);
 
   return NextResponse.json({
     resolved_location: callerLoc,

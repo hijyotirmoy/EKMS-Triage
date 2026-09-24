@@ -169,13 +169,6 @@ export const TriageResultPanel = ({ result, loading }) => {
           </p>
           <p className="mt-1 text-xs text-muted-foreground/80">{s.label}</p>
 
-          <div className="mt-5">
-            <p className="eyebrow mb-2">Why this level</p>
-            <p className="text-sm leading-relaxed text-foreground/90" data-testid="triage-reasoning-text">
-              {t.reasoning}
-            </p>
-          </div>
-
           {result.ekms_ai_context?.triageState && (
             <div className="mt-5 rounded-md border border-emerald-500/30 bg-emerald-50/40 p-4 dark:bg-emerald-950/20">
               <div className="mb-2 flex items-center gap-2">
@@ -193,6 +186,11 @@ export const TriageResultPanel = ({ result, loading }) => {
                 {result.ekms_ai_context.triageState.severity && (
                   <span className="rounded border border-blue-500/20 bg-background/80 px-2 py-1 font-medium text-blue-900 dark:text-blue-200">
                     Severity: <strong>{result.ekms_ai_context.triageState.severity}</strong>
+                  </span>
+                )}
+                {result.ekms_ai_context.triageState.medication && (
+                  <span className="rounded border border-indigo-500/20 bg-background/80 px-2 py-1 font-medium text-indigo-900 dark:text-indigo-200">
+                    Medication: <strong>{result.ekms_ai_context.triageState.medication}</strong>
                   </span>
                 )}
                 {result.ekms_ai_context.triageState.duration && (

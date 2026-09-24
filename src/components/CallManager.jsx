@@ -411,8 +411,9 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
             prev.some(
               (t) =>
                 t.id === finalMsg.id ||
-                (t.text.toLowerCase() === finalMsg.text.toLowerCase() &&
-                  Math.abs((t.timestamp || 0) - finalMsg.timestamp) < 1800)
+                (t.speaker === finalMsg.speaker &&
+                  t.text.toLowerCase() === finalMsg.text.toLowerCase() &&
+                  Math.abs((t.timestamp || 0) - finalMsg.timestamp) < 350)
             )
           ) {
             return prev;
