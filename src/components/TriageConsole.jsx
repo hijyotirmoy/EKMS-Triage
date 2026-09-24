@@ -21,6 +21,7 @@ import { TriageResultPanel } from "./TriageResultPanel";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { LiveScribeWindow } from "./LiveScribeWindow";
+import { extractClinicalEntities } from "../lib/clinicalAdaptiveEngine";
 
 const EMPTY = {
   caller_name: "",
@@ -51,7 +52,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [activeRightTab, setActiveRightTab] = useState("auto"); // 'auto' | 'scribe' | 'triage'
+  const [activeRightTab, setActiveRightTab] = useState("scribe"); // 'scribe' | 'triage' - Default to Call Transcript tab so it is always present
   const [ekmsContext, setEkmsContext] = useState(null);
   const [chatPresetTrigger, setChatPresetTrigger] = useState("");
   const [callerFoundInfo, setCallerFoundInfo] = useState(null);
@@ -62,6 +63,20 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
   const chatRef = useRef(null);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const hasClearedOnMountRef = useRef(false);
+
+  // On page load / refresh: clear manual room transcripts once on initial load
+  useEffect(() => {
+    if (!hasClearedOnMountRef.current && callSession?.clearTranscripts) {
+      hasClearedOnMountRef.current = true;
+      callSession.clearTranscripts();
+      callSession.stopManualRecording?.();
+      try {
+        localStorage.removeItem("ekms_scribe_sync");
+      } catch (e) {}
+    }
+  }, [callSession?.clearTranscripts]);
 
   // Caller history lookup by phone number
   const lookupCaller = useCallback(async (phoneNumber) => {
@@ -131,12 +146,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
   useEffect(() => {
     if (incomingCaller && incomingCaller.phone) {
       const rawPhone = incomingCaller.phone;
-      // New incoming call: clear previous caller's data
-      setForm((f) => ({
+      // New incoming call: clear previous caller's data and start clean
+      setForm(() => ({
         ...EMPTY,
-        symptom_notes: f.symptom_notes,
-        duration: f.duration,
-        severity_reported: f.severity_reported,
         phone: rawPhone,
         caller_name: incomingCaller.name || "",
         city: incomingCaller.city || "",
@@ -145,10 +157,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
       setCallerFoundInfo(null);
       setCallerHistory([]);
       lastLookedUpRef.current = "";
-
-      if (incomingCaller.symptoms) {
-        setChatPresetTrigger(incomingCaller.symptoms);
-      }
+      setChatPresetTrigger("");
+      chatRef.current?.resetChat();
       lookupCaller(rawPhone);
     }
   }, [incomingCaller, lookupCaller]);
@@ -166,15 +176,84 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     );
   };
 
+  // When a real phone call connects, auto-switch to Call Transcript tab
+  useEffect(() => {
+    if (callSession?.callState === "connected") {
+      setActiveRightTab("scribe");
+    }
+  }, [callSession?.callState]);
+
+  // Real-time NLP stream: Whenever speech transcript updates (in manual room or live call),
+  // instantly feed the latest speech into EKMS AI adaptive engine for 0ms entity extraction!
+  const lastProcessedTranscriptLenRef = useRef(0);
+  const lastProcessedInterimRef = useRef("");
+  const interimSpeechTimeoutRef = useRef(null);
+
+  // 1. Process finalized segments as soon as they commit
+  useEffect(() => {
+    const transcripts = callSession?.transcripts || [];
+    if (transcripts.length === 0) {
+      lastProcessedTranscriptLenRef.current = 0;
+      return;
+    }
+
+    if (transcripts.length > lastProcessedTranscriptLenRef.current) {
+      const newItems = transcripts.slice(lastProcessedTranscriptLenRef.current);
+      lastProcessedTranscriptLenRef.current = transcripts.length;
+
+      const newSpeech = newItems.map((t) => t.text).join(" ").trim();
+      if (newSpeech) {
+        chatRef.current?.processLiveSpeech?.(newSpeech);
+      }
+    }
+  }, [callSession?.transcripts]);
+
+  // 2. Real-Time Instant Voice Detection:
+  // Detects answers directly while the user is speaking in real time (interim transcript),
+  // so the user NEVER has to click Stop & Save or wait for silence!
+  useEffect(() => {
+    const interimText = callSession?.interimTranscript?.text?.trim();
+    if (!interimText || interimText.length < 2) return;
+    if (interimText === lastProcessedInterimRef.current) return;
+
+    // Check if the current spoken speech can answer the current triage step
+    const canAnswer = chatRef.current?.canAnswerCurrentStage?.(interimText);
+    if (canAnswer) {
+      clearTimeout(interimSpeechTimeoutRef.current);
+      // Ultra-fast 100ms debounce to allow compound words like "very much" or "2-3 days" to assemble
+      interimSpeechTimeoutRef.current = setTimeout(() => {
+        lastProcessedInterimRef.current = interimText;
+        chatRef.current?.processLiveSpeech?.(interimText);
+      }, 100);
+    }
+
+    return () => clearTimeout(interimSpeechTimeoutRef.current);
+  }, [callSession?.interimTranscript?.text]);
+
   const handleInsertScribeToComplaint = (callerSpeech) => {
-    if (!callerSpeech) return;
+    if (!callerSpeech || !callerSpeech.trim()) return;
+    const cleanSpeech = callerSpeech.trim();
+
+    // Extract clinical entities using NLP so notes are clinical keywords, not messy filler
+    const nlp = extractClinicalEntities(cleanSpeech);
+    const cleanNotes = nlp.hasClinicalContent && nlp.cleanKeywords
+      ? `[NLP Findings: ${nlp.cleanKeywords} | Condition: ${nlp.conditionLabel || "Clinical Assessment"}]`
+      : cleanSpeech;
+
     setForm((f) => ({
       ...f,
-      symptom_notes: f.symptom_notes
-        ? `${f.symptom_notes}\n${callerSpeech}`
-        : callerSpeech,
+      symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanNotes)
+        ? f.symptom_notes
+        : f.symptom_notes ? `${f.symptom_notes}\n${cleanNotes}` : cleanNotes,
+      duration: nlp.detectedDuration || f.duration,
+      severity_reported: nlp.detectedSeverity || f.severity_reported,
     }));
-    toast.success("Transcribed speech inserted into complaint notes");
+
+    // Trigger EKMS AI adaptive engine on transcribed speech
+    if (chatRef.current?.insertComplaintText) {
+      chatRef.current.insertComplaintText(cleanSpeech);
+    }
+    toast.success("Clinical entities extracted & saved to Complaint Notes!");
   };
 
   const submit = async (e) => {
@@ -241,7 +320,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               setHistoryPage(1);
               lastLookedUpRef.current = "";
               chatRef.current?.resetChat();
-              toast.info("Intake form and AI chat reset");
+              callSession?.clearTranscripts?.();
+              callSession?.stopManualRecording?.();
+              try {
+                localStorage.removeItem("ekms_scribe_sync");
+              } catch (e) {}
+              toast.info("Intake form, AI chat, and transcripts reset");
             }}
             className="shrink-0 rounded-md border border-border/70 p-2 text-muted-foreground transition-colors duration-200 hover:border-primary/60 hover:text-foreground"
             title="Reset form and AI chat"
@@ -442,6 +526,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
             onSyncFields={(field, val) => {
               setForm((f) => ({ ...f, [field]: val }));
             }}
+            onReadyToShowResult={(tState) => {
+              setActiveRightTab("triage");
+            }}
+            onRunTriage={() => {
+              submit({ preventDefault: () => {} });
+            }}
           />
         </div>
 
@@ -614,61 +704,49 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
         const hasInterim = Boolean(callSession?.interimTranscript);
         const hasActiveScribe = isCallActive || hasTranscripts || hasInterim;
 
-        let currentRightView = activeRightTab;
-        if (currentRightView === "auto") {
-          if (result || loading) {
-            currentRightView = "triage";
-          } else if (hasActiveScribe) {
-            currentRightView = "scribe";
-          } else {
-            currentRightView = "triage";
-          }
-        }
-
-        const showToggleBar = hasActiveScribe || Boolean(result);
+        const currentRightView = activeRightTab || "scribe";
 
         return (
           <div className="flex flex-col">
-            {showToggleBar && (
-              <div className="mb-2.5 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-secondary/50 p-1 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setActiveRightTab("triage")}
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
-                      currentRightView === "triage"
-                        ? "bg-background text-foreground shadow-xs border border-border/70"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Stethoscope className="h-3.5 w-3.5 text-primary" />
-                    Triage Outcome
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveRightTab("scribe")}
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
-                      currentRightView === "scribe"
-                        ? "bg-background text-foreground shadow-xs border border-border/70"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
-                    Call Transcript {transcriptsCount > 0 ? `(${transcriptsCount})` : ""}
-                    {isCallActive && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
-                    )}
-                  </button>
-                </div>
-
-                {isCallActive && (
-                  <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                    Call Live
-                  </span>
-                )}
+            {/* Always visible tab toggle bar so agent can access Call Transcript & Triage Outcome at any time */}
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-secondary/50 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("scribe")}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
+                    currentRightView === "scribe"
+                      ? "bg-background text-foreground shadow-xs border border-border/70"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                  Call Transcript {transcriptsCount > 0 ? `(${transcriptsCount})` : ""}
+                  {isCallActive && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("triage")}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
+                    currentRightView === "triage"
+                      ? "bg-background text-foreground shadow-xs border border-border/70"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Stethoscope className="h-3.5 w-3.5 text-primary" />
+                  Triage Outcome {result ? "✓" : ""}
+                </button>
               </div>
-            )}
+
+              {isCallActive && (
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  Call Live
+                </span>
+              )}
+            </div>
 
             {currentRightView === "scribe" ? (
               <LiveScribeWindow
@@ -686,6 +764,14 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
                 onInsertToComplaint={handleInsertScribeToComplaint}
                 currentLanguage={callSession?.agentLang || "en-IN"}
                 onLanguageChange={callSession?.setAgentLang}
+                transcribeMode={callSession?.transcribeMode || "live_call"}
+                onTranscribeModeChange={callSession?.setTranscribeMode}
+                currentManualSpeaker={callSession?.currentManualSpeaker || "caller"}
+                onManualSpeakerToggle={callSession?.toggleManualSpeaker}
+                onClearTranscripts={callSession?.clearTranscripts}
+                isManualRecording={callSession?.isManualRecording || false}
+                onStartManualRecording={callSession?.startManualRecording}
+                onStopManualRecording={callSession?.stopManualRecording}
               />
             ) : (
               <TriageResultPanel result={result} loading={loading} />

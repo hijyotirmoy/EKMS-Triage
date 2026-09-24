@@ -12,6 +12,7 @@ import {
   PhoneOff,
   Play,
   Volume2,
+  Headphones,
 } from "lucide-react";
 import { toast } from "sonner";
 import { playRingtone, stopRingtone, unlockMobileAudio, WebRtcCallSession } from "@/lib/webrtc";
@@ -31,6 +32,13 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   const [transcripts, setTranscripts] = useState([]);
   const [interimTranscript, setInterimTranscript] = useState(null);
   const [agentLang, setAgentLang] = useState("en-IN");
+  const [transcribeMode, setTranscribeMode] = useState("live_call"); // 'live_call' | 'manual_room'
+  const [currentManualSpeaker, setCurrentManualSpeaker] = useState("caller"); // 'caller' | 'agent'
+  const [isManualRecording, setIsManualRecording] = useState(false);
+  const transcribeModeRef = useRef("live_call");
+  const manualSpeakerRef = useRef("caller");
+  const lastSpeakerTurnRef = useRef("agent");
+  const isManualRecordingRef = useRef(false);
 
   // Draggable window state
   const [dragPos, setDragPos] = useState({ x: null, y: null });
@@ -48,12 +56,85 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   const pollIntervalRef = useRef(null);
   const lastCallerSpeechRef = useRef({ text: "", timestamp: 0, active: false });
   const callerSpeakingUntilRef = useRef(0);
+  const isMutedRef = useRef(false);
+  const lastInterimSyncRef = useRef(0);
+  const interimTimeoutRef = useRef(null);
   const remoteAnalyserRef = useRef(null);
   const vadIntervalRef = useRef(null);
   const onCallerConnectedRef = useRef(onCallerConnected);
   const onCallUpdateRef = useRef(onCallUpdate);
 
-  // Setup Web Audio VAD on incoming caller stream to identify caller voice
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    transcribeModeRef.current = transcribeMode;
+  }, [transcribeMode]);
+
+  useEffect(() => {
+    manualSpeakerRef.current = currentManualSpeaker;
+  }, [currentManualSpeaker]);
+
+  // Environmental speaker detector for Manual Room Transcribe mode
+  // Automatically distinguishes between Caller symptoms/complaints and Agent triage questions/guidance
+  const detectSpeakerFromText = (text, lastSpeaker = "agent") => {
+    if (!text) return lastSpeaker === "agent" ? "caller" : "agent";
+    const lower = text.toLowerCase().trim();
+
+    // Strong Caller signals (symptoms, complaints, distress, first-person pronouns)
+    const callerPatterns = [
+      /\b(i am|i have|my|i'm|me|mine|mujhe|mera|meri|humko|mere ko|hamara|main)\b/,
+      /\b(pain|dard|fever|bukhar|headache|sir dard|vomit|vomiting|ulti|cough|khasi|blood|khoon)\b/,
+      /\b(chest|sine|stomach|pet|throat|gala|arm|haath|leg|pair|back|kamar)\b/,
+      /\b(breath|breathing|saans|dizzy|dizziness|chakkar|weakness|kamjori)\b/,
+      /\b(since|yesterday|morning|kal se|subah se|din se|hours|ghante)\b/,
+      /\b(cut|injury|wound|chot|accident|bleeding|burn|jal gaya|swelling|sujan)\b/,
+      /\b(please help|help me|bachao|doctor please|emergency|very bad|bahut zyada)\b/,
+      /\b(asukh|bikh|jor|mor|moi)\b/, // Assamese clinical signals
+    ];
+
+    // Strong Agent signals (greetings, clinical questions, ESIC protocol, reassurance)
+    const agentPatterns = [
+      /\b(esic|triage|helpline|control room|operator)\b/,
+      /\b(hello|namaste|good morning|good evening|ha ji)\b/,
+      /\b(how can i help|kya takleef|kya samasya|bataiye|boli|what is the problem)\b/,
+      /\b(your name|aapka naam|what is your age|kitni umar|age kya hai)\b/,
+      /\b(where are you|kahan se|which district|konsa zila|address|pincode)\b/,
+      /\b(ambulance|108|hospital|dispensary|clinic|doctor ke paas|referral)\b/,
+      /\b(don't worry|chinta mat|relax|take a breath|deep breath|lambi saans)\b/,
+      /\b(hold on|line pe rahiye|wait|ek minute|shant rahiye)\b/,
+      /\b(are you taking|koi dawa|any medicine|prescription|pehle se)\b/,
+      /\b(diabetic|sugar|bp|blood pressure|asthma|pregnant)\b/,
+      /\b(noted|theek hai|okay|alright|main note kar raha)\b/,
+      /\?$/,
+    ];
+
+    let callerScore = 0;
+    let agentScore = 0;
+
+    for (const pattern of callerPatterns) {
+      if (pattern.test(lower)) callerScore += 2;
+    }
+    for (const pattern of agentPatterns) {
+      if (pattern.test(lower)) agentScore += 2;
+    }
+
+    if (/^(what|where|when|how|why|is there|do you|are you|can you|kya aap|kahan|kaise|kab se)\b/i.test(lower)) {
+      agentScore += 2;
+    }
+    if (/^(i have|i am having|my|mujhe|main|merko|kal se|subah se)\b/i.test(lower)) {
+      callerScore += 2;
+    }
+
+    if (callerScore > agentScore) return "caller";
+    if (agentScore > callerScore) return "agent";
+
+    // Alternate turn by default
+    return lastSpeaker === "agent" ? "caller" : "agent";
+  };
+
+  // Setup digital signal tracking on incoming caller stream (audio coming to speaker)
   const setupRemoteAudioAnalysis = (stream) => {
     if (!stream) return;
     try {
@@ -62,15 +143,49 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       if (!AudioContextClass) return;
       const ctx = new AudioContextClass();
       if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.3;
+      analyser.smoothingTimeConstant = 0.2;
+
+      // 1. Silent gain connected to destination forces Chromium's audio thread to active-pull WebRTC frames
+      const silenceGain = ctx.createGain();
+      silenceGain.gain.value = 0.0;
+
+      // 2. Direct digital sample inspector on the audio thread
+      const processor = ctx.createScriptProcessor(2048, 1, 1);
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        let sumSquares = 0;
+        let peak = 0;
+        for (let i = 0; i < input.length; i++) {
+          const abs = Math.abs(input[i]);
+          if (abs > peak) peak = abs;
+          sumSquares += input[i] * input[i];
+        }
+        const rms = Math.sqrt(sumSquares / input.length);
+
+        // Digital audio signal tracking from speaker: if RMS > 0.005 or peak > 0.03, caller is actively speaking!
+        if (rms > 0.005 || peak > 0.03) {
+          callerSpeakingUntilRef.current = Date.now() + 2500;
+          lastCallerSpeechRef.current = {
+            text: "",
+            timestamp: Date.now(),
+            active: true,
+          };
+        }
+      };
+
       source.connect(analyser);
+      analyser.connect(processor);
+      processor.connect(silenceGain);
+      silenceGain.connect(ctx.destination);
 
-      remoteAnalyserRef.current = { ctx, source, analyser };
+      remoteAnalyserRef.current = { ctx, source, analyser, processor, silenceGain };
+
+      // 3. Frequency domain inspector
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
       if (vadIntervalRef.current) clearInterval(vadIntervalRef.current);
       vadIntervalRef.current = setInterval(() => {
         if (!remoteAnalyserRef.current?.analyser) return;
@@ -83,9 +198,8 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
         }
         const avg = sum / dataArray.length;
 
-        // When remote caller audio energy is detected (voice arriving over WebRTC)
-        if (avg > 3 || maxVal > 18) {
-          // Incoming caller voice is active! Hold caller attribution window for 2.5s
+        // When remote caller audio energy is present in frequency spectrum
+        if (avg > 3 || maxVal > 15) {
           callerSpeakingUntilRef.current = Date.now() + 2500;
           lastCallerSpeechRef.current = {
             text: "",
@@ -106,6 +220,9 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     }
     if (remoteAnalyserRef.current) {
       try {
+        remoteAnalyserRef.current.processor?.disconnect();
+        remoteAnalyserRef.current.analyser?.disconnect();
+        remoteAnalyserRef.current.silenceGain?.disconnect();
         remoteAnalyserRef.current.source?.disconnect();
         remoteAnalyserRef.current.ctx?.close();
       } catch (e) {}
@@ -136,54 +253,151 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
         speechCtrlRef.current?.setLanguage(lang);
       },
       callId: activeCallIdRef.current,
+      transcribeMode,
+      isManualRecording,
+      startManualRecording: () => {
+        setIsManualRecording(true);
+        isManualRecordingRef.current = true;
+        startAgentSpeech(activeCallIdRef.current);
+        toast.success("Manual Room Recording started · Speak now");
+      },
+      stopManualRecording: () => {
+        setIsManualRecording(false);
+        isManualRecordingRef.current = false;
+        speechCtrlRef.current?.stop();
+        setInterimTranscript(null);
+      },
+      setTranscribeMode: (mode) => {
+        setTranscribeMode(mode);
+        transcribeModeRef.current = mode;
+        if (mode === "manual_room") {
+          setIsManualRecording(true);
+          isManualRecordingRef.current = true;
+          startAgentSpeech(activeCallIdRef.current);
+          toast.success("Manual Room Voice Active: Listening in real time...");
+        } else {
+          setIsManualRecording(false);
+          isManualRecordingRef.current = false;
+          if (callState !== "connected") {
+            speechCtrlRef.current?.stop();
+            setInterimTranscript(null);
+          }
+          toast.info("Switched to Live Call Transcribe mode");
+        }
+      },
+      currentManualSpeaker,
+      setCurrentManualSpeaker,
+      toggleManualSpeaker: () => {
+        setCurrentManualSpeaker((cur) => {
+          const next = cur === "caller" ? "agent" : "caller";
+          manualSpeakerRef.current = next;
+          lastSpeakerTurnRef.current = cur;
+          toast.info(`Next speaker turn: ${next === "caller" ? "Caller (IP)" : "Agent (You)"}`);
+          return next;
+        });
+      },
+      clearTranscripts: () => {
+        setTranscripts([]);
+        setInterimTranscript(null);
+      },
     });
-  }, [callState, activeCaller, callDuration, transcripts, interimTranscript, agentLang]);
+  }, [callState, activeCaller, callDuration, transcripts, interimTranscript, agentLang, transcribeMode, currentManualSpeaker, isManualRecording]);
 
-  // Start live speech stream - automatically attributes speech to Caller (IP) or Agent (You)
+  // Throttled interim sync to Firestore prevents network congestion while keeping local UI instant
+  const throttledInterimSync = (callId, interimMsg) => {
+    if (!callId) return;
+    const now = Date.now();
+    if (now - lastInterimSyncRef.current > 350) {
+      lastInterimSyncRef.current = now;
+      try {
+        const db = getFirestoreDb();
+        updateDoc(doc(db, "calls", callId), {
+          interimTranscript: interimMsg,
+          updatedAt: now,
+        }).catch(() => {});
+      } catch (e) {}
+    } else {
+      clearTimeout(interimTimeoutRef.current);
+      interimTimeoutRef.current = setTimeout(() => {
+        lastInterimSyncRef.current = Date.now();
+        try {
+          const db = getFirestoreDb();
+          updateDoc(doc(db, "calls", callId), {
+            interimTranscript: interimMsg,
+            updatedAt: Date.now(),
+          }).catch(() => {});
+        } catch (e) {}
+      }, 350);
+    }
+  };
+
+  // Start live speech stream for Agent
+  // In 'live_call' mode: Strictly attributes physical headset mic to Agent (You).
+  // In 'manual_room' mode: Single environmental mic captures both Agent & Caller and auto-detects who is speaking.
+  // Immediately silences/stops when operator is muted.
   const startAgentSpeech = (callId) => {
+    if (isMutedRef.current) return;
+    if ((speechCtrlRef.current?.isListening || speechCtrlRef.current?.isStarting) && speechCtrlRef.current?.lang === agentLang) {
+      return; // Already actively listening or starting with matching language
+    }
     if (speechCtrlRef.current) speechCtrlRef.current.stop();
+
     const ctrl = new SpeechStreamController({
       lang: agentLang,
       onInterim: (text) => {
-        const clean = text.trim();
-        if (!clean) return;
-        const now = Date.now();
-        const isCallerVoice = now < callerSpeakingUntilRef.current;
-        const speaker = isCallerVoice ? "caller" : "agent";
-        const speakerName = isCallerVoice ? "Caller (IP)" : "Agent (You)";
+        // If muted, drop immediately
+        if (isMutedRef.current) return;
+        if (!text) return;
+
+        let speaker = "agent";
+        let speakerName = "Agent (You)";
+
+        if (transcribeModeRef.current === "manual_room") {
+          // Unified Room Speech: Single unified transcription stream without caller/agent separation
+          speaker = "room";
+          speakerName = "Speech";
+        }
 
         const interimMsg = {
           type: "transcript_interim",
           speaker,
           speakerName,
-          text: clean,
-          timestamp: now,
+          text,
+          timestamp: Date.now(),
         };
+
+        // Instant local update (real-time voice typing speed)
         setInterimTranscript(interimMsg);
         bChannelRef.current?.postMessage(interimMsg);
         scribeChannelRef.current?.postMessage(interimMsg);
+
         const curCallId = callId || activeCallIdRef.current;
         if (curCallId) {
-          try {
-            const db = getFirestoreDb();
-            updateDoc(doc(db, "calls", curCallId), {
-              interimTranscript: interimMsg,
-              updatedAt: Date.now(),
-            }).catch(() => {});
-          } catch (e) {}
+          throttledInterimSync(curCallId, interimMsg);
         }
       },
       onFinal: (text) => {
+        // If muted, drop immediately
+        if (isMutedRef.current) return;
         const clean = text.trim();
         if (!clean) return;
+
         const now = Date.now();
-        const isCallerVoice = now < callerSpeakingUntilRef.current;
-        const speaker = isCallerVoice ? "caller" : "agent";
-        const speakerName = isCallerVoice ? "Caller (IP)" : "Agent (You)";
+        let speaker = "agent";
+        let speakerName = "Agent (You)";
+
+        if (transcribeModeRef.current === "manual_room") {
+          // Unified Room Speech: Unified continuous speech without separation
+          speaker = "room";
+          speakerName = "Speech";
+        } else {
+          lastSpeakerTurnRef.current = "agent";
+        }
 
         setInterimTranscript(null);
+
         const finalMsg = {
-          id: `${speaker === "caller" ? "c" : "a"}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: `${speaker === "caller" ? "c" : "a"}_${now}_${Math.random().toString(36).slice(2, 6)}`,
           type: "transcript_final",
           speaker,
           speakerName,
@@ -191,6 +405,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           isFinal: true,
           timestamp: now,
         };
+
         setTranscripts((prev) => {
           if (
             prev.some(
@@ -204,8 +419,10 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           }
           return [...prev, finalMsg];
         });
+
         bChannelRef.current?.postMessage(finalMsg);
         scribeChannelRef.current?.postMessage(finalMsg);
+
         const curCallId = callId || activeCallIdRef.current;
         if (curCallId) {
           try {
@@ -213,15 +430,43 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
             updateDoc(doc(db, "calls", curCallId), {
               transcripts: arrayUnion(finalMsg),
               interimTranscript: null,
-              updatedAt: Date.now(),
+              updatedAt: now,
             }).catch(() => {});
           } catch (e) {}
         }
       },
     });
+
     speechCtrlRef.current = ctrl;
     ctrl.start();
   };
+
+  // Persistent Speech Recognition Controller:
+  // Starts mic when transcribeMode is 'manual_room' AND isManualRecording is true
+  // In 'live_call' mode, starts mic ONLY when a real call is connected (callState === 'connected')
+  useEffect(() => {
+    if (isMuted) {
+      speechCtrlRef.current?.stop();
+      setInterimTranscript(null);
+      return;
+    }
+
+    if (transcribeMode === "manual_room") {
+      if (isManualRecording) {
+        startAgentSpeech(activeCallIdRef.current);
+      } else {
+        speechCtrlRef.current?.stop();
+        setInterimTranscript(null);
+      }
+    } else if (transcribeMode === "live_call") {
+      if (callState === "connected") {
+        startAgentSpeech(activeCallIdRef.current);
+      } else {
+        speechCtrlRef.current?.stop();
+        setInterimTranscript(null);
+      }
+    }
+  }, [transcribeMode, callState, isMuted, agentLang, isManualRecording]);
 
   // Cross-tab broadcast channel & Storage event listeners for 100% reliable caller sync
   useEffect(() => {
@@ -276,6 +521,14 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     };
 
     if (typeof window !== "undefined") {
+      setTranscripts([]);
+      setInterimTranscript(null);
+      setIsManualRecording(false);
+      isManualRecordingRef.current = false;
+      try {
+        localStorage.removeItem("ekms_scribe_sync");
+      } catch (e) {}
+
       try {
         const channel1 = new BroadcastChannel("ekms-call-channel");
         bChannelRef.current = channel1;
@@ -308,8 +561,10 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   // Ensure Agent's speech recognition stays alive on focus or interaction
   useEffect(() => {
     const handleAgentWakeup = () => {
-      if (callState === "connected") {
-        speechCtrlRef.current?.ensureListening();
+      if (transcribeModeRef.current === "manual_room" || callState === "connected") {
+        if (!isMutedRef.current) {
+          speechCtrlRef.current?.ensureListening();
+        }
       }
     };
     window.addEventListener("focus", handleAgentWakeup);
@@ -392,7 +647,9 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
         } else if (state === "ended") {
           setCallState("ended");
           stopTimer();
-          speechCtrlRef.current?.stop();
+          if (transcribeModeRef.current !== "manual_room") {
+            speechCtrlRef.current?.stop();
+          }
           cleanupRemoteAudio();
           if (callDocUnsubRef.current) {
             callDocUnsubRef.current();
@@ -542,8 +799,22 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   const handleToggleMute = (e) => {
     e.stopPropagation();
     const muted = callSessionRef.current?.toggleMute();
-    setIsMuted(muted);
-    toast.info(muted ? "Microphone muted" : "Microphone active");
+    const newMuted = Boolean(muted);
+    setIsMuted(newMuted);
+    isMutedRef.current = newMuted;
+
+    if (newMuted) {
+      // 1. Immediately abort & stop the agent's speech recognition
+      speechCtrlRef.current?.stop();
+      // 2. Clear any active interim transcript from the agent
+      setInterimTranscript((cur) => (cur?.speaker === "agent" ? null : cur));
+      toast.info("Microphone muted (Speech capture paused)");
+    } else {
+      toast.info("Microphone active (Speech capture live)");
+      if (callState === "connected") {
+        startAgentSpeech(activeCallIdRef.current);
+      }
+    }
   };
 
   const handleToggleHold = (e) => {
@@ -743,6 +1014,39 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
             ) : (
               <span className="text-[10px] font-medium text-amber-400">Paused</span>
             )}
+          </div>
+
+          {/* Scribe Mode Switcher: Live Call vs Manual Room Mic */}
+          <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-900/90 p-1 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                const next = transcribeMode === "live_call" ? "manual_room" : "live_call";
+                setTranscribeMode(next);
+                transcribeModeRef.current = next;
+                toast.info(
+                  next === "manual_room"
+                    ? "Switched to Manual Room Transcribe (Single mic for both Agent & Caller)"
+                    : "Switched to Live Call Transcribe (Headset mic = Agent, Remote stream = Caller)"
+                );
+              }}
+              className="flex w-full items-center justify-between px-2 py-1 text-[11px] font-semibold text-slate-300 hover:text-white transition"
+              title="Click to toggle transcription mode"
+            >
+              <div className="flex items-center gap-1.5">
+                {transcribeMode === "manual_room" ? (
+                  <Mic className="h-3.5 w-3.5 text-indigo-400 animate-pulse" />
+                ) : (
+                  <Headphones className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
+                )}
+                <span className="font-bold text-[10px] uppercase tracking-wide">
+                  {transcribeMode === "manual_room" ? "Manual Room Mic" : "Live Call (Stream)"}
+                </span>
+              </div>
+              <span className="rounded-md bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold text-slate-300 hover:bg-slate-700">
+                Switch Mode
+              </span>
+            </button>
           </div>
 
           {/* Action Buttons: Cut, Mute, Hold */}

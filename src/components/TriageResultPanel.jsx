@@ -22,10 +22,6 @@ const Empty = () => (
       <Stethoscope className="h-6 w-6 text-primary/80" strokeWidth={1.75} />
     </div>
     <h3 className="text-base sm:text-lg font-bold text-foreground">Triage output appears here</h3>
-    <p className="mt-2 max-w-sm text-xs sm:text-sm text-muted-foreground leading-relaxed">
-      Fill the intake form or load a sample call. The engine returns an urgency level, red flags,
-      the facility type needed and the nearest ESIC / ESIS centres.
-    </p>
   </div>
 );
 
@@ -243,19 +239,6 @@ export const TriageResultPanel = ({ result, loading }) => {
               </p>
             </div>
           </div>
-
-          {t.followup_questions?.length > 0 && (
-            <div className="mt-5">
-              <p className="eyebrow mb-2">Ask next</p>
-              <ul className="space-y-1.5" data-testid="triage-followup-questions">
-                {t.followup_questions.map((q, i) => (
-                  <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                    <span className="mono text-primary/80">{i + 1}.</span> {q}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           <p className="mt-5 border-t border-border/60 pt-4 text-[11px] leading-relaxed text-muted-foreground/80">
             {result.disclaimer}

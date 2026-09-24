@@ -1,6 +1,11 @@
 // Web Speech API & Multi-lingual Speech-to-Text / Text-to-Speech Controller
 // Supports Indian English (en-IN), Hindi/Hinglish (hi-IN), Assamese (as-IN), and English (en-US)
 
+const isMobileDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 export class SpeechStreamController {
   constructor({ lang = "en-IN", onInterim, onFinal, onError }) {
     this.lang = lang;
@@ -45,7 +50,11 @@ export class SpeechStreamController {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
       const rec = new SpeechRecognition();
-      rec.continuous = true;
+      const isMobile = isMobileDevice();
+
+      // On Android/mobile, continuous=true causes speech engine crashes or aborts.
+      // continuous=false with instant auto-restart in onend provides rock-solid continuous listening.
+      rec.continuous = !isMobile;
       rec.interimResults = true;
       rec.maxAlternatives = 1;
       rec.lang = this.lang || "en-IN";
@@ -61,7 +70,7 @@ export class SpeechStreamController {
         let interimTranscript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const item = event.results[i];
-          const transcript = item[0].transcript;
+          const transcript = item[0]?.transcript || "";
           if (item.isFinal) {
             const clean = transcript.trim();
             if (clean) {
@@ -72,11 +81,13 @@ export class SpeechStreamController {
           }
         }
         if (interimTranscript) {
-          this.onInterim?.(interimTranscript.trim());
+          // Zero-delay interim emission as letters and words are spoken
+          this.onInterim?.(interimTranscript);
         }
       };
 
       rec.onerror = (event) => {
+        // "no-speech" and "aborted" are normal lifecycle events
         if (event.error !== "no-speech" && event.error !== "aborted") {
           console.warn("Speech recognition notice:", event.error);
           this.onError?.(event.error);
@@ -91,11 +102,12 @@ export class SpeechStreamController {
         this.isStarting = false;
         if (this.shouldRestart) {
           clearTimeout(this.restartTimeout);
+          // 80ms safe delay gives Windows/Chrome audio driver time to cleanly release mic before restart
           this.restartTimeout = setTimeout(() => {
             if (this.shouldRestart) {
               this._createAndStart();
             }
-          }, 250);
+          }, 80);
         }
       };
 
@@ -111,7 +123,7 @@ export class SpeechStreamController {
           if (this.shouldRestart) {
             this._createAndStart();
           }
-        }, 600);
+        }, 200);
       }
     }
   }
@@ -119,6 +131,7 @@ export class SpeechStreamController {
   start() {
     if (!this.isSupported()) return;
     this.shouldRestart = true;
+    if (this.isListening || this.isStarting) return;
     clearTimeout(this.restartTimeout);
     this._createAndStart();
   }

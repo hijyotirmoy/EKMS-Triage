@@ -25,10 +25,40 @@ export default function IpCallerPage() {
   const timerRef = useRef(null);
   const ringTimeoutRef = useRef(null);
   const callerLangRef = useRef(callerLang);
+  const lastCallerInterimSyncRef = useRef(0);
+  const callerInterimTimeoutRef = useRef(null);
+
   useEffect(() => {
     callerLangRef.current = callerLang;
     speechCtrlRef.current?.setLanguage(callerLang);
   }, [callerLang]);
+
+  const throttledCallerInterimSync = (activeCallId, msg) => {
+    if (!activeCallId) return;
+    const now = Date.now();
+    if (now - lastCallerInterimSyncRef.current > 350) {
+      lastCallerInterimSyncRef.current = now;
+      try {
+        const db = getFirestoreDb();
+        setDoc(doc(db, "calls", activeCallId), {
+          interimTranscript: msg,
+          updatedAt: now,
+        }, { merge: true }).catch(() => {});
+      } catch (e) {}
+    } else {
+      clearTimeout(callerInterimTimeoutRef.current);
+      callerInterimTimeoutRef.current = setTimeout(() => {
+        lastCallerInterimSyncRef.current = Date.now();
+        try {
+          const db = getFirestoreDb();
+          setDoc(doc(db, "calls", activeCallId), {
+            interimTranscript: msg,
+            updatedAt: Date.now(),
+          }, { merge: true }).catch(() => {});
+        } catch (e) {}
+      }, 350);
+    }
+  };
 
   const startSpeechRecognition = (callId) => {
     if (speechCtrlRef.current) {
@@ -47,7 +77,7 @@ export default function IpCallerPage() {
           text,
           timestamp: Date.now(),
         };
-        // Notify Agent that caller is actively speaking right now
+        // Instant broadcast across windows
         bChannelRef.current?.postMessage({
           type: "caller_speaking",
           callId: activeCallId,
@@ -57,25 +87,7 @@ export default function IpCallerPage() {
         });
         bChannelRef.current?.postMessage(msg);
         scribeChannelRef.current?.postMessage(msg);
-        try {
-          localStorage.setItem("ekms_scribe_sync", JSON.stringify({ ...msg, _ts: Date.now() }));
-        } catch (e) {}
-        if (activeCallId) {
-          try {
-            const db = getFirestoreDb();
-            setDoc(doc(db, "calls", activeCallId), {
-              interimTranscript: msg,
-              updatedAt: Date.now(),
-            }, { merge: true }).catch(() => {});
-          } catch (e) {}
-          try {
-            fetch("/api/call/signal", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "transcript", callId: activeCallId, data: { transcript: msg } }),
-            }).catch(() => {});
-          } catch (e) {}
-        }
+        throttledCallerInterimSync(activeCallId, msg);
       },
       onFinal: (text) => {
         setLiveTranscript("");
@@ -236,6 +248,12 @@ export default function IpCallerPage() {
     if (!phone.trim()) return toast.error("Please enter your phone number");
     try {
       unlockMobileAudio();
+      // Pre-warm speech recognition on user interaction for instant mobile authorization
+      if (typeof window !== "undefined") {
+        try {
+          startSpeechRecognition();
+        } catch (e) {}
+      }
       await callSessionRef.current.startCall({
         phone: phone.trim(),
         name: "",
@@ -251,13 +269,24 @@ export default function IpCallerPage() {
       clearTimeout(ringTimeoutRef.current);
       ringTimeoutRef.current = null;
     }
+    speechCtrlRef.current?.stop();
+    setLiveTranscript("");
     callSessionRef.current?.endCall();
   };
 
   const handleToggleMute = () => {
     const muted = callSessionRef.current?.toggleMute();
-    setIsMuted(muted);
-    toast.info(muted ? "Microphone muted" : "Microphone unmuted");
+    const newMuted = Boolean(muted);
+    setIsMuted(newMuted);
+    if (newMuted) {
+      speechCtrlRef.current?.stop();
+      setLiveTranscript("");
+    } else {
+      if (callState === "connected") {
+        startSpeechRecognition(callSessionRef.current?.callId);
+      }
+    }
+    toast.info(newMuted ? "Microphone muted" : "Microphone unmuted");
   };
 
   return (
