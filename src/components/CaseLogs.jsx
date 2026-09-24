@@ -177,7 +177,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                         setCaseToDelete(c);
                       }}
                       title={`Delete case ${c.case_ref}`}
-                      className="inline-flex items-center justify-center rounded-lg border border-rose-200/80 bg-rose-50/60 p-2 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700 active:scale-95 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-400 dark:hover:bg-rose-950/60"
+                      className="inline-flex items-center justify-center rounded-lg border border-rose-300 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800 active:scale-95 shadow-2xs"
                       aria-label={`Delete case ${c.case_ref}`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -254,7 +254,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
             </button>
 
             {/* Danger Warning Icon */}
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs">
               <Trash2 className="h-6 w-6" />
             </div>
 

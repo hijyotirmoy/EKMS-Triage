@@ -184,7 +184,7 @@ export function AppShell({ activePage = "home", children }) {
   // Loading indicator before reading localStorage
   if (!authInitialized) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
       </div>
     );
@@ -193,7 +193,7 @@ export function AppShell({ activePage = "home", children }) {
   // If not logged in, render AgentLogin
   if (!currentAgent) {
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-emerald-500/20 dark:bg-slate-950 dark:text-slate-100">
+      <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-emerald-500/20">
         <Toaster position="top-right" theme="light" />
         <header className="border-b border-border bg-background/90 backdrop-blur-md">
           <div className="mx-auto flex max-w-[1500px] items-center justify-between px-4 py-3 sm:px-8 sm:py-3.5">
@@ -213,9 +213,9 @@ export function AppShell({ activePage = "home", children }) {
               href="/caller"
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-50 px-2.5 py-1 sm:px-3 text-[11px] font-bold text-emerald-800 transition-all hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+              className="flex items-center gap-1.5 rounded-full border border-emerald-600/60 bg-emerald-50 px-2.5 py-1 sm:px-3 text-[11px] font-bold text-emerald-950 transition-all hover:bg-emerald-100 shadow-2xs"
             >
-              <PhoneCall className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+              <PhoneCall className="h-3 w-3 text-emerald-700" />
               Triage Caller
             </a>
           </div>
@@ -249,7 +249,7 @@ export function AppShell({ activePage = "home", children }) {
       />
 
       {/* Top Navigation Header */}
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-2 px-4 py-2.5 sm:px-8 sm:py-3.5">
           <Link
             href="/"
@@ -273,34 +273,34 @@ export function AppShell({ activePage = "home", children }) {
             <Link
               href="/cases"
               data-testid="header-case-count"
-              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs ${
                 activePage === "cases"
-                  ? "border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 ring-1 ring-emerald-500/20"
-                  : "border-border text-muted-foreground hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
+                  ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
+                  : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
               }`}
               title="Open Triage Case logs page"
             >
               <span>Triage Case</span>
-              <span className="opacity-75 font-mono">({stats?.total ?? "—"})</span>
+              <span className="font-mono text-emerald-800">({stats?.total ?? "—"})</span>
             </Link>
 
             {/* Facilities count link -> opens /facilities */}
             <Link
               href="/facilities"
-              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs ${
                 activePage === "facilities"
-                  ? "border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 ring-1 ring-emerald-500/20"
-                  : "border-border text-muted-foreground hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
+                  ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
+                  : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
               }`}
               title="Open Triage Facility directory page"
             >
               <span>Triage Facility</span>
-              <span className="opacity-75 font-mono">({meta?.facility_count ?? "—"})</span>
+              <span className="font-mono text-emerald-800">({meta?.facility_count ?? "—"})</span>
             </Link>
 
-            {/* Logged in Agent Badge (without "Online" text) */}
-            <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            {/* Logged in Agent Badge */}
+            <div className="flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
               <span>{currentAgent.agentId}</span>
             </div>
 
@@ -309,10 +309,10 @@ export function AppShell({ activePage = "home", children }) {
               href="/caller"
               target="_blank"
               rel="noreferrer"
-              className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-800 transition-all duration-200 hover:bg-emerald-100 hover:shadow-xs dark:bg-emerald-950/40 dark:text-emerald-300"
+              className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-600/60 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-950 transition-all duration-200 hover:bg-emerald-100 hover:shadow-xs shadow-2xs"
               title="Open Triage Caller portal in new tab/window"
             >
-              <PhoneCall className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+              <PhoneCall className="h-3 w-3 text-emerald-700" />
               Triage Caller
             </a>
 
@@ -405,13 +405,13 @@ export function AppShell({ activePage = "home", children }) {
                   target="_blank"
                   rel="noreferrer"
                   onClick={() => setMenuOpen(false)}
-                  className="flex w-full items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs font-bold text-emerald-800 dark:text-emerald-300"
+                  className="flex w-full items-center justify-between rounded-xl border border-emerald-600/50 bg-emerald-50 px-3.5 py-2.5 text-xs font-bold text-emerald-950 hover:bg-emerald-100 shadow-2xs"
                 >
                   <div className="flex items-center gap-2.5">
-                    <PhoneCall className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <PhoneCall className="h-4 w-4 text-emerald-700" />
                     <span>Triage Caller</span>
                   </div>
-                  <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+                  <ChevronRight className="h-3.5 w-3.5 opacity-60" />
                 </a>
               </div>
             </div>
@@ -430,7 +430,7 @@ export function AppShell({ activePage = "home", children }) {
                     setMenuOpen(false);
                     handleLogout();
                   }}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                  className="flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100 shadow-2xs"
                 >
                   <LogOut className="h-3.5 w-3.5" />
                   Log Out

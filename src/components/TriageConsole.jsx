@@ -21,7 +21,7 @@ import { TriageResultPanel } from "./TriageResultPanel";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { LiveScribeWindow } from "./LiveScribeWindow";
-import { extractClinicalEntities } from "../lib/clinicalAdaptiveEngine";
+import { extractClinicalEntities, processTranscriptionForAi } from "../lib/clinicalAdaptiveEngine";
 
 const EMPTY = {
   caller_name: "",
@@ -116,23 +116,23 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           `Previous record found for ${c.caller_name || phoneNumber}: Details & history loaded.`
         );
       } else {
-        // Different / New caller number: clear old caller's data so agent can fill new caller details
+        // Different / New caller number: preserve whatever details the agent has already typed
         setForm((f) => ({
           ...f,
           phone: phoneNumber,
-          caller_name: "",
-          age: "",
-          sex: "",
-          city: "",
-          district: "",
-          pincode: "",
-          latitude: "",
-          longitude: "",
+          caller_name: f.caller_name || "",
+          age: f.age || "",
+          sex: f.sex || "",
+          city: f.city || "",
+          district: f.district || "",
+          pincode: f.pincode || "",
+          latitude: f.latitude || "",
+          longitude: f.longitude || "",
         }));
         setCallerFoundInfo(null);
         setCallerHistory([]);
         toast.info(
-          `New number (${phoneNumber}): Please fill caller name, age, sex & location.`
+          `New number (${phoneNumber}): Please fill caller details.`
         );
       }
     } catch (err) {
@@ -183,17 +183,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     }
   }, [callSession?.callState]);
 
-  // Real-time NLP stream: Whenever speech transcript updates (in manual room or live call),
-  // instantly feed the latest speech into EKMS AI adaptive engine for 0ms entity extraction!
+  // Real-time NLP stream: Processes transcribed speech with NLP, filters conversational filler,
+  // prevents duplicate submissions, and sends standardized structured clinical formats to the AI chat.
   const lastProcessedTranscriptLenRef = useRef(0);
-  const lastProcessedInterimRef = useRef("");
-  const interimSpeechTimeoutRef = useRef(null);
+  const sentClinicalSignaturesRef = useRef(new Set());
 
-  // 1. Process finalized segments as soon as they commit
+  // Process finalized segments as soon as they commit
   useEffect(() => {
     const transcripts = callSession?.transcripts || [];
     if (transcripts.length === 0) {
       lastProcessedTranscriptLenRef.current = 0;
+      sentClinicalSignaturesRef.current.clear();
       return;
     }
 
@@ -203,97 +203,78 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
 
       const newSpeech = newItems.map((t) => t.text).join(" ").trim();
       if (newSpeech) {
-        // Feed into AI chat adaptive engine
-        chatRef.current?.processLiveSpeech?.(newSpeech);
+        // 1. Process transcription through NLP: extract entities, strip small-talk/silence, format into standard format
+        const nlpResult = processTranscriptionForAi(
+          newSpeech,
+          ekmsContext?.triageState || {},
+          sentClinicalSignaturesRef.current
+        );
 
-        // Auto-extract clinical entities and sync with intake form in real-time
-        const nlp = extractClinicalEntities(newSpeech);
-        if (nlp.hasClinicalContent) {
-          const cleanNotes = nlp.cleanKeywords
-            ? `[NLP Findings: ${nlp.cleanKeywords} | Condition: ${nlp.conditionLabel || "Clinical Assessment"}]`
-            : newSpeech;
+        if (nlpResult) {
+          // 2. Prevent sending the same thing multiple times
+          sentClinicalSignaturesRef.current.add(nlpResult.entitySignature);
 
+          // 3. Send ONLY standard structured format to the AI chat
+          chatRef.current?.processLiveSpeech?.(nlpResult.standardText);
+
+          // 4. Update Intake Form with clean clinical findings
+          const cleanNotes = `[NLP Findings: ${nlpResult.standardText}]`;
           setForm((f) => ({
             ...f,
             symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanNotes)
               ? f.symptom_notes
               : f.symptom_notes ? `${f.symptom_notes}\n${cleanNotes}` : cleanNotes,
-            duration: nlp.detectedDuration || f.duration,
-            severity_reported: nlp.detectedSeverity || f.severity_reported,
-          }));
-        } else {
-          // Keep all spoken voice transcribed into symptom notes even if purely conversational
-          setForm((f) => ({
-            ...f,
-            symptom_notes: f.symptom_notes && f.symptom_notes.includes(newSpeech)
-              ? f.symptom_notes
-              : f.symptom_notes ? `${f.symptom_notes}\n${newSpeech}` : newSpeech,
+            duration: nlpResult.nlp.detectedDuration || f.duration,
+            severity_reported: nlpResult.nlp.detectedSeverity || f.severity_reported,
           }));
         }
       }
     }
-  }, [callSession?.transcripts]);
-
-  // 2. Real-Time Instant Voice Detection:
-  // Detects answers directly while the user is speaking in real time (interim transcript),
-  // so the user NEVER has to click Stop & Save or wait for silence!
-  useEffect(() => {
-    const interimText = callSession?.interimTranscript?.text?.trim();
-    if (!interimText || interimText.length < 2) return;
-    if (interimText === lastProcessedInterimRef.current) return;
-
-    // Check recent speech context (last final transcript + current interim)
-    // so multi-part answers like "fever" + "for 3 days" or "very" + "much" are caught instantly
-    const transcripts = callSession?.transcripts || [];
-    const recentTail = transcripts.slice(-2).map((t) => t.text).join(" ");
-    const combinedSpeech = recentTail ? `${recentTail} ${interimText}` : interimText;
-
-    const targetSpeech = chatRef.current?.canAnswerCurrentStage?.(interimText)
-      ? interimText
-      : chatRef.current?.canAnswerCurrentStage?.(combinedSpeech)
-      ? combinedSpeech
-      : null;
-
-    if (targetSpeech) {
-      clearTimeout(interimSpeechTimeoutRef.current);
-      // Ultra-fast 40ms debounce to allow compound words like "very much" to assemble
-      interimSpeechTimeoutRef.current = setTimeout(() => {
-        lastProcessedInterimRef.current = interimText;
-        chatRef.current?.processLiveSpeech?.(targetSpeech);
-      }, 40);
-    }
-
-    return () => clearTimeout(interimSpeechTimeoutRef.current);
-  }, [callSession?.interimTranscript?.text, callSession?.transcripts]);
+  }, [callSession?.transcripts, ekmsContext?.triageState]);
 
   const handleInsertScribeToComplaint = (callerSpeech) => {
     if (!callerSpeech || !callerSpeech.trim()) return;
     const cleanSpeech = callerSpeech.trim();
 
-    // Extract clinical entities using NLP so notes are clinical keywords, not messy filler
-    const nlp = extractClinicalEntities(cleanSpeech);
-    const cleanNotes = nlp.hasClinicalContent && nlp.cleanKeywords
-      ? `[NLP Findings: ${nlp.cleanKeywords} | Condition: ${nlp.conditionLabel || "Clinical Assessment"}]`
-      : cleanSpeech;
+    // Process entire accumulated speech through NLP
+    const nlpResult = processTranscriptionForAi(
+      cleanSpeech,
+      ekmsContext?.triageState || {},
+      sentClinicalSignaturesRef.current
+    );
 
-    setForm((f) => ({
-      ...f,
-      symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanNotes)
-        ? f.symptom_notes
-        : f.symptom_notes ? `${f.symptom_notes}\n${cleanNotes}` : cleanNotes,
-      duration: nlp.detectedDuration || f.duration,
-      severity_reported: nlp.detectedSeverity || f.severity_reported,
-    }));
+    if (nlpResult) {
+      sentClinicalSignaturesRef.current.add(nlpResult.entitySignature);
+      const cleanNotes = `[NLP Findings: ${nlpResult.standardText}]`;
+      setForm((f) => ({
+        ...f,
+        symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanNotes)
+          ? f.symptom_notes
+          : f.symptom_notes ? `${f.symptom_notes}\n${cleanNotes}` : cleanNotes,
+        duration: nlpResult.nlp.detectedDuration || f.duration,
+        severity_reported: nlpResult.nlp.detectedSeverity || f.severity_reported,
+      }));
 
-    // Trigger EKMS AI adaptive engine on transcribed speech
-    if (chatRef.current?.insertComplaintText) {
-      chatRef.current.insertComplaintText(cleanSpeech);
+      // Send standard format to chat AI
+      if (chatRef.current?.insertComplaintText) {
+        chatRef.current.insertComplaintText(nlpResult.standardText);
+      }
+      toast.success("Clinical entities extracted & formatted for AI Consultation!");
+    } else {
+      // If no new clinical entities, update notes without confusing the chat AI
+      setForm((f) => ({
+        ...f,
+        symptom_notes: f.symptom_notes && f.symptom_notes.includes(cleanSpeech)
+          ? f.symptom_notes
+          : f.symptom_notes ? `${f.symptom_notes}\n${cleanSpeech}` : cleanSpeech,
+      }));
+      toast.info("Notes updated from transcript.");
     }
-    toast.success("Clinical entities extracted & saved to Complaint Notes!");
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, overrideContext) => {
+    e?.preventDefault?.();
+    const activeContext = overrideContext || ekmsContext;
     if (!form.caller_name || !form.caller_name.trim()) {
       return toast.error("Caller Name is mandatory. Please enter caller name.");
     }
@@ -303,7 +284,15 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     if (form.age && (isNaN(Number(form.age)) || Number(form.age) <= 0)) {
       return toast.error("Please enter a valid age.");
     }
-    if (!form.symptom_notes || form.symptom_notes.trim().length < 3) {
+
+    const compiledNotes =
+      form.symptom_notes?.trim() ||
+      activeContext?.triageState?.notes ||
+      activeContext?.triageState?.condition ||
+      activeContext?.triageState?.symptom ||
+      "";
+
+    if (!compiledNotes || compiledNotes.length < 3) {
       return toast.error("Please enter the caller's complaint notes in the chat area");
     }
     setLoading(true);
@@ -311,11 +300,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     setResult(null);
     const payload = {
       ...form,
+      symptom_notes: compiledNotes,
       age: form.age === "" ? null : Number(form.age),
       severity_reported: Number(form.severity_reported),
       latitude: form.latitude === "" ? null : Number(form.latitude),
       longitude: form.longitude === "" ? null : Number(form.longitude),
-      ekms_ai_context: ekmsContext,
+      ekms_ai_context: activeContext,
       source_app: "console",
     };
     Object.keys(payload).forEach((k) => payload[k] === "" && delete payload[k]);
@@ -336,7 +326,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
       <form onSubmit={submit} className="panel p-5 sm:p-6" data-testid="intake-form">
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 className="text-xl font-bold sm:text-2xl">Caller intake</h2>
@@ -370,9 +360,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
         {/* 1. Caller Demographic Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {callerFoundInfo && (
-            <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex items-center justify-between rounded-md bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
+            <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex items-center justify-between rounded-md bg-emerald-50 border border-emerald-400 px-3 py-1.5 text-xs text-emerald-950 font-bold shadow-2xs">
               <div className="flex items-center gap-2">
-                <UserCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <UserCheck className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
                 <span>
                   Returning IP Caller: <strong>{callerFoundInfo.caller_name}</strong>
                   {callerFoundInfo.age ? ` (${callerFoundInfo.age}y, ${callerFoundInfo.sex})` : ""}
@@ -380,7 +370,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
                 </span>
               </div>
               {callerFoundInfo.last_case_ref && (
-                <span className="font-mono text-[11px] opacity-75 hidden sm:inline">
+                <span className="font-mono text-[11px] text-emerald-800 hidden sm:inline font-bold">
                   Prev: {callerFoundInfo.last_case_ref}
                 </span>
               )}
@@ -517,8 +507,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
             onReadyToShowResult={(tState) => {
               setActiveRightTab("triage");
             }}
-            onRunTriage={() => {
-              submit({ preventDefault: () => {} });
+            onRunTriage={(overrideCtx) => {
+              submit({ preventDefault: () => {} }, overrideCtx);
             }}
           />
         </div>
@@ -604,17 +594,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
                     </div>
 
                     {/* Navigation Provided by Agent */}
-                    <div className="mt-3 rounded-md bg-emerald-500/10 border border-emerald-500/25 p-3 text-xs">
-                      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                        <Navigation className="h-3.5 w-3.5 shrink-0" />
+                    <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-400 p-3 text-xs shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-950">
+                        <Navigation className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
                         <span>Navigation Provided by Agent</span>
                       </div>
-                      <p className="mt-1 text-xs font-medium text-emerald-950 dark:text-emerald-100 leading-relaxed">
+                      <p className="mt-1 text-xs font-semibold text-emerald-950 leading-relaxed">
                         {item.navigation || item.recommended_action || "Standard consultation / triage guidance"}
                       </p>
                       {item.recommended_facility_type && (
-                        <p className="mt-1.5 text-[11px] text-emerald-800 dark:text-emerald-300/90 font-semibold border-t border-emerald-500/20 pt-1.5">
-                          Routed Facility: <span className="underline font-bold">{item.recommended_facility_type}</span>
+                        <p className="mt-1.5 text-[11px] text-emerald-900 font-bold border-t border-emerald-300 pt-1.5">
+                          Routed Facility: <span className="underline font-extrabold">{item.recommended_facility_type}</span>
                           {item.nearest_facility ? ` (${item.nearest_facility})` : ""}
                         </p>
                       )}
@@ -701,8 +691,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               </div>
 
               {isCallActive && (
-                <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-600 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-950 shadow-2xs">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-ping" />
                   Call Live
                 </span>
               )}

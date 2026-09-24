@@ -308,69 +308,80 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
 export function extractSeverityAndDuration(allText = "") {
   const lower = allText.toLowerCase();
 
-  // Duration Detection
+  // Duration Detection (Supports years, months, weeks, days, and small time frames / hours)
   let detectedDuration = null;
-  if (
+
+  // 1. Years Extraction (e.g. 2 years, 1 year, 5 years, 2 saal, ek saal, saalon se, chronic)
+  const yearMatch = lower.match(/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch)\s*(?:\+|-|\s)*)?(?:years?|yrs?|saal|sal)\b/i);
+  if (yearMatch) {
+    const rawVal = yearMatch[1] || "";
+    const numMap = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10", ek: "1", do: "2", teen: "3", char: "4", paanch: "5" };
+    const num = numMap[rawVal.toLowerCase()] || rawVal || "1";
+    detectedDuration = `${num} ${Number(num) === 1 ? "year" : "years"} (Chronic)`;
+  } else if (/\b(since last year|pichle saal se|saalon se|for years|many years|several years)\b/i.test(lower)) {
+    detectedDuration = "1+ years (Chronic)";
+  }
+  // 2. Months Extraction (e.g. 6 months, 3 months, 1 month, 2 mahine, pichle mahine se)
+  else if (/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:\+|-|\s)*)?(?:months?|mos?|mahine|mahina|maheene)\b/i.test(lower)) {
+    const monthMatch = lower.match(/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:\+|-|\s)*)?(?:months?|mos?|mahine|mahina|maheene)\b/i);
+    const rawVal = monthMatch ? monthMatch[1] || "" : "";
+    const numMap = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10", ek: "1", do: "2", teen: "3", char: "4", paanch: "5", chhah: "6" };
+    const num = numMap[rawVal.toLowerCase()] || rawVal || "1";
+    detectedDuration = `${num} ${Number(num) === 1 ? "month" : "months"}`;
+  } else if (/\b(since last month|pichle mahine se|few months)\b/i.test(lower)) {
+    detectedDuration = "1-2 months";
+  }
+  // 3. Weeks Extraction (e.g. 3 weeks, 2 weeks, 1 week, do hafte, several weeks)
+  else if (/\b(?:(\d+|one|two|three|four|ek|do|teen|char)\s*(?:\+|-|\s)*)?(?:weeks?|wks?|hafte|hafta)\b/i.test(lower)) {
+    const weekMatch = lower.match(/\b(?:(\d+|one|two|three|four|ek|do|teen|char)\s*(?:\+|-|\s)*)?(?:weeks?|wks?|hafte|hafta)\b/i);
+    const rawVal = weekMatch ? weekMatch[1] || "" : "";
+    const numMap = { one: "1", two: "2", three: "3", four: "4", ek: "1", do: "2", teen: "3", char: "4" };
+    const num = numMap[rawVal.toLowerCase()] || rawVal || "1";
+    detectedDuration = `${num} ${Number(num) === 1 ? "week" : "weeks"}`;
+  } else if (/\b(more than a week|ek hafte se|several weeks|10 days)\b/i.test(lower)) {
+    detectedDuration = "1-2 weeks";
+  }
+  // 4. Days Range (e.g. 4-7 days, 2-3 days)
+  else if (/\b(\d+)\s*(?:to|-)\s*(\d+)\s*(?:days?|din)\b/i.test(lower)) {
+    const rangeMatch = lower.match(/\b(\d+)\s*(?:to|-)\s*(\d+)\s*(?:days?|din)\b/i);
+    detectedDuration = `${rangeMatch[1]}-${rangeMatch[2]} days`;
+  }
+  // 5. Specific Days (e.g. 4 days, 3 days, 5 days, 2 days, 1 day)
+  else if (/\b(\d+|one|two|three|four|five|six|seven|ek|do|teen|char|paanch)\s*(?:days?|din)\b/i.test(lower)) {
+    const dayMatch = lower.match(/\b(\d+|one|two|three|four|five|six|seven|ek|do|teen|char|paanch)\s*(?:days?|din)\b/i);
+    const rawVal = dayMatch[1];
+    const numMap = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", ek: "1", do: "2", teen: "3", char: "4", paanch: "5" };
+    const num = numMap[rawVal.toLowerCase()] || rawVal;
+    detectedDuration = `${num} ${Number(num) === 1 ? "day" : "days"}`;
+  } else if (/\b(kal se|yesterday|24 hours|ek din)\b/i.test(lower)) {
+    detectedDuration = "1 day";
+  }
+  // 6. Hours & Small Time Frame / Acute Onset (e.g. 2-4 hours, 3 hours, 30 minutes, subah se, achanak)
+  else if (/\b(\d+)\s*(?:to|-)\s*(\d+)\s*(?:hours?|hrs?|ghante)\b/i.test(lower)) {
+    const hrRange = lower.match(/\b(\d+)\s*(?:to|-)\s*(\d+)\s*(?:hours?|hrs?|ghante)\b/i);
+    detectedDuration = `${hrRange[1]}-${hrRange[2]} hours`;
+  } else if (/\b(\d+)\s*(?:hours?|hrs?|ghante)\b/i.test(lower)) {
+    const hrMatch = lower.match(/\b(\d+)\s*(?:hours?|hrs?|ghante)\b/i);
+    detectedDuration = `${hrMatch[1]} ${Number(hrMatch[1]) === 1 ? "hour" : "hours"}`;
+  } else if (/\b(\d+)\s*(?:minutes?|mins?|minute)\b/i.test(lower)) {
+    const minMatch = lower.match(/\b(\d+)\s*(?:minutes?|mins?|minute)\b/i);
+    detectedDuration = `${minMatch[1]} minutes`;
+  } else if (
     lower.includes("less than 2 hours") ||
     lower.includes("< 2") ||
     lower.includes("< 30") ||
-    lower.includes("30 min") ||
-    lower.includes("minutes") ||
     lower.includes("just started") ||
-    lower.includes("1 to 2 hour") ||
-    lower.includes("1-2 hour") ||
     lower.includes("achanak") ||
     lower.includes("sudden")
   ) {
     detectedDuration = "Less than 2 hours";
-  } else if (
-    lower.includes("4 day") ||
-    lower.includes("4-7 day") ||
-    lower.includes("char din") ||
-    lower.includes("4 din") ||
-    lower.includes("5 day") ||
-    lower.includes("6 day") ||
-    lower.includes("7 day")
-  ) {
-    detectedDuration = "4-7 days";
-  } else if (
-    lower.includes("2 day") ||
-    lower.includes("3 day") ||
-    lower.includes("2-3 day") ||
-    lower.includes("do din") ||
-    lower.includes("teen din") ||
-    lower.includes("do teen din")
-  ) {
-    detectedDuration = "2-3 days";
-  } else if (
-    lower.includes("1 day") ||
-    lower.includes("ek din") ||
-    lower.includes("kal se") ||
-    lower.includes("yesterday") ||
-    lower.includes("24 hours")
-  ) {
-    detectedDuration = "1 day";
-  } else if (
-    lower.includes("more than a week") ||
-    lower.includes("hafta") ||
-    lower.includes("10 days") ||
-    lower.includes("two weeks") ||
-    lower.includes("2 weeks")
-  ) {
-    detectedDuration = "More than a week";
-  } else if (
-    lower.includes("month") ||
-    lower.includes("mahina") ||
-    lower.includes("chronic")
-  ) {
-    detectedDuration = "More than a month";
   } else if (
     lower.includes("today") ||
     lower.includes("aaj") ||
     lower.includes("subah se") ||
     lower.includes("few hours")
   ) {
-    detectedDuration = "Today";
+    detectedDuration = "Today (few hours)";
   }
 
   // Severity Detection (1-10)
@@ -1139,17 +1150,39 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
       return [
         {
           id: "trauma_q1",
-          title: "Bleeding & Wound Severity",
-          question: "Is there active spurting bleeding that does not stop with direct pressure, or a deep open wound?",
+          title: "Accident Location, Time & Mechanism",
+          question: "Where did the accident occur, at what exact time, and what happened (road traffic collision, workplace machinery, or high fall)?",
           options: [
-            "Active severe bleeding / Spurting blood (High Trauma Emergency)",
-            "Deep cut / laceration requiring stitches",
-            "Minor surface scrape or abrasion with stopped bleeding",
-            "Blunt contusion / bruise without skin break",
+            "Road traffic collision on highway / road — Fresh accident (<30 mins)",
+            "Workplace / factory machine accident — Fresh injury (<1 hour)",
+            "Fall from height / roof / construction scaffolding",
+            "Severe domestic accident / blunt trauma",
           ],
         },
         {
           id: "trauma_q2",
+          title: "Casualty Count & Entrapment",
+          question: "How many casualties / people are injured, and is anyone trapped inside a vehicle or under machinery?",
+          options: [
+            "Multiple casualties (>2 victims injured) — Multiple ambulances required",
+            "Single victim — Critically injured / trapped / unconscious",
+            "Single victim — Conscious with bleeding / fracture",
+            "Minor casualties — Alert and out of danger",
+          ],
+        },
+        {
+          id: "trauma_q3",
+          title: "Bleeding & Wound Severity",
+          question: "Is there active spurting bleeding that does not stop with direct pressure, or a deep open wound?",
+          options: [
+            "Active severe bleeding / Spurting blood (High Trauma Emergency)",
+            "Deep cut / laceration with heavy blood loss",
+            "Severe crush injury or amputated digit/finger",
+            "Minor surface scrape or abrasion with stopped bleeding",
+          ],
+        },
+        {
+          id: "trauma_q4",
           title: "Bone & Deformity Check",
           question: "Is there visible bone deformity, bone piercing skin (open fracture), or complete inability to move limb?",
           options: [
@@ -1160,9 +1193,9 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
           ],
         },
         {
-          id: "trauma_q3",
+          id: "trauma_q5",
           title: "Head & Spine Injury Check",
-          question: "Was there a blow to the head, loss of consciousness, confusion, vomiting, or severe neck pain?",
+          question: "Was there a blow to the head, loss of consciousness, confusion, vomiting, or severe neck/spine pain?",
           options: [
             "Loss of consciousness, amnesia, or repeated vomiting (Head Trauma)",
             "Severe neck or spine pain (Do not move patient)",
@@ -1170,27 +1203,63 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
             "No head, neck, or spine impact",
           ],
         },
+      ];
+
+    case CLINICAL_DOMAINS.PSYCHIATRIC:
+      return [
         {
-          id: "trauma_q4",
-          title: "Time of Injury",
-          question: "Exactly when did the injury or accident occur?",
+          id: "psych_q1",
+          title: "Emotional Distress & Cause",
+          question: "What has happened that is causing you so much pain or distress, and when did this feeling begin? (Hindi: क्या बात आपको बहुत परेशान कर रही है?)",
           options: [
-            "Less than 30 minutes ago (Fresh trauma)",
-            "1 to 3 hours ago",
-            "Earlier today (4-8 hours ago)",
-            "Yesterday or earlier",
+            "Severe overwhelming stress / sudden personal crisis",
+            "Deep ongoing depression and feeling empty inside",
+            "Severe panic, fast heartbeat, and extreme fear / anxiety",
+            "Workplace harassment or family conflict",
           ],
         },
         {
-          id: "trauma_q5",
-          title: "First Aid & Tetanus Check",
-          question: "Has pressure bandage or clean dressing been applied, and did you have a Tetanus (TT) injection in the last 5 years?",
+          id: "psych_q2",
+          title: "Safety & Self-Harm Screening",
+          question: "Are you feeling completely hopeless, or have you had thoughts of hurting yourself or ending your life? (Hindi: क्या मन में खुद को नुकसान पहुँचाने का विचार आया है?)",
           options: [
-            "Pressure dressing applied and bleeding controlled",
-            "Tetanus (TT) injection taken within last 6 months",
-            "No Tetanus shot in over 5 years / Never taken",
-            "Took painkiller (Paracetamol/Tramadol)",
-            "No first aid done yet",
+            "Active thoughts of self-harm or suicide (Immediate Crisis)",
+            "Feeling exhausted and hopeless, but no wish to harm myself",
+            "Severe sadness and crying, needing someone to listen",
+            "High anxiety without thoughts of self-harm",
+          ],
+        },
+        {
+          id: "psych_q3",
+          title: "Emotional Symptoms & Sleep",
+          question: "Are you crying continuously, unable to sleep, or finding it difficult to eat or breathe calmly?",
+          options: [
+            "Continuous crying and feeling broken down",
+            "Severe insomnia (no sleep for days) and no appetite",
+            "Panic attacks with shaking hands and chest tightness",
+            "Difficulty concentrating or talking to anyone",
+          ],
+        },
+        {
+          id: "psych_q4",
+          title: "Support System & Surroundings",
+          question: "Is someone with you right now, or are you alone? Can you sit somewhere safe and calm?",
+          options: [
+            "I am completely alone right now",
+            "Family member or friend is nearby at home",
+            "At workplace / factory floor",
+            "Sitting in a quiet, safe space",
+          ],
+        },
+        {
+          id: "psych_q5",
+          title: "Counseling & Tele-MANAS Referral",
+          question: "We care about your safety. Can we immediately connect you to our Psychological Counselling Department and National Tele-MANAS (14416)?",
+          options: [
+            "Yes, please connect me to a counselor right now",
+            "Yes, please forward this call to the mental health team",
+            "I just want someone to listen to me for a few minutes",
+            "I will talk to my family first",
           ],
         },
       ];
@@ -2900,6 +2969,121 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     domain,
     conditionLabel,
     probingAnswer,
+  };
+}
+
+/**
+ * Processes transcribed speech with NLP, filters silence hallucinations & conversational filler,
+ * prevents duplicate emissions, and formats into a standardized clinical format for the AI chat.
+ */
+export function processTranscriptionForAi(rawSpeech, currentClinicalState = {}, sentSignaturesSet = new Set()) {
+  if (!rawSpeech) return null;
+  const text = String(rawSpeech).trim();
+  if (!text || text.length < 2) return null;
+
+  // 1. Filter out Whisper silence/subtitle hallucinations
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const hallucinationPatterns = [
+    /thank\s*you\s*(for\s*watching)?/gi,
+    /thanks\s*(for\s*watching)?/gi,
+    /please\s*subscribe/gi,
+    /subscribe\s*to\s*(my|the)?\s*channel/gi,
+    /like\s*and\s*subscribe/gi,
+    /subtitles\s*by/gi,
+    /amara\s*org/gi,
+    /what\s*will\s*walk/gi,
+    /please\s*take\s*your\s*priority/gi,
+    /see\s*you\s*(in\s*the\s*next\s*video|next\s*time|tomorrow|again)/gi,
+    /bye\s*bye/gi,
+    /mbc/gi,
+  ];
+
+  for (const pattern of hallucinationPatterns) {
+    if (pattern.test(normalized)) {
+      const stripped = normalized.replace(pattern, "").trim();
+      if (stripped.length < 4) return null;
+    }
+  }
+
+  // 2. Filter out pure small talk, greetings, phone audio test checks
+  const isPureSmallTalk = /^(hello|hi|namaskar|good morning|testing|can you hear me|awaz aa rahi hai|haan|theek hai|accha|okay|yes|no|nahi|thanks|thank you|bye)$/i.test(normalized);
+  if (isPureSmallTalk) return null;
+
+  // 3. Extract clinical entities via NLP
+  const nlp = extractClinicalEntities(text, "probing", currentClinicalState);
+
+  // Check specific intent requests (104, 108, e-Sanjeevani, Pharmacy, Psychiatric)
+  const is104 = /\b(104|phone consultation|phone doctor|tele consultation|tele-consultation|tele doctor|tele-doctor|call with 104|104 doctor|doctor on call)\b/i.test(normalized);
+  const is108 = /\b(108|ambulance|emergency vehicle|108 call)\b/i.test(normalized);
+  const isESanjeevani = /\b(e sanjeevani|esanjeevani|online doctor|video consultation)\b/i.test(normalized);
+  const isPharmacy = /\b(pharmacy|chemist|dawai ki dukan|medicine refill)\b/i.test(normalized);
+  const isPsychiatric = /\b(tele manas|tele-manas|psychiat|counseling|depression|suicid|mental health)\b/i.test(normalized);
+
+  const hasClinicalContent = Boolean(
+    nlp.primarySymptom ||
+    (nlp.companionSymptoms && nlp.companionSymptoms.length > 0) ||
+    nlp.detectedDuration ||
+    nlp.cleanSeverity ||
+    nlp.probingAnswer ||
+    is104 || is108 || isESanjeevani || isPharmacy || isPsychiatric
+  );
+
+  if (!hasClinicalContent) {
+    // Pure conversational chatter without clinical or referral relevance: do not send to AI!
+    return null;
+  }
+
+  // 4. Construct Clean Standard Format for the AI Chat
+  let standardText = "";
+  let entitySignature = "";
+
+  if (is104 && !nlp.primarySymptom) {
+    standardText = "Caller Request: Requesting 104 Tele-Doctor phone consultation";
+    entitySignature = "req::104";
+  } else if (is108 && !nlp.primarySymptom) {
+    standardText = "Caller Request: Emergency 108 Ambulance required";
+    entitySignature = "req::108";
+  } else if (isESanjeevani && !nlp.primarySymptom) {
+    standardText = "Caller Request: Seeking e-Sanjeevani online doctor tele-consultation";
+    entitySignature = "req::esanjeevani";
+  } else if (isPharmacy && !nlp.primarySymptom) {
+    standardText = "Caller Request: Medicine refill at nearest dispensary pharmacy";
+    entitySignature = "req::pharmacy";
+  } else if (isPsychiatric && !nlp.primarySymptom) {
+    standardText = "Caller Request: Transfer to Tele-MANAS / Psychiatric Counseling Team";
+    entitySignature = "req::telemanas";
+  } else if (nlp.primarySymptom) {
+    const items = [`Complaint: ${nlp.primarySymptom}`];
+    if (nlp.detectedDuration) items.push(`Duration: ${nlp.detectedDuration}`);
+    if (nlp.cleanSeverity) items.push(`Severity: ${nlp.cleanSeverity}`);
+    if (nlp.companionSymptoms && nlp.companionSymptoms.length > 0) {
+      items.push(`Associated: ${nlp.companionSymptoms.join(", ")}`);
+    }
+    standardText = items.join(" | ");
+    entitySignature = `sym::${nlp.primarySymptom}::${nlp.detectedDuration || ""}::${nlp.cleanSeverity || ""}::${(nlp.companionSymptoms || []).sort().join(",")}`;
+  } else if (nlp.detectedDuration) {
+    standardText = `Duration: ${nlp.detectedDuration}`;
+    entitySignature = `dur::${nlp.detectedDuration}`;
+  } else if (nlp.cleanSeverity) {
+    standardText = `Severity: ${nlp.cleanSeverity}`;
+    entitySignature = `sev::${nlp.cleanSeverity}`;
+  } else if (nlp.probingAnswer) {
+    standardText = `Answer: ${nlp.probingAnswer}`;
+    entitySignature = `ans::${nlp.probingAnswer}`;
+  } else {
+    standardText = `Clinical Finding: ${nlp.cleanKeywords || text}`;
+    entitySignature = `obs::${(nlp.cleanKeywords || text).toLowerCase()}`;
+  }
+
+  // 5. Deduplication: Don't send same thing multiple times
+  if (sentSignaturesSet.has(entitySignature)) {
+    return null;
+  }
+
+  return {
+    standardText,
+    entitySignature,
+    nlp,
   };
 }
 

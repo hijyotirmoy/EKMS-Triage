@@ -33,53 +33,109 @@ export async function evaluateTriage(intake) {
       const content = data.content?.[0]?.text;
       if (content) {
         const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
-        return JSON.parse(cleaned);
+        return normalizeTriageDecision(JSON.parse(cleaned), intake);
       }
     } catch (err) {
       console.warn("Direct Anthropic API call failed:", err.message);
     }
   }
 
-  // 2. Upstream Live Claude Sonnet 4.6 evaluation via the live website's API key
-  const useLiveUpstream = process.env.USE_LIVE_UPSTREAM_AI !== "false";
-  if (useLiveUpstream) {
+  // 2. Direct Google Gemini 3.6 Flash triage evaluation
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-      const liveKey = process.env.UPSTREAM_API_KEY || "sk_live_vJjfGTfyHd4u5v-5Et49KQTfzSRzD8gk";
-      const liveUrl = process.env.UPSTREAM_API_URL || "https://esicdemotriage.dhwaniris.in/api/triage";
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `You are an expert ESIC / ESIS medical triage clinical evaluator for Indian call centers in Assam. Evaluate the caller's intake details and output strict valid JSON only (no markdown, no backticks):
+{
+  "urgency_level": "Emergency" | "Urgent" | "Routine" | "Self-care",
+  "urgency_score": 1-10,
+  "confidence": "high" | "medium" | "low",
+  "summary_en": "concise 1-2 sentence clinical summary in English",
+  "summary_hi": "concise 1-2 sentence clinical summary in Hindi",
+  "reasoning": "clinical justification for triage score",
+  "red_flags": ["list of red flags if any"],
+  "recommended_facility_type": "Nearest ESIC Hospital / Emergency Casualty" | "ESIC Dispensary / OPD",
+  "recommended_action": "clear action step for patient",
+  "call_108": true | false,
+  "detected_language": "English" | "Hindi" | "Hinglish",
+  "followup_questions": ["question 1", "question 2"]
+}
 
-      const upstreamRes = await fetch(liveUrl, {
+Intake data:
+${JSON.stringify(intake, null, 2)}`,
+                  },
+                ],
+              },
+            ],
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+          return normalizeTriageDecision(JSON.parse(cleaned), intake);
+        }
+      }
+    } catch (e) {
+      console.warn("Gemini triage evaluation fallback:", e.message);
+    }
+  }
+
+  // 3. Direct Groq Cloud AI triage evaluation
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
+          Authorization: `Bearer ${groqKey}`,
           "Content-Type": "application/json",
-          "X-API-Key": liveKey,
         },
         body: JSON.stringify({
-          caller_name: intake.caller_name || "Caller",
-          phone: intake.phone || "",
-          age: intake.age != null && intake.age !== "" ? Number(intake.age) : null,
-          sex: intake.sex || "",
-          symptom_notes: intake.symptom_notes,
-          duration: intake.duration || "",
-          severity_reported: Number(intake.severity_reported) || 5,
-          city: intake.city || "",
-          district: intake.district || "",
-          pincode: intake.pincode || "",
-          source_app: "console",
+          model: "qwen/qwen3.8-27b",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify(intake),
+            },
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 800,
         }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
-      if (upstreamRes.ok) {
-        const liveData = await upstreamRes.json();
-        if (liveData && liveData.triage) {
-          return liveData.triage;
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content;
+        if (text) {
+          return normalizeTriageDecision(JSON.parse(text), intake);
         }
       }
-    } catch (err) {
-      console.warn("Live upstream Claude call notice (falling back to built-in clinical engine):", err.message);
+    } catch (e) {
+      console.warn("Groq triage evaluation fallback:", e.message);
     }
   }
 
@@ -238,18 +294,121 @@ export async function evaluateTriage(intake) {
     ];
   }
 
-  return {
-    urgency_level,
-    urgency_score,
-    confidence: "high",
-    summary_en,
-    summary_hi,
-    reasoning,
-    red_flags,
-    recommended_facility_type,
-    recommended_action,
-    call_108,
-    detected_language,
-    followup_questions,
-  };
+  return normalizeTriageDecision(
+    {
+      urgency_level,
+      urgency_score,
+      confidence: "high",
+      summary_en,
+      summary_hi,
+      reasoning,
+      red_flags,
+      recommended_facility_type,
+      recommended_action,
+      call_108,
+      detected_language,
+      followup_questions,
+    },
+    intake
+  );
+}
+
+/**
+ * Normalizes triage output to strictly synchronize with EKMS AI consultative triage state.
+ * Ensures psychiatric/counselling distress, Tele-MANAS, 104, e-Sanjeevani, and Pharmacy
+ * are not erroneously collapsed into 108 Ambulance or default dispensary.
+ */
+function normalizeTriageDecision(triage, intake) {
+  if (!triage) return triage;
+
+  const ekmsCtx = intake.ekms_ai_context || {};
+  const tState = ekmsCtx.triageState || ekmsCtx;
+  const referral = (tState?.referralDestination || "").toLowerCase();
+  const notes = `${intake.symptom_notes || ""} ${tState?.symptom || ""} ${tState?.condition || ""}`.toLowerCase();
+
+  const isPsych = Boolean(
+    tState?.isPsychiatric ||
+    referral.includes("psych") ||
+    referral.includes("counsel") ||
+    referral.includes("manas") ||
+    referral.includes("14416") ||
+    /\b(suicid|mar ja|jaan de dunga|depress|udaas|hopeless|anxiety|ghabrahat|die\b|kill myself|self-harm|self harm|crying)\b/i.test(notes)
+  );
+
+  const isPoisonOrTrauma = /\b(pesticide|spray|chemical|zeher|poison|slit|overdose|hanging|severe bleed|unconscious|behosh)\b/i.test(notes);
+
+  // 1. Psychiatric Crisis / Depression / Self-harm: Priority Routing to Tele-MANAS
+  if (isPsych && !isPoisonOrTrauma) {
+    triage.is_psychiatric = true;
+    triage.call_108 = false; // NEVER dispatch 108 physical ambulance for emotional/psychiatric crisis
+    triage.recommended_facility_type = "Psychological Counselling Department / Tele-MANAS (14416)";
+    triage.recommended_action =
+      "Transfer call immediately to Psychological Counselling Department or Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
+    if (!triage.summary_en || triage.summary_en.toLowerCase().includes("physical") || triage.summary_en.toLowerCase().includes("hospital")) {
+      triage.summary_en = "Caller presents with severe emotional distress / suicidal ideation requiring urgent psychiatric counselling.";
+      triage.summary_hi = "कॉलर गंभीर मानसिक तनाव/अवसाद में है, तुरंत टेली-मानस (14416) परामर्श सहायता की आवश्यकता है।";
+    }
+    return triage;
+  }
+
+  // 2. Physical Emergency / 108 Dispatch
+  if (
+    referral.includes("108") ||
+    (!isPsych && /\b(heart attack|crushing chest|cardiac arrest|massive bleed|accident casualty|unconscious|severe trauma)\b/i.test(notes))
+  ) {
+    triage.call_108 = true;
+    triage.recommended_facility_type = "108 Emergency Ambulance / ESIC Hospital Casualty";
+    triage.recommended_action = "Dispatch 108 Emergency Ambulance immediately. Instruct caller to stay calm and not exert.";
+    return triage;
+  }
+
+  // 3. 104 Medical Team / Health Helpline
+  if (referral.includes("104")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
+    triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation.";
+    return triage;
+  }
+
+  // 4. e-Sanjeevani Telemedicine
+  if (referral.includes("sanjeevani")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "e-Sanjeevani National Telemedicine Portal";
+    triage.recommended_action = "Advise caller to use government e-Sanjeevani portal/app for online doctor consultation.";
+    return triage;
+  }
+
+  // 5. Nearest Pharmacy / Dispensary Store
+  if (referral.includes("pharmacy")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "Empanelled Pharmacy / ESIS Dispensary Store";
+    triage.recommended_action = "Guide caller to nearest empanelled chemist for prescribed medications and refills.";
+    return triage;
+  }
+
+  // 6. Forward to On-duty Medical Officer
+  if (referral.includes("doctor")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "On-Duty Medical Officer Escalation";
+    triage.recommended_action = "Forward call directly to on-duty ESIC Medical Officer workstation.";
+    return triage;
+  }
+
+  // 7. ESIC Hospital
+  if (referral.includes("hospital")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "Nearest ESIC Hospital / Emergency Casualty";
+    triage.recommended_action = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
+    return triage;
+  }
+
+  // 8. ESIS Dispensary
+  if (referral.includes("dispensary")) {
+    triage.call_108 = false;
+    triage.recommended_facility_type = "ESIS Dispensary Primary Care";
+    triage.recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";
+    return triage;
+  }
+
+  return triage;
 }

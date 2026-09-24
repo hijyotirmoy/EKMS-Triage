@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "EKMS triage",
+  title: "EKMS Triage",
   description:
     "AI-assisted urgency triage and nearest ESIC / ESIS facility routing for call-centre operators.",
   icons: {
@@ -10,7 +10,7 @@ export const metadata = {
     apple: "/logo.png",
   },
   openGraph: {
-    title: "EKMS triage",
+    title: "EKMS Triage",
     description:
       "AI-assisted urgency triage and nearest ESIC / ESIS facility routing for call-centre operators.",
     type: "website",
