@@ -321,101 +321,31 @@ export async function processDoctorConsultationTurn({
 
   // =========================================================================
   // MULTI-PROVIDER AI CASCADE ARCHITECTURE
-  // Priority: 1. Google Gemini Flash (3.6 / 3.5 / latest)
-  //           2. Groq Multi-Key (5 Keys failover, 3-turn sliding window)
+  // Priority: 1. Groq Multi-Key Pool (qwen/qwen3.8-27b, 30+ Keys failover, instant ~400ms)
+  //           2. Google Gemini Flash (gemini-2.0-flash / gemini-1.5-flash)
   //           3. OpenAI (gpt-4o-mini / gpt-4o)
   //           4. Anthropic Claude (via Dhwani ESIC Proxy / Direct)
   //           5. Local Deterministic Clinical Engine
   // =========================================================================
 
-  // --- Priority 1: Google Gemini AI API (Highest Human Empathy, Warmth & Clinical Fluency) ---
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    const geminiModels = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-pro-latest"];
-    for (const model of geminiModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7000);
-
-        // Sliding window of last 3 turns to minimize token payload while retaining context
-        const conversationText = history
-          .slice(-3)
-          .map((m) => `${m.sender === "user" || m.role === "user" ? "Caller" : "Doctor"}: ${m.text || m.content || ""}`)
-          .join("\n");
-
-        const promptText = `${SYSTEM_PROMPT}
-
-CONVERSATION HISTORY (Last 3 Turns):
-${conversationText}
-
-CURRENT CALLER INPUT: "${cleanInput}"
-CLINICAL CONTEXT: Suspected: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}
-ALREADY ASKED QUESTIONS: ${JSON.stringify(askedQuestionsList)}
-
-Strictly return a JSON object with:
-{
-  "probingQuestion": "Ask the IP: ... (Hinglish: ...)",
-  "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
-  "suspectedCondition": "Primary suspected condition",
-  "isPsychiatric": false,
-  "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "..." | null,
-  "referralReason": "..." | null,
-  "redFlagsDetected": [],
-  "duration": "...",
-  "isReadyForSummary": false,
-  "clinicalSummary": "..."
-}`;
-
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: promptText }] }],
-              generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 384 },
-            }),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (content) {
-            const parsed = JSON.parse(content);
-            if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-              return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
-            }
-          }
-        } else {
-          console.warn(`[AI Cascade] Gemini (${model}) limit/status ${res.status}, auto-shifting to Groq Multi-Key...`);
-          if (res.status === 429) break; // Project quota exhausted, shift to Groq immediately
-        }
-      } catch (err) {
-        console.warn(`[AI Cascade] Gemini (${model}) error:`, err.message, "- shifting to next provider...");
-      }
-    }
+  // --- Priority 1: Groq Cloud AI API with Multi-Key Pool (Ultra-fast, high clinical accuracy) ---
+  const groqKeys = [];
+  if (process.env.GROQ_API_KEY) groqKeys.push(process.env.GROQ_API_KEY);
+  if (process.env.GROQ_API_KEYS) {
+    groqKeys.push(...process.env.GROQ_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean));
+  }
+  for (let i = 1; i <= 30; i++) {
+    const k = process.env[`GROQ_API_KEY_${i}`];
+    if (k && !groqKeys.includes(k)) groqKeys.push(k);
   }
 
-  // --- Priority 2: Groq Cloud AI API with Multi-Key Failover ---
-  const groqKeys = [
-    process.env.GROQ_API_KEY,
-    process.env.GROQ_API_KEY_2,
-    process.env.GROQ_API_KEY_3,
-    process.env.GROQ_API_KEY_4,
-    process.env.GROQ_API_KEY_5,
-  ].filter(Boolean);
   if (groqKeys.length > 0) {
     const groqCandidateModels = [
       { name: "qwen/qwen3.8-27b", maxTokens: 384, temperature: 0.3 },
-      { name: "openai/gpt-oss-120b", maxTokens: 384, temperature: 0.3 },
-      { name: "openai/gpt-oss-20b", maxTokens: 384, temperature: 0.3 },
+      { name: "allam-2-7b", maxTokens: 384, temperature: 0.3 },
     ];
 
-    // Sliding window of last 3 turns saves 400-600 tokens per turn while clinical context retains state
+    // Sliding window of last 3 turns saves tokens while clinical context retains full state
     const conversationMessages = [
       { role: "system", content: SYSTEM_PROMPT },
       ...history.slice(-3).map((m) => ({
@@ -469,7 +399,7 @@ Respond strictly in valid JSON format:
               }
             }
           } else {
-            console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) limit/status ${res.status}`);
+            console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) status ${res.status}`);
             if (res.status === 429) {
               console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} limit reached (429), auto-shifting to next Groq key...`);
               break; // Shift to next key immediately
@@ -478,6 +408,77 @@ Respond strictly in valid JSON format:
         } catch (err) {
           console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) error:`, err.message);
         }
+      }
+    }
+  }
+
+  // --- Priority 2: Google Gemini AI API ---
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest"];
+    for (const model of geminiModels) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+        const conversationText = history
+          .slice(-3)
+          .map((m) => `${m.sender === "user" || m.role === "user" ? "Caller" : "Doctor"}: ${m.text || m.content || ""}`)
+          .join("\n");
+
+        const promptText = `${SYSTEM_PROMPT}
+
+CONVERSATION HISTORY (Last 3 Turns):
+${conversationText}
+
+CURRENT CALLER INPUT: "${cleanInput}"
+CLINICAL CONTEXT: Suspected: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}
+ALREADY ASKED QUESTIONS: ${JSON.stringify(askedQuestionsList)}
+
+Strictly return a JSON object with:
+{
+  "probingQuestion": "Ask the IP: ... (Hinglish: ...)",
+  "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
+  "suspectedCondition": "Primary suspected condition",
+  "isPsychiatric": false,
+  "severity": "High" | "Moderate" | "Mild",
+  "referralDestination": "..." | null,
+  "referralReason": "..." | null,
+  "redFlagsDetected": [],
+  "duration": "...",
+  "isReadyForSummary": false,
+  "clinicalSummary": "..."
+}`;
+
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: promptText }] }],
+              generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 384 },
+            }),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (content) {
+            const parsed = JSON.parse(content);
+            if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+              return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
+            }
+          }
+        } else {
+          console.warn(`[AI Cascade] Gemini (${model}) status ${res.status}`);
+          if (res.status === 429) break;
+        }
+      } catch (err) {
+        console.warn(`[AI Cascade] Gemini (${model}) error:`, err.message);
       }
     }
   }
@@ -591,11 +592,32 @@ Respond strictly in valid JSON format:
           cleanQ = sanitizeClinicalQuestion(cleanQ, fullNotes, cleanInput);
           cleanQ = enforceSingleQuestion(cleanQ);
 
-          const conditionLabel = /\b(fall|fell|falling|gira|giri|bed)\b/i.test(cleanInput)
-            ? "Traumatic Fall / Impact Injury Assessment"
-            : (tr.summary_en ? tr.summary_en.slice(0, 60) : "Clinical Triage Evaluation");
+          // Add empathetic Hinglish translation if Dhwani returns only English
+          if (!/\((?:Hinglish|Hindi|हिन्दी):/i.test(cleanQ)) {
+            if (/\bwhat symptoms are present\b/i.test(cleanQ)) {
+              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Aapko abhi is samay kya-kya lakshan ya takleef mehsoos ho rahi hai?")"');
+            } else if (/\bhow long ago did the bite happen\b/i.test(cleanQ)) {
+              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Saanp ne kitni der pehle kaata tha?")"');
+            } else if (/\bwhere.*bite occur\b/i.test(cleanQ)) {
+              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")"');
+            } else if (/\bdescribe the snake\b/i.test(cleanQ)) {
+              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Kya aapne saanp ko dekha tha, uska rang ya aakaar kaisa tha?")"');
+            }
+          }
 
-          const contextualAns = generateContextualAnswers(cleanQ, cleanInput, Boolean(tr.is_psychiatric));
+          let conditionLabel = "Clinical Triage Evaluation";
+          if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(fullNotes)) {
+            conditionLabel = "Snake Bite (Type undetermined) / Local Tissue Reaction";
+          } else if (/\b(fall|fell|falling|gira|giri|bed)\b/i.test(fullNotes)) {
+            conditionLabel = "Traumatic Fall / Impact Injury Assessment";
+          } else if (/\b(chest pain|chhati|heart)\b/i.test(fullNotes)) {
+            conditionLabel = "Suspected Acute Coronary Syndrome";
+          } else if (tr.summary_en) {
+            const cleaned = tr.summary_en.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
+            conditionLabel = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+          }
+
+          const contextualAns = generateContextualAnswers(cleanQ, cleanInput, Boolean(tr.is_psychiatric), fullNotes);
 
           const anthropicParsed = {
             probingQuestion: cleanQ,
@@ -627,10 +649,11 @@ Respond strictly in valid JSON format:
 /**
  * Generates highly realistic, question-relevant answer chips if LLM returns empty or off-topic options
  */
-export function generateContextualAnswers(questionText, userInput = "", isPsych = false) {
+export function generateContextualAnswers(questionText, userInput = "", isPsych = false, fullContextText = "") {
   const q = (questionText || "").toLowerCase();
   const u = (userInput || "").toLowerCase();
-  const qu = `${q} ${u}`;
+  const ctx = (fullContextText || "").toLowerCase();
+  const qu = `${q} ${u} ${ctx}`;
 
   // 1. Age Inquiry (for third-party inquiries about relatives/patients)
   if (/\b(how old|what is (?:his|her|the|their|your) age|age of|patient'?s? age|father'?s? age|mother'?s? age|child'?s? age|kitni umar)\b/i.test(q)) {
@@ -740,13 +763,17 @@ export function generateContextualAnswers(questionText, userInput = "", isPsych 
     ];
   }
 
-  // 9. Snake Bite / Envenomation Symptoms (swelling, numbness, breathing)
-  if (/\b(swelling|numbness|swollen|sujan|sunnta)\b/i.test(q)) {
+  // 9. Snake Bite / Envenomation Symptoms (swelling, numbness, breathing, present symptoms)
+  if (
+    (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(qu)) &&
+    (/\b(swelling|numbness|swollen|sujan|sunnta|symptoms|lakshan|present right now|experiencing|what symptoms)\b/i.test(q) ||
+     /\bwhat symptoms are present\b/i.test(q))
+  ) {
     return [
-      "Rapid swelling spreading around bite",
-      "Area feels completely numb and cold",
-      "Having difficulty breathing / chest tight",
-      "No swelling yet, only puncture marks",
+      "Rapid swelling & intense burning pain around bite",
+      "Numbness, tingling, or weakness spreading in leg",
+      "Difficulty breathing, dizziness, or blurred vision",
+      "No severe symptoms, only local puncture pain",
     ];
   }
 
@@ -1009,7 +1036,34 @@ export function generateContextualAnswers(questionText, userInput = "", isPsych 
     ];
   }
 
-  // 29. Final clinical fallback
+  // 29. Final clinical condition-aware fallback
+  if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(qu)) {
+    return [
+      "Rapid swelling & intense burning pain around bite",
+      "Numbness, tingling, or weakness spreading in leg",
+      "Difficulty breathing, dizziness, or blurred vision",
+      "No severe symptoms, only local puncture pain",
+    ];
+  }
+
+  if (/\b(fall|fell|falling|injury|chot|fracture|wound)\b/i.test(qu)) {
+    return [
+      "Severe pain and swelling in injured area",
+      "Unable to bear weight or move limb",
+      "Mild bruise, able to walk slowly",
+      "Dizziness or nausea after injury",
+    ];
+  }
+
+  if (/\b(chest|chhati|heart)\b/i.test(qu)) {
+    return [
+      "Heavy pressure radiating to arm or jaw",
+      "Shortness of breath and sweating",
+      "Sharp pain while taking deep breath",
+      "Mild discomfort, comes and goes",
+    ];
+  }
+
   if (/\b(fever|bukhar|body pain|badan)\b/i.test(qu)) {
     return [
       "Started earlier today (< 24 hours)",
@@ -1161,7 +1215,11 @@ export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInp
 function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsList = [], history = []) {
   const cleanInput = (userInput || "").toLowerCase();
   const prevRef = (prevState.referralDestination || "").toLowerCase();
-  const allContext = `${cleanInput} ${prevRef} ${prevState.suspectedCondition || ""} ${prevState.symptom || ""}`.toLowerCase();
+  const historyText = history
+    .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
+    .join(" ")
+    .toLowerCase();
+  const allContext = `${cleanInput} ${prevRef} ${prevState.suspectedCondition || ""} ${prevState.symptom || ""} ${historyText}`.toLowerCase();
 
   const userTextHasPsych =
     /\b(suicid\w*|mar ja\w*|jaan de dunga|depress\w*|udaas\b|\brona\b|hopeless\b|anxiety\b|ghabrahat\b|mental health|akelepan\b|\bpareshan\b|\bdie\b|kill myself|crying\b|cried\b|zindagi se thak|lonely\b|niraash\b)\b/i.test(
@@ -1433,10 +1491,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       (!isAskingCasualties && answersHaveCasualties) ||
       (isYesNo && !answersHaveYesNo && !answersHaveDuration)
     ) {
-      suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych);
+      suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych, allContext);
     }
   } else {
-    suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych);
+    suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych, allContext);
   }
 
   const isSelfHarmTrauma =
@@ -1449,6 +1507,17 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   let finalCondition = raw.suspectedCondition;
   if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
     finalCondition = "Traumatic Fall / Impact Injury Assessment";
+  } else if (/Caller reports/i.test(finalCondition)) {
+    if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(allContext)) {
+      finalCondition = "Snake Bite (Type undetermined) / Local Tissue Reaction";
+    } else if (/\b(chest pain|chhati|heart)\b/i.test(allContext)) {
+      finalCondition = "Suspected Acute Coronary Syndrome";
+    } else if (/\b(fever|bukhar)\b/i.test(allContext)) {
+      finalCondition = "Febrile Illness / Pyrexia under Investigation";
+    } else {
+      const cleaned = finalCondition.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
+      finalCondition = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
   } else if (isPsych) {
     finalCondition = raw.suspectedCondition || "Psychological Distress / Anxiety Crisis";
   } else if (is104PhoneDoctor) {
@@ -1483,6 +1552,11 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
  */
 export function buildLocalDoctorConsultationFallback(userInput, history = [], prevState = {}) {
   const cleanInput = (userInput || "").toLowerCase().trim();
+  const historyText = history
+    .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
+    .join(" ")
+    .toLowerCase();
+  const effectiveInput = `${cleanInput} ${prevState.suspectedCondition || ""} ${prevState.symptom || ""} ${historyText}`.toLowerCase();
 
   // Extract all questions already asked by the bot in this session
   const askedQuestions = history
@@ -1838,20 +1912,46 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   // Build disease-adaptive probing question tailored to the exact complaint
   let currentStep;
 
-  if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(cleanInput)) {
+  if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(effectiveInput)) {
     conditionLabel = "Suspected Snake / Animal Bite Envenomation";
-    currentStep = {
-      title: "Bite Location Inquiry",
-      question: 'Ask the IP: "Where on your body did the snake bite occur?" (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")',
-      options: [
-        "Bite is on foot / ankle",
-        "Bite is on lower leg",
-        "Bite is on hand / fingers",
-        "Bite is on arm / wrist",
-      ],
-      severity: "High",
-    };
-  } else if (/\b(weakness|dizzy|dizziness|faint|chakkar|kamzori|fatigue|giddiness|unsteady)\b/i.test(cleanInput)) {
+    if (!hasAsked(["kahan", "where on your body", "kis hisse", "describe the snake"])) {
+      currentStep = {
+        title: "Bite Location Inquiry",
+        question: 'Ask the IP: "Where on your body did the snake bite occur?" (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")',
+        options: [
+          "Bite is on foot / ankle",
+          "Bite is on lower leg",
+          "Bite is on hand / fingers",
+          "Bite is on arm / wrist",
+        ],
+        severity: "High",
+      };
+    } else if (!hasAsked(["swelling", "sujan", "numbness", "sunnta"])) {
+      currentStep = {
+        title: "Envenomation Red Flags",
+        question: 'Ask the IP: "Are you experiencing rapid swelling, numbness, or difficulty breathing around the bite?" (Hinglish: "Kya bite ke aas-paas tezi se sujan, sunnta, ya saans lene me takleef ho rahi hai?")',
+        options: [
+          "Rapid swelling & intense burning pain",
+          "Numbness and weakness spreading in limb",
+          "Difficulty breathing or blurred vision",
+          "No severe swelling, only mild local pain",
+        ],
+        severity: "High",
+      };
+    } else {
+      currentStep = {
+        title: "Bite Appearance & Wound Check",
+        question: 'Ask the IP: "Can you describe what the bite mark looks like, such as two puncture marks or redness?" (Hinglish: "Kya aap bata sakte hain ki bite ka nishan kaisa dikh raha hai?")',
+        options: [
+          "Two clear puncture fang marks visible",
+          "Single scratch or puncture wound",
+          "Redness and bruising, marks unclear",
+          "No visible marks, only pain",
+        ],
+        severity: "High",
+      };
+    }
+  } else if (/\b(weakness|dizzy|dizziness|faint|chakkar|kamzori|fatigue|giddiness|unsteady)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Weakness & Postural Dizziness";
     currentStep = {
       title: "Onset & Orthostatic Instability",
