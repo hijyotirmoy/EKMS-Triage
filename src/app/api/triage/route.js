@@ -86,10 +86,29 @@ export async function POST(request) {
       }
     }
 
-    // 2. Resolve location & rank nearest facilities (always nearest from pincode, hospital first if severe physical case)
+    // 2. Resolve location & rank nearest facilities (always nearest from pincode, hospital first if severe, dispensary first if normal/moderate)
     const facilities = await getFacilities();
     const resolved_location = resolveCallerLocation(intake, facilities);
     const nearest_facilities = rankNearestFacilities(resolved_location, facilities, 5, isSevere && !isPsychiatricCase);
+
+    const topFacility = nearest_facilities?.[0];
+    if (
+      topFacility &&
+      !isPsychiatricCase &&
+      !explicitReferral.includes("108") &&
+      !explicitReferral.includes("104") &&
+      !explicitReferral.includes("sanjeevani") &&
+      !explicitReferral.includes("pharmacy") &&
+      !explicitReferral.includes("doctor")
+    ) {
+      if (isSevere) {
+        triage.recommended_facility_type = `${topFacility.name} (Emergency Hospital)`;
+        triage.recommended_action = `Advise patient to proceed immediately to ${topFacility.name} (${topFacility.pincode ? `PIN: ${topFacility.pincode}, ` : ""}${topFacility.distance_km != null ? `${topFacility.distance_km} km` : "nearest"}) casualty or emergency OPD.`;
+      } else {
+        triage.recommended_facility_type = `${topFacility.name} (Primary Care Dispensary)`;
+        triage.recommended_action = `Advise patient to visit ${topFacility.name} (${topFacility.pincode ? `PIN: ${topFacility.pincode}, ` : ""}${topFacility.distance_km != null ? `${topFacility.distance_km} km` : "nearest"}) during regular OPD hours for doctor examination and prescription.`;
+      }
+    }
 
     const latency_ms = Date.now() - startTime;
     const case_ref = generateCaseRef();

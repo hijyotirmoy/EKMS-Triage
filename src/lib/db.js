@@ -177,6 +177,73 @@ export async function addFacilities(newItems) {
   return memoryFacilities.length;
 }
 
+export async function deleteFacilities(ids) {
+  if (!ids || !ids.length) return 0;
+  const idSet = new Set(ids.map((id) => String(id)));
+  const ctx = await getFirestoreContext();
+
+  if (ctx) {
+    try {
+      if (ctx.type === "admin") {
+        const batch = ctx.db.batch();
+        for (const id of idSet) {
+          const docRef = ctx.db.collection("facilities").doc(id);
+          batch.delete(docRef);
+        }
+        await batch.commit();
+
+        const idChunks = [];
+        const idList = Array.from(idSet);
+        for (let i = 0; i < idList.length; i += 30) {
+          idChunks.push(idList.slice(i, i + 30));
+        }
+        for (const chunk of idChunks) {
+          const snapshot = await ctx.db
+            .collection("facilities")
+            .where("id", "in", chunk)
+            .get()
+            .catch(() => ({ empty: true }));
+          if (!snapshot.empty) {
+            const b2 = ctx.db.batch();
+            snapshot.forEach((doc) => b2.delete(doc.ref));
+            await b2.commit();
+          }
+        }
+      } else {
+        const { collection, query, where, getDocs, deleteDoc, doc } = await import(
+          "firebase/firestore"
+        );
+        for (const id of idSet) {
+          await deleteDoc(doc(ctx.db, "facilities", id)).catch(() => {});
+        }
+        const idChunks = [];
+        const idList = Array.from(idSet);
+        for (let i = 0; i < idList.length; i += 30) {
+          idChunks.push(idList.slice(i, i + 30));
+        }
+        for (const chunk of idChunks) {
+          try {
+            const q = query(
+              collection(ctx.db, "facilities"),
+              where("id", "in", chunk)
+            );
+            const snap = await getDocs(q);
+            for (const docSnap of snap.docs) {
+              await deleteDoc(docSnap.ref).catch(() => {});
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      console.warn("Could not delete facilities from Firestore:", e.message);
+    }
+  }
+
+  const beforeCount = memoryFacilities.length;
+  memoryFacilities = memoryFacilities.filter((f) => !idSet.has(String(f.id)));
+  return beforeCount - memoryFacilities.length;
+}
+
 // Cases operations
 export async function getCases(filters = {}) {
   const { urgency, q } = filters;

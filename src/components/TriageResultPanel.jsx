@@ -546,10 +546,31 @@ export const TriageResultPanel = ({ result, loading }) => {
               <li
                 key={f.id || i}
                 data-testid="facility-card-item"
-                className="group rounded-md border border-border/70 bg-secondary/40 p-4 transition-colors duration-200 hover:border-primary/50"
+                className={`group rounded-md border p-4 transition-all duration-200 ${
+                  i === 0
+                    ? "border-primary/60 bg-primary/5 shadow-xs"
+                    : "border-border/70 bg-secondary/40 hover:border-primary/50"
+                }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                      {i === 0 && (
+                        <span className="rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[10px] font-bold text-primary">
+                          ⭐ Recommended Facility
+                        </span>
+                      )}
+                      {f.is_exact_pincode && (
+                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                          🎯 Pincode Match ({f.pincode})
+                        </span>
+                      )}
+                      {f.facility_category_label && (
+                        <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          {f.facility_category_label}
+                        </span>
+                      )}
+                    </div>
                     <p className="flex items-center gap-2 text-sm font-semibold">
                       <Building2 className="h-4 w-4 shrink-0 text-primary/80" />
                       <span className="truncate">{f.name}</span>

@@ -1268,19 +1268,19 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
       return [
         {
           id: "gen_q1",
-          title: "Severity & Daily Function",
-          question: `Regarding ${activeCondition}, how severe is the distress right now — is it unbearable, moderate, or mild?`,
+          title: "Symptom Specifics & Onset",
+          question: `Could you describe specifically what symptoms you are experiencing with ${activeCondition}, and when did they begin?`,
           options: [
-            "High / Severe distress — Unable to perform normal activities or resting in bed",
-            "Moderate distress — Significant pain or discomfort but manageable",
-            "Mild distress — Early stage symptoms / Seeking guidance",
-            `Urgent specialist opinion needed for ${activeCondition}`,
+            "Started suddenly today with significant discomfort",
+            "Gradually worsening over the last 2 to 3 days",
+            "Mild symptoms present for several days",
+            `Urgent doctor evaluation needed for ${activeCondition}`,
           ],
         },
         {
           id: "gen_q2",
-          title: "Emergency Red Flags Check",
-          question: "Are you experiencing any shortness of breath, chest pain, high fever, or dizziness with this condition?",
+          title: "Emergency Warning Signs",
+          question: `Are you noticing any high fever, breathing trouble, severe pain, or inability to keep fluids down with this ${activeCondition}?`,
           options: [
             "Shortness of breath or chest pain",
             "High fever with severe shivering",

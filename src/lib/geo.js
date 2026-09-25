@@ -112,6 +112,21 @@ export function isHospital(f) {
   if (!f) return false;
   const type = (f.facility_type || "").toLowerCase();
   const name = (f.name || "").toLowerCase();
+  const scheme = (f.scheme || "").toLowerCase();
+
+  // If designated as tie-up or empanelled, classify as tie-up
+  if (
+    type.includes("tie-up") ||
+    type.includes("tie up") ||
+    type.includes("empanelled") ||
+    name.includes("tie-up") ||
+    name.includes("tie up") ||
+    name.includes("empanelled") ||
+    scheme.includes("tie")
+  ) {
+    return false;
+  }
+
   return (
     type.includes("hospital") ||
     type.includes("medical college") ||
@@ -120,6 +135,74 @@ export function isHospital(f) {
     name.includes("casualty") ||
     name.includes("emergency")
   );
+}
+
+export function isDispensary(f) {
+  if (!f) return false;
+  if (isHospital(f)) return false;
+  const type = (f.facility_type || "").toLowerCase();
+  const name = (f.name || "").toLowerCase();
+  const scheme = (f.scheme || "").toLowerCase();
+
+  if (
+    type.includes("tie-up") ||
+    type.includes("tie up") ||
+    type.includes("empanelled") ||
+    name.includes("tie-up") ||
+    name.includes("tie up") ||
+    name.includes("empanelled") ||
+    scheme.includes("tie")
+  ) {
+    return false;
+  }
+
+  return (
+    type.includes("dispensary") ||
+    type.includes("opd") ||
+    type.includes("phc") ||
+    type.includes("chc") ||
+    type.includes("clinic") ||
+    type.includes("health centre") ||
+    name.includes("dispensary") ||
+    name.includes("clinic")
+  );
+}
+
+export function isTieUp(f) {
+  if (!f) return false;
+  const type = (f.facility_type || "").toLowerCase();
+  const name = (f.name || "").toLowerCase();
+  const scheme = (f.scheme || "").toLowerCase();
+
+  return (
+    type.includes("tie-up") ||
+    type.includes("tie up") ||
+    type.includes("empanelled") ||
+    type.includes("diagnostic") ||
+    type.includes("private") ||
+    name.includes("tie-up") ||
+    name.includes("tie up") ||
+    name.includes("empanelled") ||
+    name.includes("diagnostic") ||
+    scheme.includes("tie") ||
+    (!isHospital(f) && !isDispensary(f))
+  );
+}
+
+export function getFacilityTier(facility, isSevere) {
+  if (isTieUp(facility)) return 2; // Tier 3: Tie-up facility
+
+  if (isSevere) {
+    // Severe condition: Hospital (Tier 0) -> Dispensary (Tier 1) -> Tie-up (Tier 2)
+    if (isHospital(facility)) return 0;
+    if (isDispensary(facility)) return 1;
+    return 2;
+  } else {
+    // Normal / Moderate condition: Dispensary (Tier 0) -> Hospital (Tier 1) -> Tie-up (Tier 2)
+    if (isDispensary(facility)) return 0;
+    if (isHospital(facility)) return 1;
+    return 2;
+  }
 }
 
 export function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -142,42 +225,54 @@ export function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
  * Resolves caller location with strict priority given to PINCODE when provided.
  */
 export function resolveCallerLocation(input, facilities = []) {
-  const { latitude, longitude, pincode, district, city } = input;
+  const { latitude, longitude, district, city } = input || {};
+  let cleanPin = input?.pincode ? String(input.pincode).trim() : null;
+
+  // Auto-extract 6-digit Assam pincode if mentioned in notes/address
+  if (!cleanPin && input?.symptom_notes) {
+    const extracted = String(input.symptom_notes).match(/\b(78\d{4})\b/);
+    if (extracted) cleanPin = extracted[1];
+  }
+  if (!cleanPin && input?.address) {
+    const extracted = String(input.address).match(/\b(78\d{4})\b/);
+    if (extracted) cleanPin = extracted[1];
+  }
 
   // PRIORITY 1: PINCODE (Always route to nearest from the caller's pincode)
-  if (pincode && String(pincode).trim()) {
-    const cleanPin = String(pincode).trim();
-
+  if (cleanPin) {
     // 1. Exact match in facilities dataset
     const match = facilities.find((f) => f.pincode && f.pincode.trim() === cleanPin && f.latitude != null);
     if (match) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
+        pincode: cleanPin,
         method: "pincode",
         matched: `Pincode ${cleanPin} (${match.name})`,
       };
     }
 
-    // 2. Direct address text match for pincode
-    const addrMatch = facilities.find((f) => f.address && f.address.includes(cleanPin) && f.latitude != null);
-    if (addrMatch) {
-      return {
-        latitude: addrMatch.latitude,
-        longitude: addrMatch.longitude,
-        method: "pincode",
-        matched: `Pincode ${cleanPin} (${addrMatch.name})`,
-      };
-    }
-
-    // 3. Known Assam Pincode database lookup
+    // 2. Known Assam Pincode database lookup (accurate geographic coordinates)
     const pinCoord = lookupAssamPincode(cleanPin);
     if (pinCoord) {
       return {
         latitude: pinCoord.latitude,
         longitude: pinCoord.longitude,
+        pincode: cleanPin,
         method: "pincode",
         matched: `Pincode ${cleanPin} (${pinCoord.area})`,
+      };
+    }
+
+    // 3. Direct address text match for pincode
+    const addrMatch = facilities.find((f) => f.address && f.address.includes(cleanPin) && f.latitude != null);
+    if (addrMatch) {
+      return {
+        latitude: addrMatch.latitude,
+        longitude: addrMatch.longitude,
+        pincode: cleanPin,
+        method: "pincode",
+        matched: `Pincode ${cleanPin} (${addrMatch.name})`,
       };
     }
 
@@ -187,6 +282,7 @@ export function resolveCallerLocation(input, facilities = []) {
       return {
         latitude: prefixMatch.latitude,
         longitude: prefixMatch.longitude,
+        pincode: cleanPin,
         method: "pincode",
         matched: `Pincode Area ${cleanPin} (${prefixMatch.area})`,
       };
@@ -198,6 +294,7 @@ export function resolveCallerLocation(input, facilities = []) {
     return {
       latitude: Number(latitude),
       longitude: Number(longitude),
+      pincode: cleanPin || null,
       method: "coordinates",
       matched: `GPS (${Number(latitude).toFixed(4)}, ${Number(longitude).toFixed(4)})`,
     };
@@ -213,6 +310,7 @@ export function resolveCallerLocation(input, facilities = []) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
+        pincode: cleanPin || null,
         method: "district",
         matched: `District ${match.district}`,
       };
@@ -233,6 +331,7 @@ export function resolveCallerLocation(input, facilities = []) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
+        pincode: cleanPin || null,
         method: "city",
         matched: `City ${city}`,
       };
@@ -243,58 +342,87 @@ export function resolveCallerLocation(input, facilities = []) {
   return {
     latitude: 26.1445,
     longitude: 91.7362,
+    pincode: cleanPin || null,
     method: "default",
     matched: "Assam regional center",
   };
 }
 
 /**
- * Ranks nearest facilities.
- * When isSevere is true, HOSPITALS are ALWAYS ranked first (sorted by nearest distance to pincode),
- * followed by dispensaries.
+ * Ranks nearest facilities based on caller location and condition severity:
+ * - If Pincode is provided: First and always refer to the facility with the nearest / matching pincode.
+ * - If Severe condition: Always refer to Hospital nearest -> then Dispensary -> then Tie-up.
+ * - If Normal/Moderate condition: Always refer to Dispensary nearest -> then Hospital -> then Tie-up.
  */
 export function rankNearestFacilities(callerLoc, facilities, limit = 5, isSevere = false) {
-  if (!callerLoc || callerLoc.latitude == null || callerLoc.longitude == null) {
-    let sorted = [...facilities];
-    if (isSevere) {
-      sorted.sort((a, b) => {
-        const aHosp = isHospital(a) ? 0 : 1;
-        const bHosp = isHospital(b) ? 0 : 1;
-        return aHosp - bHosp;
-      });
-    }
-    return sorted.slice(0, limit).map((f) => ({
-      ...f,
-      distance_km: null,
-      maps_url: `https://www.google.com/maps/dir/?api=1&destination=${f.latitude},${f.longitude}`,
-    }));
-  }
+  if (!facilities || !facilities.length) return [];
+
+  const callerPin = callerLoc?.pincode ? String(callerLoc.pincode).trim() : null;
+  const hasCoords = callerLoc && callerLoc.latitude != null && callerLoc.longitude != null;
 
   const scored = facilities.map((f) => {
-    const dist = calculateHaversineDistanceKm(
-      callerLoc.latitude,
-      callerLoc.longitude,
-      f.latitude,
-      f.longitude
+    const cleanFacPin = f.pincode ? String(f.pincode).trim() : null;
+    const isExactPin = Boolean(
+      callerPin && (
+        (cleanFacPin && callerPin === cleanFacPin) ||
+        (f.address && f.address.includes(callerPin))
+      )
     );
+
+    let dist = null;
+    if (hasCoords && f.latitude != null && f.longitude != null) {
+      dist = calculateHaversineDistanceKm(
+        callerLoc.latitude,
+        callerLoc.longitude,
+        f.latitude,
+        f.longitude
+      );
+    }
+
+    if (isExactPin) {
+      dist = 0;
+    }
+
+    const tier = getFacilityTier(f, isSevere);
+    const categoryLabel =
+      tier === 0
+        ? (isSevere ? "Hospital (Emergency / Casualty)" : "Dispensary (Primary Care OPD)")
+        : tier === 1
+        ? (isSevere ? "Dispensary (Secondary Option)" : "Hospital (Secondary Option)")
+        : "Tie-up Facility";
+
     return {
       ...f,
-      distance_km: dist ?? 9999,
-      maps_url: `https://www.google.com/maps/dir/?api=1&destination=${f.latitude},${f.longitude}`,
+      distance_km: dist != null ? dist : (isExactPin ? 0 : 9999),
+      is_exact_pincode: isExactPin,
+      facility_tier: tier,
+      facility_category_label: categoryLabel,
+      maps_url: f.latitude && f.longitude
+        ? `https://www.google.com/maps/dir/?api=1&destination=${f.latitude},${f.longitude}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(f.name + " " + (f.address || ""))}`,
     };
   });
 
   scored.sort((a, b) => {
-    // If the case is severe, ALWAYS send the IP to a Hospital first!
-    if (isSevere) {
-      const aHosp = isHospital(a) ? 0 : 1;
-      const bHosp = isHospital(b) ? 0 : 1;
-      if (aHosp !== bHosp) {
-        return aHosp - bHosp; // 0 (Hospital) comes before 1 (Dispensary)
-      }
+    // 1. Condition Hierarchy:
+    // Severe: Hospital (0) -> Dispensary (1) -> Tie-up (2)
+    // Normal/Moderate: Dispensary (0) -> Hospital (1) -> Tie-up (2)
+    if (a.facility_tier !== b.facility_tier) {
+      return a.facility_tier - b.facility_tier;
     }
-    // Within the same facility tier, rank by nearest distance to caller's pincode
-    return a.distance_km - b.distance_km;
+
+    // 2. Exact Pincode match within the same tier comes first
+    if (a.is_exact_pincode !== b.is_exact_pincode) {
+      return (b.is_exact_pincode ? 1 : 0) - (a.is_exact_pincode ? 1 : 0);
+    }
+
+    // 3. Nearest Distance in km from caller's pincode / location
+    if (a.distance_km !== b.distance_km) {
+      return a.distance_km - b.distance_km;
+    }
+
+    // 4. Stable tie-breaker
+    return (a.name || "").localeCompare(b.name || "");
   });
 
   return scored.slice(0, limit);

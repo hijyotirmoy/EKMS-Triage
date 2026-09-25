@@ -18,7 +18,10 @@ export async function GET(request) {
 
   const isSevere =
     searchParams.get("severe") === "true" ||
-    Number(searchParams.get("severity") || 0) >= 7;
+    Number(searchParams.get("severity") || 0) >= 7 ||
+    ["emergency", "urgent", "high"].includes(
+      (searchParams.get("urgency") || "").toLowerCase()
+    );
 
   const nearest = rankNearestFacilities(callerLoc, facilities, 5, isSevere);
 
