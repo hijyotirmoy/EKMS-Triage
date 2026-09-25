@@ -8,7 +8,11 @@ export async function GET(request) {
   const facility_type = searchParams.get("facility_type") || "all";
 
   const list = await getFacilities({ q, district, facility_type });
-  return NextResponse.json(list);
+  return NextResponse.json(list, {
+    headers: {
+      "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+    },
+  });
 }
 
 export async function DELETE(request) {

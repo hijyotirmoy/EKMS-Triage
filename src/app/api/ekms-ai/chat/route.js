@@ -42,6 +42,8 @@ export async function POST(request) {
       referralDestination: doctorResult.referralDestination,
       referralReason: doctorResult.referralReason,
       isPsychiatric: doctorResult.isPsychiatric,
+      is_dual_protocol: doctorResult.is_dual_protocol || false,
+      call_referral_secondary: doctorResult.call_referral_secondary || null,
       clinicalSummary: doctorResult.clinicalSummary,
       isReadyForSummary: doctorResult.isReadyForSummary,
       triageSummary: {

@@ -238,7 +238,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
             <option value="all">All types</option>
             {(meta?.facility_types || []).map((t) => (
               <option key={t} value={t}>
-                {t}
+                {t === "Tie-Up Hospital" ? "Tie-Up Facility" : t}
               </option>
             ))}
           </select>
@@ -432,7 +432,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] pl-6">
                   <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                    {f.facility_type}
+                    {f.facility_type === "Tie-Up Hospital" ? "Tie-Up Facility" : f.facility_type}
                   </span>
                   <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
                     {f.district}
@@ -561,9 +561,6 @@ export const FacilityDirectory = ({ meta, onImported }) => {
       <div className="mono mt-6 border-t border-border/60 pt-4 text-[11px] text-muted-foreground flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <p>
           Supported file formats: <span className="text-foreground font-medium">Excel (.xlsx, .xls)</span> and <span className="text-foreground font-medium">CSV (.csv)</span>.
-        </p>
-        <p>
-          Columns: name, facility_type, scheme, address, district, block, pincode, state, latitude, longitude, site_code, phone
         </p>
       </div>
 

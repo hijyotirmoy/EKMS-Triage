@@ -106,13 +106,17 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       triageState: {
         symptom: newState.suspectedCondition,
         condition: newState.suspectedCondition,
+        suspectedCondition: newState.suspectedCondition,
         severity: newState.severity,
+        severityScore: newState.severityScore,
         duration: newState.duration,
         medication: newState.medication,
         associated: newState.redFlagsDetected,
+        redFlagsDetected: newState.redFlagsDetected,
         referralDestination: newState.referralDestination,
         referralReason: newState.referralReason,
         isPsychiatric: newState.isPsychiatric,
+        clinicalSummary: newState.clinicalSummary,
       },
       chatHistory: newMessages,
     });
@@ -513,146 +517,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                       </div>
                     </div>
                   )}
-
-                  {/* Call Forwarding / Referral Destination Banner */}
-                  {m.referralDestination && (
-                    <div
-                      className={`rounded-lg p-3 text-xs border flex items-start gap-2.5 transition-all shadow-xs ${
-                        m.isPsychiatric || m.referralDestination.includes("Psychological")
-                          ? "bg-purple-50 text-purple-950 border-purple-300"
-                          : m.referralDestination.includes("108")
-                          ? "bg-rose-50 text-rose-950 border-rose-300"
-                          : m.referralDestination.includes("Hospital")
-                          ? "bg-amber-50 text-amber-950 border-amber-300"
-                          : m.referralDestination.includes("104")
-                          ? "bg-sky-50 text-sky-950 border-sky-300"
-                          : "bg-emerald-50 text-emerald-950 border-emerald-300"
-                      }`}
-                    >
-                      <div className="mt-0.5 shrink-0 text-base">
-                        {m.isPsychiatric || m.referralDestination.includes("Psychological")
-                          ? "🧠"
-                          : m.referralDestination.includes("108")
-                          ? "🚨"
-                          : m.referralDestination.includes("Hospital")
-                          ? "🏥"
-                          : m.referralDestination.includes("104")
-                          ? "📞"
-                          : "🩺"}
-                      </div>
-                      <div className="space-y-1 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-1">
-                          <span className="font-extrabold text-xs uppercase tracking-wider">
-                            Call Referral: {formatReferralDestination(m.referralDestination)}
-                          </span>
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold uppercase ${
-                              m.isPsychiatric || m.referralDestination.includes("Psychological")
-                                ? "bg-purple-200 text-purple-950"
-                                : m.referralDestination.includes("108")
-                                ? "bg-rose-200 text-rose-950"
-                                : m.referralDestination.includes("Hospital")
-                                ? "bg-amber-200 text-amber-950"
-                                : m.referralDestination.includes("104")
-                                ? "bg-sky-200 text-sky-950"
-                                : "bg-emerald-200 text-emerald-950"
-                            }`}
-                          >
-                            Suggested Routing
-                          </span>
-                        </div>
-                        {m.referralReason && (
-                          <p className="text-[11px] leading-relaxed font-semibold">
-                            {formatReferralReason(m.referralReason)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           );
         })}
-
-        {/* 3. Call Triage & Referral Summary Card */}
-        {showSummaryCard && clinicalState.suspectedCondition && (
-          <div className="mt-3 w-full rounded-xl border border-emerald-500 bg-emerald-50/80 p-4 shadow-sm text-foreground space-y-3">
-            <div className="flex items-center justify-between border-b border-emerald-500/30 pb-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                <span className="font-extrabold text-xs sm:text-sm text-emerald-950">
-                  Call Triage &amp; Referral Summary
-                </span>
-              </div>
-              <span className="rounded bg-emerald-700 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-                Assessed
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-md bg-white p-2.5 border border-border shadow-2xs">
-                <span className="text-[10px] uppercase font-bold text-slate-600 block">
-                  Primary Complaint
-                </span>
-                <span className="font-bold text-slate-950 text-sm">
-                  {clinicalState.suspectedCondition}
-                </span>
-              </div>
-
-              <div className="rounded-md bg-white p-2.5 border border-border shadow-2xs">
-                <span className="text-[10px] uppercase font-bold text-slate-600 block">
-                  Assessed Severity &amp; Duration
-                </span>
-                <span className="font-bold text-slate-950">
-                  {clinicalState.severity} ({clinicalState.severityScore}/10) · {clinicalState.duration || "Reported today"}
-                </span>
-              </div>
-
-              {clinicalState.referralDestination && (
-                <div className="col-span-2 rounded-md bg-white p-2.5 border border-border shadow-2xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-600 block mb-0.5">
-                    Recommended Call Referral Destination
-                  </span>
-                  <div className="flex items-center gap-1.5 font-extrabold text-emerald-950">
-                    <PhoneForwarded className="h-3.5 w-3.5 text-emerald-700" />
-                    <span>{formatReferralDestination(clinicalState.referralDestination)}</span>
-                  </div>
-                  {clinicalState.referralReason && (
-                    <p className="mt-1 text-xs text-slate-700 font-medium">{formatReferralReason(clinicalState.referralReason)}</p>
-                  )}
-                </div>
-              )}
-
-              {clinicalState.redFlagsDetected?.length > 0 && (
-                <div className="col-span-2 rounded-md bg-rose-50 p-2.5 border border-rose-300 shadow-2xs">
-                  <div className="flex items-center gap-1.5 text-rose-900 font-extrabold text-[11px] mb-0.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-rose-700" />
-                    <span>Red Flags Screened:</span>
-                  </div>
-                  <span className="text-xs text-rose-950 font-semibold">
-                    {clinicalState.redFlagsDetected.join(", ")}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Direct Run Triage Action Button */}
-            <div className="pt-1 flex items-center justify-between">
-              <p className="text-[11px] text-muted-foreground">
-                Details have been synced to the intake form.
-              </p>
-              <button
-                type="button"
-                onClick={handleSendToRunTriage}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
-              >
-                <span>Send to Run Triage</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
 
         {loading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">

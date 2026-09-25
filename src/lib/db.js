@@ -113,34 +113,60 @@ async function getFirestoreContext() {
   return null;
 }
 
-// Facilities operations
+// Master In-Memory Caches & Timestamps to drastically eliminate repetitive Firestore reads
+let facilitiesCache = null;
+let facilitiesCacheTimestamp = 0;
+const FACILITIES_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour TTL for static facility directory
+
+let casesCache = null;
+let casesCacheTimestamp = 0;
+const CASES_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL for cases
+
+// Facilities operations with smart in-memory caching
 export async function getFacilities(filters = {}) {
   const { q, district, facility_type } = filters;
-  const ctx = await getFirestoreContext();
+  const now = Date.now();
 
-  let list = memoryFacilities;
-  if (ctx) {
-    try {
-      if (ctx.type === "admin") {
-        const snap = await ctx.db.collection("facilities").get();
-        if (!snap.empty) {
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let list = facilitiesCache;
+
+  // Only read from Firestore if cache is empty or older than 1 hour TTL
+  if (!list || now - facilitiesCacheTimestamp > FACILITIES_CACHE_TTL_MS) {
+    const ctx = await getFirestoreContext();
+    list = memoryFacilities;
+    if (ctx) {
+      try {
+        if (ctx.type === "admin") {
+          const snap = await ctx.db.collection("facilities").get();
+          if (!snap.empty) {
+            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          }
+        } else {
+          const { collection, getDocs } = await import("firebase/firestore");
+          const snap = await getDocs(collection(ctx.db, "facilities"));
+          if (!snap.empty) {
+            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          }
         }
-      } else {
-        const { collection, getDocs } = await import("firebase/firestore");
-        const snap = await getDocs(collection(ctx.db, "facilities"));
-        if (!snap.empty) {
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
+      } catch (e) {
+        // Fallback gracefully to memoryFacilities
       }
-    } catch (e) {
-      // If Firestore empty or permissions not yet open, fallback seamlessly to authentic facilities list
     }
+    facilitiesCache = list;
+    facilitiesCacheTimestamp = now;
+    memoryFacilities = list;
   }
 
   return list.filter((f) => {
     if (district && district !== "all" && f.district !== district) return false;
-    if (facility_type && facility_type !== "all" && f.facility_type !== facility_type) return false;
+    if (facility_type && facility_type !== "all") {
+      const isTieUpFilter = facility_type === "Tie-Up Facility" || facility_type === "Tie-Up Hospital";
+      const isFacTieUp = f.facility_type === "Tie-Up Facility" || f.facility_type === "Tie-Up Hospital";
+      if (isTieUpFilter) {
+        if (!isFacTieUp) return false;
+      } else if (f.facility_type !== facility_type) {
+        return false;
+      }
+    }
     if (q) {
       const query = q.toLowerCase();
       const matchName = f.name?.toLowerCase().includes(query);
@@ -174,6 +200,8 @@ export async function addFacilities(newItems) {
     }
   }
   memoryFacilities = [...newItems, ...memoryFacilities];
+  facilitiesCache = memoryFacilities;
+  facilitiesCacheTimestamp = Date.now();
   return memoryFacilities.length;
 }
 
@@ -241,29 +269,40 @@ export async function deleteFacilities(ids) {
 
   const beforeCount = memoryFacilities.length;
   memoryFacilities = memoryFacilities.filter((f) => !idSet.has(String(f.id)));
+  facilitiesCache = memoryFacilities;
+  facilitiesCacheTimestamp = Date.now();
   return beforeCount - memoryFacilities.length;
 }
 
-// Cases operations
+// Cases operations with smart in-memory caching
 export async function getCases(filters = {}) {
   const { urgency, q } = filters;
-  const ctx = await getFirestoreContext();
+  const now = Date.now();
 
-  let list = memoryCases;
-  if (ctx) {
-    try {
-      if (ctx.type === "admin") {
-        const snap = await ctx.db.collection("cases").get();
-        list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      } else {
-        const { collection, getDocs } = await import("firebase/firestore");
-        const snap = await getDocs(collection(ctx.db, "cases"));
-        list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  let list = casesCache;
+
+  // Only read from Firestore if cache is empty or older than 60s TTL
+  if (!list || now - casesCacheTimestamp > CASES_CACHE_TTL_MS) {
+    const ctx = await getFirestoreContext();
+    list = memoryCases;
+    if (ctx) {
+      try {
+        if (ctx.type === "admin") {
+          const snap = await ctx.db.collection("cases").get();
+          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } else {
+          const { collection, getDocs } = await import("firebase/firestore");
+          const snap = await getDocs(collection(ctx.db, "cases"));
+          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
+        list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      } catch (e) {
+        console.warn("Firestore fetch cases notice:", e.message);
       }
-      list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-    } catch (e) {
-      console.warn("Firestore fetch cases notice:", e.message);
     }
+    casesCache = list;
+    casesCacheTimestamp = now;
+    memoryCases = list;
   }
 
   return list.filter((c) => {
@@ -303,8 +342,11 @@ export async function saveCase(caseData) {
       console.warn("Could not save case to Firestore:", e.message);
     }
   }
+  // Write-through to cache immediately (0 Firestore reads needed for subsequent fetches!)
   memoryCases = memoryCases.filter((c) => c.case_ref !== caseData.case_ref);
   memoryCases.unshift(caseData);
+  casesCache = memoryCases;
+  casesCacheTimestamp = Date.now();
   return caseData;
 }
 
@@ -346,7 +388,17 @@ export async function deleteCase(caseRef) {
     }
   }
   memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef && c.id !== caseRef);
+  casesCache = memoryCases;
+  casesCacheTimestamp = Date.now();
   return true;
+}
+
+export async function deleteCases(caseRefs = []) {
+  if (!Array.isArray(caseRefs) || !caseRefs.length) return 0;
+  for (const ref of caseRefs) {
+    await deleteCase(ref);
+  }
+  return caseRefs.length;
 }
 
 export async function getCaseStats() {

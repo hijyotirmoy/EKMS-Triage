@@ -17,12 +17,31 @@ import {
   PhoneForwarded,
   ArrowRight,
   Sparkles,
+  RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
+import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 
 export const ACTION_DIRECTIVES = {
+  NACO_1097: {
+    id: "NACO_1097",
+    title: "TRANSFER TO NACO 1097 HELPLINE (HIV / AIDS / STI)",
+    category: "HIV, AIDS & Sexual Health Counseling",
+    badge: "NACO 1097 Helpline",
+    badgeColor: "bg-rose-800 text-white font-bold",
+    cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
+    icon: "🎗️",
+    summary:
+      "Caller is inquiring about HIV, AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer immediately to the National AIDS Control Organisation (NACO) 24x7 Toll-Free Helpline (1097).",
+    checklist: [
+      "1. Speak with strict confidentiality, dignity, and non-judgmental reassurance.",
+      "2. Transfer call to National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counseling and ICTC/ART center locator.",
+      "3. Direct to nearest ESIC Hospital ICTC / Specialist OPD if post-exposure prophylaxis (PEP) is needed within 72 hours.",
+    ],
+  },
   CALL_108: {
     id: "CALL_108",
     title: "CALL 108 AMBULANCE IMMEDIATELY",
@@ -31,8 +50,7 @@ export const ACTION_DIRECTIVES = {
     badgeColor: "bg-rose-700 text-white font-bold",
     cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
     icon: "🚨",
-    summary:
-      "Life-threatening emergency, trauma casualty, or cardiac red-flag detected. The agent must immediately trigger or direct 108 ambulance dispatch with the caller's location.",
+    summary: "",
     checklist: [
       "1. Verify caller's current location, landmark, and contact phone number.",
       "2. Initiate 108 Emergency Ambulance dispatch immediately.",
@@ -63,10 +81,9 @@ export const ACTION_DIRECTIVES = {
     badgeColor: "bg-amber-700 text-white font-bold",
     cardBorder: "border-amber-400 bg-amber-50 text-amber-950 shadow-xs",
     icon: "🏥",
-    summary:
-      "Symptoms require secondary hospital casualty, doctor examination today, or specialist diagnostics. Guide caller to the nearest ESIC Hospital.",
+    summary: "",
     checklist: [
-      "1. Locate the nearest ESIC Hospital shown in Step 03 below.",
+      "1. Locate the nearest ESIC Hospital shown in Facilities below.",
       "2. Click 'SMS to Caller' to send the hospital name, address, and Google Maps link.",
       "3. Instruct caller to carry their Pehchan Card and government photo ID for urgent OPD/casualty.",
     ],
@@ -82,8 +99,8 @@ export const ACTION_DIRECTIVES = {
     summary:
       "Condition is suitable for primary clinic level care. Direct the IP to their registered or nearest ESIS Dispensary for doctor consultation and free medicine dispensing.",
     checklist: [
-      "1. Check the nearest ESIS Dispensary listed under Step 03.",
-      "2. Click 'SMS to Caller' to dispatch address and dispensary timings (8:00 AM – 2:00 PM).",
+      "1. Check the nearest ESIS Dispensary listed under Facilities below.",
+      "2. Click 'SMS to Caller' to dispatch address and dispensary timings (10:00 AM – 3:00 PM, Mon–Fri; Closed Sat/Sun).",
       "3. Remind IP to carry their ESIC Pehchan / Insurance card for free consultations and prescribed medicines.",
     ],
   },
@@ -151,107 +168,66 @@ export const ACTION_DIRECTIVES = {
       "3. Summarize primary symptoms, severity score, and reported duration.",
     ],
   },
+  TIE_UP_FACILITY: {
+    id: "TIE_UP_FACILITY",
+    title: "REFER TO EMPANELLED TIE-UP FACILITY",
+    category: "Empanelled Network Care",
+    badge: "Tie-Up Facility",
+    badgeColor: "bg-cyan-700 text-white font-bold",
+    cardBorder: "border-cyan-400 bg-cyan-50 text-cyan-950 shadow-xs",
+    icon: "🏥",
+    summary: "",
+    checklist: [
+      "1. Check the nearest empanelled tie-up facility listed under Facilities below.",
+      "2. Click 'SMS to Caller' to dispatch address, phone number, and Google Maps directions.",
+      "3. Remind IP to carry their ESIC Pehchan / Insurance card for cashless treatment under ESIC tie-up guidelines.",
+    ],
+  },
 };
 
-function resolveDefaultDirective(t, result) {
-  // 1. Direct explicit matching from EKMS AI Context (100% synchronized with left AI chat)
-  const explicitDest =
-    result?.ekms_ai_context?.triageState?.referralDestination ||
-    result?.ekms_ai_context?.referralDestination;
-
-  if (explicitDest) {
-    if (explicitDest === "108 Ambulance") return "CALL_108";
-    if (explicitDest === "Psychological Counselling Department") return "TELE_MANAS";
-    if (explicitDest === "ESIC Hospital") return "ESIC_HOSPITAL";
-    if (explicitDest === "ESIS Dispensary" || explicitDest.includes("Dispensary")) return "ESIS_DISPENSARY";
-    if (explicitDest === "104 Medical Team") return "TELE_104";
-    if (explicitDest === "e-Sanjeevani") return "E_SANJEEVANI";
-    if (explicitDest === "Nearest Pharmacy") return "NEAREST_PHARMACY";
-    if (explicitDest === "Forward to Doctor") return "FORWARD_DOCTOR";
-  }
-
-  const referral = (
-    explicitDest ||
-    t?.recommended_facility_type ||
-    ""
-  ).toLowerCase();
-
-  const isPsychiatricFlag = Boolean(
-    result?.ekms_ai_context?.triageState?.isPsychiatric ||
-    result?.ekms_ai_context?.isPsychiatric ||
-    t?.is_psychiatric
-  );
-
-  const notes = `${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.symptom || ""} ${result?.ekms_ai_context?.triageState?.condition || ""} ${t?.summary_en || ""} ${t?.reasoning || ""}`.toLowerCase();
-
-  // 2. PSYCHIATRIC / COUNSELLING / TELE-MANAS
-  if (
-    isPsychiatricFlag ||
-    referral.includes("psych") ||
-    referral.includes("counsel") ||
-    referral.includes("tele-manas") ||
-    referral.includes("tele manas") ||
-    referral.includes("14416") ||
-    /\b(suicid|depression|depressed|udaas|hopeless|anxiety|ghabrahat|cry|crying|pareshan|die|kill myself|self-harm|self harm)\b/i.test(notes)
-  ) {
-    return "TELE_MANAS";
-  }
-
-  // 3. 108 AMBULANCE (Acute physical emergencies, cardiac arrests, accidents)
-  if (
-    referral.includes("108") ||
-    t?.call_108 ||
-    /\b(heart attack|crushing chest|cardiac arrest|unconscious|behosh|massive bleed|accident|casualty|zeher|poison)\b/i.test(notes)
-  ) {
-    return "CALL_108";
-  }
-
-  // 4. ESIC HOSPITAL (If caller requested hospital, or severe triage outcome)
-  if (
-    referral.includes("hospital") ||
-    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal)\b/i.test(notes)
-  ) {
-    return "ESIC_HOSPITAL";
-  }
-
-  // 5. 104 MEDICAL TEAM / HEALTH HELPLINE
-  if (referral.includes("104") || /\b(104|phone consultation|tele doctor|phone pe doctor)\b/i.test(notes)) {
-    return "TELE_104";
-  }
-
-  // 6. e-SANJEEVANI TELEMEDICINE
-  if (referral.includes("sanjeevani") || /\b(e sanjeevani|esanjeevani|telemedicine|online doctor)\b/i.test(notes)) {
-    return "E_SANJEEVANI";
-  }
-
-  // 7. NEAREST PHARMACY
-  if (
-    referral.includes("pharmacy") ||
-    referral.includes("chemist") ||
-    (t?.urgency_level === "Self-care" && /\b(pharmacy|chemist|dawai store|refill)\b/i.test(notes))
-  ) {
-    return "NEAREST_PHARMACY";
-  }
-
-  // 8. FORWARD TO MEDICAL OFFICER / ON-DUTY DOCTOR
-  if (referral.includes("doctor") || referral.includes("medical officer") || /\b(forward to doctor|talk to doctor)\b/i.test(notes)) {
-    return "FORWARD_DOCTOR";
-  }
-
-  // 9. Secondary care fallback
-  if (
-    referral.includes("casualty") ||
-    t?.urgency_level === "Emergency" ||
-    t?.urgency_level === "Urgent" ||
-    (t?.urgency_score && t?.urgency_score >= 7) ||
-    (result?.intake?.severity_reported && Number(result?.intake?.severity_reported) >= 7) ||
-    /\b(fracture|deep cut|severe pain)\b/i.test(notes)
-  ) {
-    return "ESIC_HOSPITAL";
-  }
-
-  // 10. ESIS DISPENSARY (Routine primary care)
+export function mapDestinationToDirectiveId(dest) {
+  if (!dest || typeof dest !== "string") return "ESIS_DISPENSARY";
+  const d = dest.toLowerCase();
+  if (d.includes("108") || d.includes("ambulance")) return "CALL_108";
+  if (d.includes("manas") || d.includes("psych") || d.includes("counsel")) return "TELE_MANAS";
+  if (d.includes("naco") || d.includes("1097")) return "NACO_1097";
+  if (d.includes("tie") || d.includes("empanelled")) return "TIE_UP_FACILITY";
+  if (d.includes("hospital") || d.includes("casualty")) return "ESIC_HOSPITAL";
+  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team")) return "TELE_104";
+  if (d.includes("sanjeevani") || d.includes("telemedicine")) return "E_SANJEEVANI";
+  if (d.includes("pharmacy") || d.includes("chemist")) return "NEAREST_PHARMACY";
+  if (d.includes("forward to doctor") || d.includes("medical officer")) return "FORWARD_DOCTOR";
+  if (d.includes("dispensary") || d.includes("clinic")) return "ESIS_DISPENSARY";
   return "ESIS_DISPENSARY";
+}
+
+export function resolveDirectiveIds(t, result) {
+  const primaryDest =
+    t?.call_referral_primary ||
+    t?.referral_destination ||
+    result?.ekms_ai_context?.triageState?.referralDestination ||
+    result?.ekms_ai_context?.referralDestination ||
+    "ESIS Dispensary";
+
+  const secondaryDest =
+    t?.call_referral_secondary ||
+    t?.secondary_referral_destination ||
+    "104 Medical Team";
+
+  const primaryId = mapDestinationToDirectiveId(primaryDest);
+  let secondaryId = mapDestinationToDirectiveId(secondaryDest);
+
+  if (secondaryId === primaryId) {
+    secondaryId = primaryId === "ESIC_HOSPITAL" ? "TELE_104" : "ESIC_HOSPITAL";
+  }
+
+  return {
+    primaryId,
+    secondaryId,
+    isDual: false, // Dual protocol notification banner box removed completely per user request
+    primaryBadge: ACTION_DIRECTIVES[primaryId]?.badge || primaryDest,
+    secondaryBadge: ACTION_DIRECTIVES[secondaryId]?.badge || secondaryDest,
+  };
 }
 
 const Empty = () => (
@@ -359,13 +335,15 @@ export const TriageResultPanel = ({ result, loading }) => {
   const { triage: t, nearest_facilities: facs, resolved_location: loc } = result;
   const s = urgencyStyle(t.urgency_level);
 
-  const defaultDirectiveId = useMemo(() => {
-    return resolveDefaultDirective(t, result);
+  const directiveIds = useMemo(() => {
+    return resolveDirectiveIds(t, result);
   }, [t, result]);
 
   const [manualDirectiveId, setManualDirectiveId] = useState(null);
   const activeDirective =
-    ACTION_DIRECTIVES[manualDirectiveId || defaultDirectiveId] || ACTION_DIRECTIVES.ESIS_DISPENSARY;
+    ACTION_DIRECTIVES[manualDirectiveId || directiveIds.primaryId] || ACTION_DIRECTIVES.ESIS_DISPENSARY;
+  const secondaryDirective =
+    ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -373,6 +351,73 @@ export const TriageResultPanel = ({ result, loading }) => {
     );
     toast.success("Facility address copied — ready to SMS to the caller");
   };
+
+  const allRedFlags = useMemo(() => {
+    const raw = [];
+    if (Array.isArray(t?.red_flags)) raw.push(...t.red_flags);
+    const ctxFlags =
+      result?.ekms_ai_context?.triageState?.redFlagsDetected ||
+      result?.ekms_ai_context?.clinicalState?.redFlagsDetected ||
+      result?.ekms_ai_context?.redFlagsDetected;
+    if (Array.isArray(ctxFlags)) raw.push(...ctxFlags);
+
+    // Look ONLY at actual caller-reported text, never circular AI summaries
+    const callerText = `${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
+    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(callerText);
+
+    return summarizeRedFlags(raw, callerText, isSafe);
+  }, [t, result]);
+
+  const primaryComplaint =
+    t.primary_complaint ||
+    result?.ekms_ai_context?.triageState?.suspectedCondition ||
+    result?.ekms_ai_context?.triageState?.condition ||
+    result?.ekms_ai_context?.triageState?.symptom ||
+    (t.is_psychiatric ? "Emotional Distress / Mental Health Support" : "Primary Clinical Assessment");
+
+  const assessedSeverity =
+    t.assessed_severity ||
+    (t.urgency_score >= 8 ? "High" : t.urgency_score >= 5 ? "Moderate" : "Mild");
+  const durationText =
+    t.duration ||
+    result?.intake?.duration ||
+    result?.ekms_ai_context?.triageState?.duration ||
+    "Reported today";
+  const severityAndDuration = assessedSeverity.includes("(")
+    ? `${assessedSeverity} · ${durationText}`
+    : `${assessedSeverity} (${t.urgency_score || 5}/10) · ${durationText}`;
+
+  const primaryReferralDest =
+    t.call_referral_primary ||
+    t.referral_destination ||
+    ACTION_DIRECTIVES[directiveIds.primaryId]?.badge ||
+    t.recommended_facility_type ||
+    "ESIS Dispensary";
+  const cleanReason = (reason) => {
+    if (!reason || typeof reason !== "string") return "";
+    if (reason.includes("Symptoms require secondary hospital casualty")) return "";
+    return reason;
+  };
+
+  const primaryReferralReason = cleanReason(
+    t.referral_reason ||
+    ACTION_DIRECTIVES[directiveIds.primaryId]?.summary ||
+    t.recommended_action ||
+    ""
+  );
+
+  const secondaryReferralDest =
+    t.call_referral_secondary ||
+    t.secondary_referral_destination ||
+    secondaryDirective?.badge ||
+    (directiveIds.primaryId === "CALL_108"
+      ? "ESIC Hospital"
+      : "104 Medical Team");
+  const secondaryReferralReason = cleanReason(
+    t.secondary_referral_reason ||
+    secondaryDirective?.summary ||
+    ""
+  );
 
   return (
     <div className="space-y-5 rise" data-testid="triage-result">
@@ -392,7 +437,7 @@ export const TriageResultPanel = ({ result, loading }) => {
                     <PhoneCall className="h-3.5 w-3.5" /> TELE-MANAS 14416
                   </span>
                 )}
-                {!t.is_psychiatric && t.call_108 && (
+                {t.call_108 && (
                   <span
                     data-testid="triage-call-108"
                     className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
@@ -407,130 +452,209 @@ export const TriageResultPanel = ({ result, loading }) => {
           <p className="mt-4 text-base font-semibold leading-snug" data-testid="triage-summary-en">
             {t.summary_en}
           </p>
-          <p className="mt-1 text-sm text-muted-foreground" data-testid="triage-summary-hi">
-            {t.summary_hi}
-          </p>
           <p className="mt-1 text-xs text-muted-foreground/80">{s.label}</p>
 
-          {/* Red flags present */}
-          {t.red_flags?.length > 0 && (
-            <div className="mt-5 rounded-md border border-red-200 bg-red-50 p-4">
-              <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700">
-                <ShieldAlert className="h-4 w-4" /> Red flags present
-              </p>
-              <ul className="space-y-1.5 text-sm text-red-900" data-testid="triage-red-flags-list">
-                {t.red_flags.map((f, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* WHAT AGENT MUST DO NOW — Decision Directive Box (Right Below Red Flags) */}
+          {/* UNIFIED Call Triage, Referral & Directive Decision Summary Card */}
           <div
-            className={`mt-5 rounded-xl border p-4 shadow-sm transition-all ${activeDirective.cardBorder}`}
+            className={`mt-5 w-full rounded-xl border p-4 sm:p-5 shadow-sm transition-all space-y-4 ${
+              activeDirective.cardBorder ||
+              "border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/25 text-foreground"
+            }`}
             data-testid="agent-action-box"
           >
-            {/* Header Badge & Title */}
+            {/* 1. Header: Call Triage & Action Decision Summary */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-current/15 pb-3">
               <div className="flex items-center gap-2.5">
-                <span className="text-2xl">{activeDirective.icon}</span>
+                <span className="text-2xl shrink-0">
+                  {activeDirective.icon || <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />}
+                </span>
                 <div>
                   <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block">
-                    WHAT AGENT MUST DO NOW · {activeDirective.category}
+                    Call Triage &amp; Action Directive · {activeDirective.category}
                   </span>
                   <h4 className="text-sm sm:text-base font-black tracking-tight">
                     {activeDirective.title}
                   </h4>
                 </div>
               </div>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-2xs ${activeDirective.badgeColor}`}
-              >
-                {activeDirective.badge}
-              </span>
-            </div>
-
-            {/* Directive Summary */}
-            <p className="mt-3 text-xs sm:text-sm font-semibold leading-relaxed">
-              {activeDirective.summary}
-            </p>
-
-            {/* Agent Action Checklist */}
-            <div className="mt-3 space-y-1.5 rounded-lg bg-background/90 p-3 border border-current/15 text-xs text-foreground shadow-2xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                Action Steps for Agent:
-              </span>
-              {activeDirective.checklist.map((step, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-700" />
-                  <span className="font-semibold leading-snug">{step}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Decision Switcher Buttons */}
-            <div className="mt-3.5 pt-3 border-t border-current/15">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider opacity-85">
-                  Decision Switcher (Guidance for other referral channels):
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-emerald-700 px-2.5 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                  Assessed
                 </span>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-2xs ${activeDirective.badgeColor}`}
+                >
+                  {activeDirective.badge}
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Clinical Assessment Overview Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-border shadow-2xs">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">
+                  Chief Complaint
+                </span>
+                <span className="font-bold text-foreground text-sm">
+                  {primaryComplaint}
+                </span>
+              </div>
+
+              <div className="rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-border shadow-2xs">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">
+                  Assessed Severity &amp; Duration
+                </span>
+                <span className="font-bold text-foreground">
+                  {severityAndDuration}
+                </span>
+              </div>
+
+              {/* Recommended Call Referral 01 (Primary Immediate Destination) */}
+              <div className="col-span-1 sm:col-span-2 rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-emerald-500/40 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-400">
+                    Recommended Call Referral 01 (Primary Immediate Destination)
+                  </span>
+                  <span className="rounded bg-emerald-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
+                    Primary
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 font-extrabold text-emerald-950 dark:text-emerald-200 text-sm">
+                  <PhoneForwarded className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                  <span>{primaryReferralDest}</span>
+                </div>
+                {primaryReferralReason && (
+                  <p className="mt-1 text-xs text-foreground/80 font-medium leading-relaxed">
+                    {primaryReferralReason}
+                  </p>
+                )}
+              </div>
+
+              {/* Recommended Call Referral 02 (Co-Occurring / Secondary Referral) */}
+              {secondaryReferralDest && (
+                <div className="col-span-1 sm:col-span-2 rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-blue-400/50 shadow-2xs">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase font-bold text-blue-800 dark:text-blue-400">
+                      Recommended Call Referral 02 (Co-Occurring / Secondary Referral)
+                    </span>
+                    <span className="rounded bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
+                      Secondary
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 font-extrabold text-blue-950 dark:text-blue-200 text-sm">
+                    <PhoneForwarded className="h-4 w-4 text-blue-700 dark:text-blue-400 shrink-0" />
+                    <span>{secondaryReferralDest}</span>
+                  </div>
+                  {secondaryReferralReason && (
+                    <p className="mt-1 text-xs text-foreground/80 font-medium leading-relaxed">
+                      {secondaryReferralReason}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 4. Decision Switcher Buttons (Placed directly above Red Flags with upgraded modern UI/UX) */}
+            <div className="rounded-xl border border-current/15 bg-background/70 dark:bg-slate-900/70 backdrop-blur-xs p-3.5 shadow-2xs space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-primary opacity-80" />
+                  <span className="text-[11px] font-black uppercase tracking-wider text-foreground">
+                    Decision Switcher
+                  </span>
+                  <span className="text-[10px] text-muted-foreground font-medium hidden sm:inline">
+                    (Guidance for referral channels)
+                  </span>
+                </div>
                 {manualDirectiveId && (
                   <button
                     type="button"
                     onClick={() => setManualDirectiveId(null)}
-                    className="text-[10px] font-semibold underline opacity-80 hover:opacity-100"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/80 transition-colors bg-primary/10 hover:bg-primary/20 px-2.5 py-1 rounded-full cursor-pointer shadow-2xs"
                   >
-                    Reset to AI Recommendation
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Reset to Primary AI Recommendation</span>
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {Object.values(ACTION_DIRECTIVES).map((dir) => {
                   const isSelected = dir.id === activeDirective.id;
-                  const isAiDefault = dir.id === defaultDirectiveId;
+                  const isPrimary = dir.id === directiveIds.primaryId;
+                  const isSecondary = dir.id === directiveIds.secondaryId;
                   return (
                     <button
                       key={dir.id}
                       type="button"
                       onClick={() => setManualDirectiveId(dir.id)}
-                      className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all ${
+                      className={`group relative inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer ${
                         isSelected
-                          ? `${dir.badgeColor} shadow-2xs scale-[1.02]`
-                          : "bg-background/90 text-foreground border border-border/80 hover:bg-secondary hover:border-foreground/30"
+                          ? `${dir.badgeColor} ring-2 ring-offset-1 ring-primary/40 shadow-sm scale-[1.02]`
+                          : "bg-background/95 dark:bg-slate-800 text-foreground border border-border/80 hover:bg-secondary/80 hover:border-foreground/25 hover:scale-[1.01]"
                       }`}
                     >
-                      <span>{dir.icon}</span>
-                      <span>{dir.badge}</span>
-                      {isAiDefault && !isSelected && (
-                        <span className="ml-0.5 text-[9px] text-amber-500 font-extrabold">(AI)</span>
+                      <span className="text-sm shrink-0 leading-none">{dir.icon}</span>
+                      <span className="tracking-tight">{dir.badge}</span>
+                      {isPrimary && !isSelected && (
+                        <span className="ml-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 border border-amber-400/40">
+                          ⭐ Primary
+                        </span>
+                      )}
+                      {isSecondary && !isSelected && (
+                        <span className="ml-1 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[9px] font-extrabold px-1.5 py-0.5 border border-blue-400/40">
+                          ⭐ Secondary
+                        </span>
                       )}
                     </button>
                   );
                 })}
               </div>
             </div>
-          </div>
 
-          {t.recommended_action && (
-            <div className="mt-5 rounded-md border border-border/60 bg-secondary/25 p-4">
-              <p className="eyebrow mb-1.5">Tell the caller</p>
-              <p className="text-sm font-medium text-foreground leading-relaxed" data-testid="triage-recommended-action">
-                {t.recommended_action}
+            {/* 5. Red Flags Present (Housed cleanly inside the assessment card) */}
+            {allRedFlags.length > 0 && (
+              <div className="rounded-lg border border-red-300 bg-rose-50/90 dark:bg-rose-950/40 p-3 shadow-2xs">
+                <p className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700 dark:text-red-400">
+                  <ShieldAlert className="h-4 w-4 text-red-600" /> Red flags present
+                </p>
+                <ul className="space-y-1 text-xs sm:text-sm text-red-900 dark:text-red-200 font-medium" data-testid="triage-red-flags-list">
+                  {allRedFlags.map((f, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                      <span className="font-semibold">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 6. Directive Guidance Summary */}
+            {activeDirective.summary && (
+              <p className="text-xs sm:text-sm font-semibold leading-relaxed">
+                {activeDirective.summary}
               </p>
+            )}
+
+            {/* 7. Action Steps for Agent Checklist */}
+            <div className="space-y-1.5 rounded-lg bg-background/90 p-3 border border-current/15 text-xs text-foreground shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
+                Action Steps for Agent:
+              </span>
+              {activeDirective.checklist.map((step, idx) => (
+                <div key={idx} className="flex items-start gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
+                  <span className="font-semibold leading-snug">{step}</span>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
       <div className="panel p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="eyebrow">Step 03</p>
-            <h3 className="text-lg font-bold">Nearest ESIC / ESIS facilities</h3>
+            <h3 className="text-lg font-bold">Facilities</h3>
           </div>
           {loc && (
             <span className="mono rounded-full border border-border/70 px-2.5 py-1 text-[11px] text-muted-foreground">

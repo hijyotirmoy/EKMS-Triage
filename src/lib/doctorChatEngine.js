@@ -9,80 +9,41 @@ import {
   detectClinicalDomain,
   DOMAIN_LABELS,
   getDiseaseProbingProtocol,
-} from "./clinicalAdaptiveEngine";
+} from "./clinicalAdaptiveEngine.js";
+import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus } from "./triageEngine.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
 
-YOUR CORE PURPOSE:
-1. Interview the caller (Insured Person / IP) by asking focused probing questions to uncover the main issue, symptoms, duration, triggers, and severity.
-2. DO NOT GIVE MEDICAL ADVICE OR DRUG PRESCRIPTIONS (No dosage, no "take aspirin", no "take nitroglycerin", etc.). Your goal is to guide the operator on WHAT DECISION TO TAKE AND WHERE TO FORWARD THE CALL.
+CORE CLINICAL RULES:
+1. INTERVIEW CALLER: Ask focused clinical probing questions to uncover main complaint, duration, triggers, and severity. Do NOT give medical advice, drug prescriptions, or dosages.
+2. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
+3. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
+   - Formulate the probing question in English, followed by a concise Romanized Hinglish translation in parentheses:
+     Format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
+   - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
+4. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
+5. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
+6. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
+7. EMPATHY & EMOTIONAL REASSURANCE:
+   - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
+   - Dual Emergency: If acute self-harm/physical trauma + psychiatric crisis, prioritize physical emergency dispatch (108 Ambulance) with concurrent psychiatric counselling support.
+8. REFERRAL TIMING: On Turns 1-2, return referralDestination: null unless acute 108 emergency or direct caller preference. On Turn 3+, synthesize findings for referral recommendation.
 
-3. CRITICAL ANTI-REPETITION MANDATE (HIGHEST PRIORITY):
-   - You are provided with the full dialogue history and a list of already asked questions.
-   - YOU MUST NEVER REPEAT OR RE-ASK THE SAME QUESTION OR ANY SIMILAR VARIANT OF A QUESTION THAT WAS ALREADY ASKED!
-   - If the caller already answered something (e.g. they confirmed feeling hopeless, or stated a duration, or denied self-harm), DO NOT re-ask it. Acknowledge what they said and immediately move to the next clinical topic!
-
-4. DOCTOR-LIKE EMPATHY & EMOTIONAL REASSURANCE:
-   - Never sound like a cold robot. Real doctors validate distress with genuine warmth and empathy:
-     * When caller shares sadness, hopelessness, pain, or crying: FIRST acknowledge their feelings warmly (e.g., "I hear how heavy and overwhelming this feels for you...", "Main samajh sakta/sakti hoon aap bohot takleef mein hain...").
-     * When caller has sudden severe pain or injury: reassure them calmly (e.g., "Please stay as calm as possible, we are right here with you and organizing help...").
-   - Formulate the probing question in English and Hindi (or Hinglish) prefixed with "Ask the IP: " (e.g. Ask the IP: "..." (Hindi: ...)).
-
-5. ADAPTIVE PROGRESSIVE INQUIRY RULES BASED ON CONDITION:
-   - For Psychiatric / Emotional Distress / Depression / Loneliness:
-     * Step 1: Warm emotional validation + probe root trigger (family, work stress, financial burden, personal grief, health).
-     * Step 2: Duration & daily functional impact (how long carrying this sadness, impact on sleep, appetite, crying spells).
-     * Step 3: Gentle safety screening (thoughts of self-harm or giving up, or checking if they are currently alone).
-     * Step 4: Warm reassurance & priority handover to Psychological Counselling Department / Tele-MANAS (14416).
-   - For Physical Disease & Illness (Fever, Pain, Vomiting, Headache, etc.):
-     * Step 1: Acknowledge symptoms + probe specific symptom character & onset (sharp vs dull, sudden vs gradual).
-     * Step 2: Probe exact duration with diverse options spanning:
-       (1) Small: "< 2 hours / Sudden", "1 to 3 days (Recent)"
-       (2) Medium: "1 to 2 weeks", "1 to 6 months"
-       (3) Long: "1 year or more (Chronic)"
-       Extract any mentioned duration directly into the "duration" field!
-     * Step 3: Screen for specific red flags & triggers (breathing trouble, inability to retain water, high fever, chest pain).
-     * Step 4: Decision & routing guidance (Dispensary vs Hospital vs 108).
-   - For Accidents / Trauma / Workplace Injury Cases:
-     * Step 1: Exact location, landmark, road/factory name, and time of accident.
-     * Step 2: Casualties count, anyone trapped in vehicle/machine, or unconscious.
-     * Step 3: Active heavy bleeding, fractures, and immediate first-aid instructions.
-     * Step 4: Immediate 108 Emergency Ambulance dispatch.
-
-6. REFERRAL TIMING & CONCLUSION CRITERIA:
-   - For Turns 1 and 2 (First two probing questions): You are in active clinical inquiry to explore symptoms and duration. DO NOT finalize the referral destination yet (return "referralDestination": null and "referralReason": null, "isReadyForSummary": false), UNLESS there is an immediate life-threatening 108 emergency (e.g. cardiac arrest, active massive hemorrhage, severe road accident) or the caller directly requested a specific facility.
-   - For Turns 3 or 4+: Synthesize all findings from the complaint, onset, duration, and associated symptoms to reach a sound clinical conclusion. Provide the finalized "referralDestination" (e.g. "ESIC Hospital", "ESIS Dispensary", "104 Medical Team", "Psychological Counselling Department", "108 Ambulance") with a detailed clinical rationale in "referralReason", and set "isReadyForSummary": true.
-   - The referral destination must remain dynamic and update if further critical details or red flags emerge in subsequent turns.
-
-7. CRITICAL DIRECT CALLER PREFERENCE RULE:
-   - If the caller directly states where they want to go or what service they want, ALWAYS RESPECT THEIR CHOICE:
-     * Hospital / Aspatal: "ESIC Hospital"
-     * Dispensary / Clinic: "ESIS Dispensary"
-     * 104 phone doctor: "104 Medical Team"
-     * 108 ambulance: "108 Ambulance"
-     * e-Sanjeevani: "e-Sanjeevani"
-     * Pharmacy / Chemist: "Nearest Pharmacy"
-     * Counsellor / Mental Health: "Psychological Counselling Department"
-
-8. OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown formatting, no other text):
+OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
-  "probingQuestion": "Ask the IP: '...'",
+  "probingQuestion": "Ask the IP: '...' (Hinglish: ...)",
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
   "suspectedCondition": "Primary suspected condition",
   "isPsychiatric": true | false,
   "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "ESIC Hospital" | "ESIS Dispensary" | "104 Medical Team" | "e-Sanjeevani" | "Nearest Pharmacy" | "Forward to Doctor" | null,
-  "referralReason": "Clear, direct guidance on what the agent should do right now" | null,
+  "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "ESIC Hospital" | "ESIS Dispensary" | "104 Medical Team" | "e-Sanjeevani" | "Nearest Pharmacy" | "Forward to Doctor" | null,
+  "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["list of red flags if any"],
   "duration": "detected duration or accident time",
   "isReadyForSummary": true | false,
-  "clinicalSummary": "Concise structured triage summary"
-}
-
-9. STRICT OFF-TOPIC BOUNDARY:
-   - If query is non-medical (sports, weather, politics, jokes), firmly and politely redirect to health symptoms only.
-`;
+  "clinicalSummary": "Concise structured triage summary in English"
+}`;
 
 /**
  * Detects if user input is an off-topic non-medical inquiry
@@ -127,7 +88,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller explicitly requested to visit ESIC Hospital; guide caller to nearest ESIC Hospital for examination today.",
       suspectedConditionSuffix: "Hospital Visit Consultation",
       suggestedQuestion:
-        'Ask the IP: "Which district or location are you calling from so we can guide you to the nearest ESIC Hospital?" (Hindi: आप किस जिले/स्थान से हैं ताकि हम आपको नज़दीकी ESIC अस्पताल का पता बता सकें?)',
+        'Ask the IP: "Which district or location are you calling from so we can guide you to the nearest ESIC Hospital?" (Hinglish: "Aap kis district ya location se bol rahe hain taaki hum nearest ESIC Hospital ka pata bata sakein?")',
       suggestedAnswers: [
         "Need address of nearest ESIC Hospital",
         "Have severe symptoms needing hospital OPD today",
@@ -149,7 +110,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller requested local ESIS Dispensary visit; provide dispensary timings and Pehchan card check.",
       suspectedConditionSuffix: "ESIS Dispensary Visit",
       suggestedQuestion:
-        'Ask the IP: "Do you have your ESIC Pehchan card with you, and do you know your local dispensary timings?" (Hindi: क्या आपके पास ESIC पहचान कार्ड है और नज़दीकी डिस्पेंसरी की जानकारी है?)',
+        'Ask the IP: "Do you have your ESIC Pehchan card with you, and do you know your local dispensary timings?" (Hinglish: "Kya aapke paas ESIC Pehchan card hai aur local dispensary timings pata hain?")',
       suggestedAnswers: [
         "Need local dispensary address and OPD timings",
         "Have Pehchan card ready",
@@ -171,7 +132,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller requested 108 Ambulance; immediately collect location landmarks and coordinate 108 dispatch.",
       suspectedConditionSuffix: "108 Emergency Ambulance Dispatch",
       suggestedQuestion:
-        'Ask the IP: "What is your exact location and landmark right now for 108 Ambulance dispatch?" (Hindi: 108 एम्बुलेंस भेजने के लिए अपना सटीक पता और नज़दीकी लैंडमार्क बताएं)',
+        'Ask the IP: "What is your exact location and landmark right now for 108 Ambulance dispatch?" (Hinglish: "108 Ambulance bhejne ke liye apna exact location aur landmark batayein?")',
       suggestedAnswers: [
         "Emergency at home — Need immediate ambulance",
         "Accident on road / highway — Casualties present",
@@ -193,7 +154,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller requested tele-doctor phone consultation; transfer call queue to 104 Medical Team.",
       suspectedConditionSuffix: "104 Tele-Doctor Consultation",
       suggestedQuestion:
-        'Ask the IP: "Could you briefly state your main symptom so 104 medical team is ready when connected?" (Hindi: कृपया अपना मुख्य लक्षण बताएं ताकि 104 डॉक्टर तुरंत मदद कर सकें)',
+        'Ask the IP: "Could you briefly state your main symptom so 104 medical team is ready when connected?" (Hinglish: "Kripya apna main symptom batayein taaki 104 medical team connect hote hi madad kar sake?")',
       suggestedAnswers: [
         "Fever / cold / mild body ache",
         "Stomach upset / nausea / weakness",
@@ -215,7 +176,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller requested government online telemedicine consultation; advise e-Sanjeevani portal/app.",
       suspectedConditionSuffix: "e-Sanjeevani Telemedicine Guidance",
       suggestedQuestion:
-        'Ask the IP: "Do you have an Android/iOS smartphone with internet to consult the doctor via e-Sanjeevani?" (Hindi: क्या आपके पास ई-संजीवनी पर ऑनलाइन डॉक्टर से बात करने के लिए स्मार्टफोन है?)',
+        'Ask the IP: "Do you have an Android/iOS smartphone with internet to consult the doctor via e-Sanjeevani?" (Hinglish: "Kya aapke paas e-Sanjeevani par online doctor se baat karne ke liye smartphone aur internet hai?")',
       suggestedAnswers: [
         "Yes, have smartphone with internet connection",
         "Need help registering on esanjeevani.in",
@@ -237,7 +198,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller requested medicine dispensing / refill; guide to nearest empanelled chemist or dispensary pharmacy.",
       suspectedConditionSuffix: "Pharmacy Prescription Refill",
       suggestedQuestion:
-        'Ask the IP: "Do you have an ESIC doctor prescription or Pehchan card for getting medicines?" (Hindi: क्या आपके पास दवा लेने के लिए डॉक्टर का पर्चा या पहचान कार्ड है?)',
+        'Ask the IP: "Do you have an ESIC doctor prescription or Pehchan card for getting medicines?" (Hinglish: "Kya aapke paas dawai lene ke liye doctor ka parcha ya Pehchan card hai?")',
       suggestedAnswers: [
         "Yes, have valid doctor prescription",
         "Need regular BP / Diabetes monthly medicines",
@@ -259,7 +220,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller explicitly requested psychological counselling / emotional support; forward to Psychological Counselling Department (Tele-MANAS 14416).",
       suspectedConditionSuffix: "Psychological Counselling Support",
       suggestedQuestion:
-        'Ask the IP: "We are connecting you with our compassionate mental health counselling team. Are you in a comfortable place to speak freely?" (Hindi: हम आपको परामर्श टीम से जोड़ रहे हैं। क्या आप खुलकर बात करने के लिए सुरक्षित स्थान पर हैं?)',
+        'Ask the IP: "We are connecting you with our compassionate mental health counselling team. Are you in a comfortable place to speak freely?" (Hinglish: "Hum aapko counselling team se connect kar rahe hain. Kya aap bina kisi jhijhak ke akele me baat karne ke liye safe jagah par hain?")',
       suggestedAnswers: [
         "Yes, please connect to counsellor now",
         "Experiencing extreme stress and anxiety",
@@ -281,12 +242,34 @@ export function detectDirectCallerReferralIntent(text) {
         "Forward call directly to on-duty ESIC Medical Officer workstation.",
       suspectedConditionSuffix: "Medical Officer Escalation",
       suggestedQuestion:
-        'Ask the IP: "Connecting your call to our on-duty Medical Officer. Please stay on the line." (Hindi: आपका कॉल ऑन-ड्यूटी मेडिकल ऑफिसर को ट्रांसफर किया जा रहा है।)',
+        'Ask the IP: "Connecting your call to our on-duty Medical Officer. Please stay on the line." (Hinglish: "Aapka call on-duty Medical Officer ko transfer kiya ja raha hai, kripya line par bane rahein.")',
       suggestedAnswers: [
         "Urgent doctor review needed",
         "Need physician opinion on lab reports",
         "Unresponsive to primary treatment",
         "Direct clinical discussion",
+      ],
+    };
+  }
+
+  // 9. Direct NACO 1097 / HIV / AIDS / Sexual Disease Intent
+  if (
+    /\b(naco|1097|hiv|aids|gupt rog|sexual health|sexually transmitted|std\b|sti\b|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(
+      clean
+    )
+  ) {
+    return {
+      destination: "NACO 1097 Helpline",
+      reason:
+        "Caller inquiring about HIV/AIDS, STI, or sexual health; transfer call to National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counselling and testing guidance.",
+      suspectedConditionSuffix: "HIV / AIDS & Sexual Health Guidance",
+      suggestedQuestion:
+        'Ask the IP: "Your consultation is completely confidential. Are you seeking free HIV/STI testing information, counseling, or emergency PEP guidance?" (Hinglish: "Aapki baatcheet bilkul confidential hai. Kya aap free HIV/STI test, counselling ya emergency PEP guidance chahte hain?")',
+      suggestedAnswers: [
+        "Need confidential HIV counseling & testing center info",
+        "Recent possible exposure — need emergency PEP guidance (< 72 hrs)",
+        "Experiencing symptoms of sexually transmitted infection",
+        "Need routine information on NACO toll-free 1097 services",
       ],
     };
   }
@@ -308,7 +291,7 @@ export async function processDoctorConsultationTurn({
   if (isNonMedicalQuery(cleanInput)) {
     return {
       probingQuestion:
-        'Ask the IP: "This helpline is exclusively dedicated to healthcare, medical triage, and ESIC clinical assistance. Please state what health symptoms or medical concerns you are facing." (यह हेल्पलाइन केवल स्वास्थ्य और चिकित्सा परामर्श के लिए है। कृपया अपनी स्वास्थ्य समस्या या लक्षण बताएं।)',
+        'Ask the IP: "This helpline is exclusively dedicated to healthcare, medical triage, and ESIC clinical assistance. Please state what health symptoms or medical concerns you are facing." (Hinglish: "Yeh helpline keval swasthya aur medical triage ke liye hai. Kripya apni bimari ya lakshan batayein.")',
       suggestedAnswers: [
         "Physical symptoms or pain",
         "Need ESIC Doctor / Dispensary visit",
@@ -338,37 +321,40 @@ export async function processDoctorConsultationTurn({
 
   // =========================================================================
   // MULTI-PROVIDER AI CASCADE ARCHITECTURE
-  // Priority: 1. Gemini -> 2. Groq -> 3. OpenAI -> 4. Anthropic (Dhwani) -> 5. Local Dynamic
-  // When an API limit is reached or quota exceeded (429), automatically shift to next!
+  // Priority: 1. Google Gemini Flash (3.6 / 3.5 / latest)
+  //           2. Groq Multi-Key (5 Keys failover, 3-turn sliding window)
+  //           3. OpenAI (gpt-4o-mini / gpt-4o)
+  //           4. Anthropic Claude (via Dhwani ESIC Proxy / Direct)
+  //           5. Local Deterministic Clinical Engine
   // =========================================================================
 
-  // --- Priority 1: Google Gemini AI API ---
+  // --- Priority 1: Google Gemini AI API (Highest Human Empathy, Warmth & Clinical Fluency) ---
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    const geminiModels = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-2.5-flash-lite", "gemini-pro-latest"];
+    const geminiModels = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-pro-latest"];
     for (const model of geminiModels) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 7000);
 
+        // Sliding window of last 3 turns to minimize token payload while retaining context
         const conversationText = history
-          .slice(-6)
+          .slice(-3)
           .map((m) => `${m.sender === "user" || m.role === "user" ? "Caller" : "Doctor"}: ${m.text || m.content || ""}`)
           .join("\n");
 
         const promptText = `${SYSTEM_PROMPT}
 
-CONVERSATION HISTORY:
+CONVERSATION HISTORY (Last 3 Turns):
 ${conversationText}
 
 CURRENT CALLER INPUT: "${cleanInput}"
-PREVIOUS SUSPECTED CONDITION: "${currentClinicalState.suspectedCondition || "Not yet determined"}"
-ALREADY ASKED QUESTIONS (DO NOT REPEAT): ${JSON.stringify(askedQuestionsList)}
-CURRENT USER TURN: ${userTurnsCount}
+CLINICAL CONTEXT: Suspected: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}
+ALREADY ASKED QUESTIONS: ${JSON.stringify(askedQuestionsList)}
 
 Strictly return a JSON object with:
 {
-  "probingQuestion": "Ask the IP: ... (Hindi: ...)",
+  "probingQuestion": "Ask the IP: ... (Hinglish: ...)",
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
   "suspectedCondition": "Primary suspected condition",
   "isPsychiatric": false,
@@ -388,7 +374,7 @@ Strictly return a JSON object with:
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               contents: [{ parts: [{ text: promptText }] }],
-              generationConfig: { responseMimeType: "application/json", temperature: 0.3 },
+              generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 384 },
             }),
             signal: controller.signal,
           }
@@ -405,7 +391,7 @@ Strictly return a JSON object with:
             }
           }
         } else {
-          console.warn(`[AI Cascade] Gemini (${model}) limit/status ${res.status}, auto-shifting to Groq...`);
+          console.warn(`[AI Cascade] Gemini (${model}) limit/status ${res.status}, auto-shifting to Groq Multi-Key...`);
           if (res.status === 429) break; // Project quota exhausted, shift to Groq immediately
         }
       } catch (err) {
@@ -414,69 +400,84 @@ Strictly return a JSON object with:
     }
   }
 
-  // --- Priority 2: Groq Cloud AI API (Qwen 27B -> GPT-OSS 120B -> GPT-OSS 20B) ---
-  const groqKey = process.env.GROQ_API_KEY;
-  if (groqKey) {
-    const candidateModels = [
-      { name: "qwen/qwen3.8-27b", maxTokens: 1024, temperature: 0.3 },
-      { name: "openai/gpt-oss-120b", maxTokens: 2048, temperature: 0.3 },
-      { name: "openai/gpt-oss-20b", maxTokens: 2048, temperature: 0.3 },
+  // --- Priority 2: Groq Cloud AI API with Multi-Key Failover ---
+  const groqKeys = [
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_API_KEY_2,
+    process.env.GROQ_API_KEY_3,
+    process.env.GROQ_API_KEY_4,
+    process.env.GROQ_API_KEY_5,
+  ].filter(Boolean);
+  if (groqKeys.length > 0) {
+    const groqCandidateModels = [
+      { name: "qwen/qwen3.8-27b", maxTokens: 384, temperature: 0.3 },
+      { name: "openai/gpt-oss-120b", maxTokens: 384, temperature: 0.3 },
+      { name: "openai/gpt-oss-20b", maxTokens: 384, temperature: 0.3 },
     ];
-    for (const { name: model, maxTokens, temperature } of candidateModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7000);
 
-        const conversationMessages = [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...history.slice(-10).map((m) => ({
-            role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
-            content: typeof m.content === "string" ? m.content : m.text || "",
-          })),
-          {
-            role: "user",
-            content: `Caller's current reply: "${cleanInput}".
-Previous suspected condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}".
-Already asked questions in this chat: ${JSON.stringify(askedQuestionsList)}.
-Current user turn count: ${userTurnsCount}.
+    // Sliding window of last 3 turns saves 400-600 tokens per turn while clinical context retains state
+    const conversationMessages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...history.slice(-3).map((m) => ({
+        role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
+        content: typeof m.content === "string" ? m.content : m.text || "",
+      })),
+      {
+        role: "user",
+        content: `Caller: "${cleanInput}".
+Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
+Already asked: ${JSON.stringify(askedQuestionsList)}.
 
 Respond strictly in valid JSON format:
-{ "probingQuestion": "Ask the IP: ...", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": true/false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": true/false, "clinicalSummary": "..." }`,
-          },
-        ];
+{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
+      },
+    ];
 
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${groqKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model,
-            messages: conversationMessages,
-            response_format: { type: "json_object" },
-            temperature,
-            max_tokens: maxTokens,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
+    // Iterate through available Groq keys (failover on 429/quota)
+    for (let keyIdx = 0; keyIdx < groqKeys.length; keyIdx++) {
+      const activeGroqKey = groqKeys[keyIdx];
 
-        if (res.ok) {
-          const data = await res.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (content) {
-            const parsed = JSON.parse(content);
-            if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-              return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
+      for (const { name: model, maxTokens, temperature } of groqCandidateModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${activeGroqKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model,
+              messages: conversationMessages,
+              response_format: { type: "json_object" },
+              temperature,
+              max_tokens: maxTokens,
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const data = await res.json();
+            const content = data.choices?.[0]?.message?.content;
+            if (content) {
+              const parsed = JSON.parse(content);
+              if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+                return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
+              }
+            }
+          } else {
+            console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) limit/status ${res.status}`);
+            if (res.status === 429) {
+              console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} limit reached (429), auto-shifting to next Groq key...`);
+              break; // Shift to next key immediately
             }
           }
-        } else {
-          console.warn(`[AI Cascade] Groq (${model}) limit/status ${res.status}, auto-shifting to OpenAI...`);
-          if (res.status === 429) break;
+        } catch (err) {
+          console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) error:`, err.message);
         }
-      } catch (err) {
-        console.warn(`[AI Cascade] Groq (${model}) error:`, err.message);
       }
     }
   }
@@ -492,19 +493,18 @@ Respond strictly in valid JSON format:
 
         const conversationMessages = [
           { role: "system", content: SYSTEM_PROMPT },
-          ...history.slice(-10).map((m) => ({
+          ...history.slice(-3).map((m) => ({
             role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
             content: typeof m.content === "string" ? m.content : m.text || "",
           })),
           {
             role: "user",
-            content: `Caller's current reply: "${cleanInput}".
-Previous suspected condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}".
-Already asked questions in this chat: ${JSON.stringify(askedQuestionsList)}.
-Current user turn count: ${userTurnsCount}.
+            content: `Caller: "${cleanInput}".
+Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
+Already asked: ${JSON.stringify(askedQuestionsList)}.
 
 Respond strictly in valid JSON format:
-{ "probingQuestion": "Ask the IP: ...", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": true/false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": true/false, "clinicalSummary": "..." }`,
+{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
           },
         ];
 
@@ -519,7 +519,7 @@ Respond strictly in valid JSON format:
             messages: conversationMessages,
             response_format: { type: "json_object" },
             temperature: 0.3,
-            max_tokens: 1024,
+            max_tokens: 384,
           }),
           signal: controller.signal,
         });
@@ -583,15 +583,24 @@ Respond strictly in valid JSON format:
           questions.find((q) => !askedQuestionsList.some((asked) => asked.includes(q.slice(0, 20)))) || questions[0];
 
         if (unaskedQ) {
+          let cleanQ = unaskedQ;
+          if (!cleanQ.startsWith("Ask the IP:")) {
+            cleanQ = `Ask the IP: "${cleanQ.replace(/^["']|["']$/g, "")}"`;
+          }
+          cleanQ = enforceSingleQuestion(cleanQ);
+          cleanQ = sanitizeClinicalQuestion(cleanQ, fullNotes, cleanInput);
+          cleanQ = enforceSingleQuestion(cleanQ);
+
+          const conditionLabel = /\b(fall|fell|falling|gira|giri|bed)\b/i.test(cleanInput)
+            ? "Traumatic Fall / Impact Injury Assessment"
+            : (tr.summary_en ? tr.summary_en.slice(0, 60) : "Clinical Triage Evaluation");
+
+          const contextualAns = generateContextualAnswers(cleanQ, cleanInput, Boolean(tr.is_psychiatric));
+
           const anthropicParsed = {
-            probingQuestion: `Ask the IP: "${unaskedQ}"`,
-            suggestedAnswers: [
-              "Yes, experiencing this symptom",
-              "Mild discomfort present, but manageable",
-              "No, not experiencing this",
-              "Symptoms started earlier today",
-            ],
-            suspectedCondition: tr.summary_en ? tr.summary_en.slice(0, 60) : "Clinical Triage Evaluation",
+            probingQuestion: cleanQ,
+            suggestedAnswers: contextualAns,
+            suspectedCondition: conditionLabel,
             severity: tr.urgency_level === "Emergency" ? "High" : tr.urgency_level === "Urgent" ? "Moderate" : "Mild",
             severityScore: tr.urgency_score || (tr.urgency_level === "Emergency" ? 9 : 5),
             referralDestination: tr.recommended_facility_type || "ESIS Dispensary",
@@ -613,6 +622,536 @@ Respond strictly in valid JSON format:
 
   // --- Priority 5: Local Dynamic Clinical Engine (<1ms, Guaranteed 100% Non-Repeating) ---
   return buildLocalDoctorConsultationFallback(cleanInput, history, currentClinicalState);
+}
+
+/**
+ * Generates highly realistic, question-relevant answer chips if LLM returns empty or off-topic options
+ */
+export function generateContextualAnswers(questionText, userInput = "", isPsych = false) {
+  const q = (questionText || "").toLowerCase();
+  const u = (userInput || "").toLowerCase();
+  const qu = `${q} ${u}`;
+
+  // 1. Age Inquiry (for third-party inquiries about relatives/patients)
+  if (/\b(how old|what is (?:his|her|the|their|your) age|age of|patient'?s? age|father'?s? age|mother'?s? age|child'?s? age|kitni umar)\b/i.test(q)) {
+    return [
+      "Over 65 years (Elderly)",
+      "40 to 60 years (Adult)",
+      "18 to 40 years (Young adult)",
+      "Under 18 years (Child / Minor)",
+    ];
+  }
+
+  // 2. Casualties / Disaster / Workplace Mass Accident (STRICT: Never match "how many" alone!)
+  if (
+    /\b(how many\s+(?:people|persons?|casualties|workers?|victims?)|kitne log ghayal|kitne log hain|how many.*(?:injured|casualties|victims|trapped))\b/i.test(q) ||
+    (/\b(casualties|disaster|accident|explosion|collapse)\b/i.test(q) && /\b(injured|casualties|trapped|victim)\b/i.test(q))
+  ) {
+    return [
+      "1 person injured — conscious with severe pain",
+      "2 or more casualties — multiple people hurt",
+      "Victim is unconscious / not responding",
+      "Person trapped in vehicle / machinery",
+    ];
+  }
+
+  // 3. Fever & Body Pain Duration (Directly answers "how many days has this fever and body pain been continuing?")
+  if (
+    /\b(how long|how many days|since when|when did|duration|kab se|kitne din|kitna samay)\b/i.test(q) &&
+    /\b(fever|bukhar|temperature|body pain|badan dard|pain|dard|ache)\b/i.test(qu)
+  ) {
+    return [
+      "Started earlier today (< 24 hours)",
+      "Since yesterday (1 to 2 days)",
+      "For 3 to 5 days",
+      "More than a week (Persistent fever)",
+    ];
+  }
+
+  // 4. Fever Severity / High Temperature / Thermometer / Chills / Shivering
+  if (/\b(how high|temperature|thermometer|degree|chills|shivering|sweating|kitna bukhar|kapkapi|thand)\b/i.test(q)) {
+    return [
+      "High fever over 102°F with severe shivering/chills",
+      "Moderate fever (100°F - 101°F) with body ache",
+      "Haven't measured with thermometer, but body feels very hot",
+      "Fever comes and goes with heavy sweating",
+    ];
+  }
+
+  // 5. Fever Associated Red Flags (Breathing, Rash, Stiff Neck, Confusion, Vomiting)
+  if (
+    /\b(fever|bukhar)\b/i.test(qu) &&
+    /\b(rash|spots|breathing|breathless|stiff neck|confusion|vomiting|dane|saans)\b/i.test(q)
+  ) {
+    return [
+      "Yes, feeling breathless / chest tightness",
+      "Yes, vomiting and severe body weakness",
+      "Notice red spots / skin rash",
+      "No rash or breathing trouble, only fever and body ache",
+    ];
+  }
+
+  // 6. Fall / Bed Fall / Impact Injury / Head Strike
+  if (
+    /\b(fall|fell|falling|gira|giri|bed|slip|tripped|hit your head|injure.*body|when you fell|unable to get up|floor)\b/i.test(q) ||
+    /\b(fall|fell|falling|gira|giri|bed)\b/i.test(u)
+  ) {
+    if (/\b(head|vomit|vision|sar par|sir par)\b/i.test(q)) {
+      return [
+        "Hit my head, feeling dizzy or dazed",
+        "Feeling nauseous / vomited once",
+        "Severe headache and blurred vision",
+        "No head injury, head is completely fine",
+      ];
+    }
+    if (/\b(stand|walk|limb|weight|khade|pair)\b/i.test(q)) {
+      return [
+        "Cannot bear any weight on leg / hip",
+        "Suspected fracture / limb swollen",
+        "Able to stand up with support",
+        "Can walk slowly with mild pain",
+      ];
+    }
+    return [
+      "Hit my head, feeling dizzy or dazed",
+      "Severe pain in arm / leg / back",
+      "Unable to get up from the floor",
+      "Bruised and sore, but can move limbs",
+    ];
+  }
+
+  // 7. General Duration for any symptom (When did it start / How long)
+  if (/\b(when did|how long|how many (?:hours|days|weeks|months)|duration|since when|kab se|kitne din|kitna samay)\b/i.test(q)) {
+    return [
+      "Started earlier today (< 24 hours)",
+      "1 to 3 days (Recent)",
+      "About 1 to 2 weeks",
+      "Chronic problem (More than a month)",
+    ];
+  }
+
+  // 8. Snake Bite / Animal Bite Location
+  if (/\b(where.*bite|bite.*located|where on your body|body part|kahan par kaata|shareer ke kis hisse|bite happen)\b/i.test(q)) {
+    return [
+      "Bite is on foot / ankle",
+      "Bite is on lower leg",
+      "Bite is on hand / fingers",
+      "Bite is on arm / wrist",
+    ];
+  }
+
+  // 9. Snake Bite / Envenomation Symptoms (swelling, numbness, breathing)
+  if (/\b(swelling|numbness|swollen|sujan|sunnta)\b/i.test(q)) {
+    return [
+      "Rapid swelling spreading around bite",
+      "Area feels completely numb and cold",
+      "Having difficulty breathing / chest tight",
+      "No swelling yet, only puncture marks",
+    ];
+  }
+
+  // 10. Snake appearance / identification
+  if (/\b(see the snake|what did the snake look like|color of the snake|saamp kaisa tha)\b/i.test(q)) {
+    return [
+      "Could not see the snake clearly",
+      "Saw a dark brown / black snake",
+      "Saw a green / striped snake",
+      "Snake had a hood / raised head",
+    ];
+  }
+
+  // 11. Loss of consciousness / Blackout / Syncope
+  if (/\b(lose consciousness|loss of consciousness|blacked out|black out|passed out|pass out|behosh|hosh khona)\b/i.test(q)) {
+    return [
+      "Yes, blacked out for a few moments",
+      "No loss of consciousness, remained awake",
+      "Felt very dazed and disoriented",
+      "Do not remember right after the event",
+    ];
+  }
+
+  // 12. Dizziness / Faintness / Lightheadedness
+  if (/\b(dizzy|faint|lightheaded|chakkar|unsteady|room spinning)\b/i.test(q)) {
+    return [
+      "Yes, feeling very dizzy and faint",
+      "A little faint, but conscious and alert",
+      "No dizziness, feeling relatively stable",
+      "Vision is getting blurry / feeling cold",
+    ];
+  }
+
+  // 13. Bleeding / Pressure on wound / First aid / Blood
+  if (/\b(bleed|wound|pressure|cloth|wrist|laceration|cut|bandage|dabav|khoon)\b/i.test(q)) {
+    return [
+      "Holding firm pressure with clean cloth",
+      "Heavy bleeding soaking through cloth",
+      "Bleeding is beginning to slow down",
+      "Hands are shaking / hard to press",
+    ];
+  }
+
+  // 14. Alone / Anyone with them / Companion
+  if (/\b(alone|anyone with you|family|koi hai|saath|parivaar|friend)\b/i.test(q)) {
+    return [
+      "I am completely alone right now",
+      "A family member is with me",
+      "Neighbor / colleague is nearby",
+      "Someone is arriving soon",
+    ];
+  }
+
+  // 15. Paramedics / Ambulance / Location
+  if (/\b(ambulance|paramedics|address|location|landmark|reach directly|pahunch sakti)\b/i.test(q)) {
+    return [
+      "Ambulance can reach directly on main road",
+      "Waiting at the entrance gate to guide them",
+      "Arranging local vehicle to hospital",
+      "Need ambulance dispatch right now",
+    ];
+  }
+
+  // 16. Chest pressure / Cardiac ischemia
+  if (/\b(crushing|heavy pressure|radiat|chhati|heart|seene me dard)\b/i.test(q)) {
+    return [
+      "Heavy crushing pressure radiating to left arm",
+      "Sharp stinging chest pain when breathing in",
+      "Burning sensation / acidity feeling",
+      "Dull tightness across center of chest",
+    ];
+  }
+
+  // 17. Respiratory / Breathlessness / Cough
+  if (/\b(breath|breathing|saans|wheez|dyspnea)\b/i.test(q)) {
+    return [
+      "Severe breathlessness even while resting",
+      "Breathlessness when speaking or walking",
+      "Wheezing sound with tight chest feeling",
+      "Breathing is stable / manageable",
+    ];
+  }
+
+  if (/\b(cough|cold|phlegm|sputum|throat|khansi|balgam|gale me)\b/i.test(q)) {
+    return [
+      "Dry persistent cough with sore throat",
+      "Cough with thick yellow / green phlegm",
+      "Cough causes chest tightness / breathlessness",
+      "No cough, only fever and body ache",
+    ];
+  }
+
+  // 18. Stress / Psychological triggers
+  if (/\b(stress|causing you the most|worry|trouble|family|work pressure|tanaav)\b/i.test(q)) {
+    return [
+      "Heavy work pressure & workplace stress",
+      "Family dispute / Relationship difficulties",
+      "Financial burden & debt worries",
+      "Chronic illness / Physical health distress",
+    ];
+  }
+
+  // 19. Self-harm / Thoughts of giving up
+  if (/\b(harm|giving up|give up|jan dene|thoughts of|nuksaan|suicid)\b/i.test(q)) {
+    return [
+      "Yes, having thoughts of self-harm",
+      "No thoughts of self-harm, just deeply exhausted",
+      "Feeling severe anxiety and panic attacks",
+      "Need to talk to a counselor right now",
+    ];
+  }
+
+  // 20. Safe place / Counselling connection
+  if (/\b(safe place|surakshit|tele-manas|counsel|transfer)\b/i.test(q)) {
+    return [
+      "Yes, please connect me to the counsellor right now",
+      "I am at home alone, please connect urgently",
+      "Family member is with me, please guide transfer",
+      "Will stay on the line for counselling team",
+    ];
+  }
+
+  // 21. Medication / Treatment taken
+  if (/\b(medicine|medication|dawa|tablet|paracetamol|painkiller|treatment|doctor ko dikhaya|taken anything)\b/i.test(q)) {
+    return [
+      "Took Paracetamol, but fever came back",
+      "Took painkiller, only gave temporary relief",
+      "Haven't taken any medicines yet",
+      "Visited local clinic / chemist earlier today",
+    ];
+  }
+
+  // 22. Pre-existing medical conditions
+  if (/\b(pre-existing|history of|diabetes|bp|hypertension|blood pressure|asthma|heart disease|bimari)\b/i.test(q)) {
+    return [
+      "Yes, have diabetes / high blood pressure",
+      "Yes, history of asthma / heart disease",
+      "No prior health conditions",
+      "Not sure / haven't had recent checkup",
+    ];
+  }
+
+  // 23. Vomiting / diarrhea / loose stools
+  if (/\b(vomit\w*|ulti\w*|diarrhea\w*|loose motion\w*|stool\w*|dast|nausea\w*)\b/i.test(q)) {
+    if (/\b(how many times|how many|frequency|kitni bar|times today)\b/i.test(q)) {
+      return [
+        "Vomited 1 to 2 times, able to sip water",
+        "Frequent vomiting (3 to 5 times) with weakness",
+        "Severe continuous vomiting (> 5 times), cannot retain fluids",
+        "Feeling nauseous, but haven't vomited yet",
+      ];
+    }
+    return [
+      "Frequent vomiting (> 5 times), cannot keep fluids down",
+      "Watery loose motions 3 to 4 times with weakness",
+      "Mild nausea with stomach upset after food",
+      "Vomited once or twice, able to drink water",
+    ];
+  }
+
+  // 24. Headache
+  if (/\b(headache|sar dard|sir dard|migraine)\b/i.test(q)) {
+    return [
+      "Sudden explosive severe headache unlike any before",
+      "One-sided throbbing headache with nausea",
+      "Dull band-like pressure across forehead",
+      "Mild headache relieved by resting",
+    ];
+  }
+
+  // 25. Anatomical Location of Pain / Symptoms (Body, Leg, Knee, Calf, Ankle, Back, Abdomen, Chest, Arm, Head)
+  if (
+    /\b(where.*(?:pain|hurt|dard)|location.*(?:pain|dard)|which part|kis hisse|kahan.*dard|pair me kahan|kahan dard)\b/i.test(q) ||
+    (/\b(where|kahan|location)\b/i.test(q) && /\b(pain|dard|hurt|ache)\b/i.test(qu)) ||
+    /\b(thigh|knee|calf|ankle|shin|foot)\b/i.test(q)
+  ) {
+    if (/\b(body|badan|whole body|all over|joints)\b/i.test(qu)) {
+      return [
+        "Severe aching all over my body & joints",
+        "Pain mostly in legs, knees, and lower back",
+        "Severe neck and shoulder muscle stiffness",
+        "Dull continuous body ache with fatigue",
+      ];
+    }
+    if (/\b(leg|thigh|knee|calf|ankle|shin|foot|pair|ghutna)\b/i.test(qu)) {
+      return [
+        "In my knee joint",
+        "In my calf muscle",
+        "In my thigh / upper leg",
+        "In my ankle or foot",
+      ];
+    }
+    if (/\b(back|spine|kamar|peeth|lumbar)\b/i.test(qu)) {
+      return [
+        "Lower back (lumbar area)",
+        "Upper / mid back between shoulder blades",
+        "Lower back shooting down the leg",
+        "Neck / cervical spine area",
+      ];
+    }
+    if (/\b(abdomen|stomach|belly|pet)\b/i.test(qu)) {
+      return [
+        "Lower right abdomen",
+        "Upper central stomach (acidity/burning)",
+        "Around navel / entire belly",
+        "Flank / sides radiating to back",
+      ];
+    }
+    if (/\b(arm|shoulder|elbow|wrist|hand|haath|kandha)\b/i.test(qu)) {
+      return [
+        "Shoulder / upper arm",
+        "Elbow joint",
+        "Forearm or wrist",
+        "Fingers / hand",
+      ];
+    }
+    if (/\b(head|face|sir|sar|aankh)\b/i.test(qu)) {
+      return [
+        "Forehead / temples (throbbing)",
+        "Back of head / neck",
+        "One side of head only",
+        "Behind the eyes",
+      ];
+    }
+    return [
+      "Severe aching all over my body & joints",
+      "Pain mostly in legs, knees, and lower back",
+      "Severe neck and shoulder muscle stiffness",
+      "Dull continuous body ache with fatigue",
+    ];
+  }
+
+  // 26. Mobility / Ability to Walk or Stand
+  if (/\b(stand|walk|get up|weight|bear weight|khade|chal pa|pair par khade|utha nahi ja raha)\b/i.test(q)) {
+    return [
+      "Unable to bear weight or stand on leg",
+      "Can stand and walk with support",
+      "Completely bedridden due to pain and weakness",
+      "Can walk slowly with mild pain",
+    ];
+  }
+
+  // 27. Pain severity & character
+  if (/\b(pain|dard|severe|sharp|ache|burning|throbbing|intensity)\b/i.test(q)) {
+    return [
+      "Severe sharp unbearable pain (8-10/10)",
+      "Moderate throbbing ache (5-7/10)",
+      "Mild discomfort (2-4/10)",
+      "Pain is radiating to other areas",
+    ];
+  }
+
+  // 28. Question-intent based fallback (Yes/No screening)
+  if (/\b(did you|do you|are you|have you|is there|was there|kya aap|kya)\b/i.test(q)) {
+    return [
+      "Yes, definitely experiencing this",
+      "Mild discomfort, but manageable",
+      "No, not experiencing this at all",
+      "It comes and goes intermittently",
+    ];
+  }
+
+  // 29. Final clinical fallback
+  if (/\b(fever|bukhar|body pain|badan)\b/i.test(qu)) {
+    return [
+      "Started earlier today (< 24 hours)",
+      "Since yesterday (1 to 2 days)",
+      "For 3 to 5 days",
+      "More than a week (Persistent fever)",
+    ];
+  }
+
+  return [
+    "Yes, experiencing this right now",
+    "No, that symptom is not present",
+    "Symptoms started earlier today",
+    "Needs urgent doctor checkup",
+  ];
+}
+
+/**
+ * Ensures exactly ONE clinical question is asked per turn.
+ * Strips compound trailing questions joined by "and are you", "and do you", "— and did it", etc.
+ */
+export function enforceSingleQuestion(questionText) {
+  if (!questionText || typeof questionText !== "string") return questionText;
+
+  const hindiMatch = questionText.match(/\((?:Hindi|Hinglish|हिन्दी):\s*['"]?([\s\S]*?)['"]?\s*\)/i);
+  let englishPart = questionText.replace(/\((?:Hindi|Hinglish|हिन्दी):[\s\S]*?\)/i, "").trim();
+
+  // Strip trailing quote/paren remnants
+  englishPart = englishPart.replace(/["')\]\s]+$/, "");
+
+  // Remove duplicate question mark artifacts like .? or ?."
+  englishPart = englishPart.replace(/\.\?+/g, ".").replace(/\?+/g, "?");
+
+  // Check if there are multiple full questions (separated by ?):
+  // e.g. "I'm sorry you are in pain. Where is it hurting? And did you fall?"
+  // We keep the empathy sentence + the FIRST question!
+  const qMarkIndex = englishPart.indexOf("?");
+  if (qMarkIndex !== -1 && qMarkIndex < englishPart.length - 1) {
+    const afterQ = englishPart.slice(qMarkIndex + 1).trim();
+    if (/\b(?:and|or|also|is|are|do|did|can|could|how|what|where|have|has)\b/i.test(afterQ)) {
+      englishPart = englishPart.slice(0, qMarkIndex + 1);
+    }
+  }
+
+  // Strip compound trailing questions joined by em-dash or comma followed by "and did it / and are you / and is there"
+  // ONLY when preceded by an interrogative question!
+  englishPart = englishPart
+    .replace(/(?<=\b(?:where|which|when|how|is|are|do|does|did|have|has|can|could)\b[\s\S]+?)(?:[,\s]*[—–-][\s—–-]*|[,\s]+and\s+)(?:did\s+it|is\s+it|is\s+there|are\s+you|do\s+you|can\s+you|could\s+you|have\s+you|was\s+there|how\s+long)\b[\s\S]*?\??$/i, "")
+    .trim();
+
+  // Clean trailing punctuation and ensure proper single question mark closing
+  englishPart = englishPart.replace(/[,;:\s—–-]+$/, "");
+  if (!englishPart.endsWith("?")) {
+    if (englishPart.endsWith(".")) {
+      if (/\b(can|could|would|please tell|what|where|when|which|how|are|is|do|does|did|have|has)\b/i.test(englishPart)) {
+        englishPart = englishPart.slice(0, -1).trim() + "?";
+      } else {
+        // If it's an empathy statement alone without a question, e.g. "I'm sorry you're feeling unwell."
+        // We must append a supportive clinical question:
+        englishPart = englishPart + " Could you tell me what symptoms are bothering you the most right now?";
+      }
+    } else {
+      englishPart = englishPart + "?";
+    }
+  }
+
+  // Format quotes cleanly with balanced double quotes
+  const coreQuestion = englishPart.replace(/^Ask the IP:\s*["']?/i, "").replace(/["']?\s*$/i, "").trim();
+  englishPart = `Ask the IP: "${coreQuestion}"`;
+
+  if (hindiMatch) {
+    let hinglishPart = hindiMatch[1]
+      .replace(/["')\]\s]+$/, "")
+      .replace(/\.\?+/g, ".")
+      .trim();
+    hinglishPart = hinglishPart.replace(/^['"]|['"]$/g, "").replace(/[,;:\s—–-]+$/, "").trim();
+    if (!hinglishPart.endsWith("?") && !hinglishPart.endsWith("।")) {
+      hinglishPart += "?";
+    }
+    return `${englishPart} (Hinglish: "${hinglishPart}")`;
+  }
+
+  return englishPart;
+}
+
+/**
+ * Detects if the caller is confirmed to be calling on behalf of someone else (third party).
+ * Default assumption: The caller is the Insured Person (IP / patient) themselves.
+ */
+export function isThirdPartyCaller(contextText = "") {
+  return /\b(my mother|my father|my child|my baby|my son|my daughter|my wife|my husband|my brother|my sister|my friend|my colleague|a worker|someone else|patient is|mummy|papa|beta|beti|bhai|behan|patni|pati|relative|neighbour|bystander)\b/i.test(contextText);
+}
+
+/**
+ * Ensures questions NEVER ask adult callers if they are conscious (since they are calling on the phone).
+ * Also replaces third-person questions ("How old is the person who fell") with direct questions to the IP.
+ */
+export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInput = "") {
+  if (!questionText || typeof questionText !== "string") return questionText;
+
+  const isThirdParty = isThirdPartyCaller(`${allContext} ${cleanInput}`);
+
+  // If the caller is the patient themselves, forbid asking "are you conscious", "is the person conscious", etc.
+  const isAskingConscious = /\b(are (?:you|they) conscious|is (?:he|she|the person|the patient) conscious|conscious and (?:responding|able to speak)|hosh me|behosh|responding normally)\b/i.test(questionText);
+  const isAskingAge = !isThirdParty && /\b(?:how old|what is your age|caller'?s? age|how old is (?:the caller|the person|the patient|the one who fell))\b/i.test(questionText);
+
+  if ((isAskingConscious && !isThirdParty) || isAskingAge) {
+    // If it's a fall / bed fall
+    if (/\b(fall|fell|falling|gira|giri|bed|slip|tripped)\b/i.test(`${cleanInput} ${allContext}`)) {
+      return 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar ya sharir ke kisi hisse me chot aayi?")';
+    }
+    // If it's bleeding / trauma
+    if (/\b(bleed|wound|cut|chot|injury|khoon)\b/i.test(`${cleanInput} ${allContext}`)) {
+      return 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")';
+    }
+    // If it's chest pain / cardiac
+    if (/\b(chest|chhati|heart|angina)\b/i.test(`${cleanInput} ${allContext}`)) {
+      return 'Ask the IP: "Does the chest pain feel like heavy crushing pressure radiating to your arm or jaw?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baazu ya jabde ki taraf ja raha hai?")';
+    }
+    // If it's weakness / dizziness
+    if (/\b(dizzy|chakkar|kamzori|faint|weakness)\b/i.test(`${cleanInput} ${allContext}`)) {
+      return 'Ask the IP: "Are you feeling severe dizziness or unable to stand up right now?" (Hinglish: "Kya aapko bahut zyada chakkar ya kamzori mehsoos ho rahi hai?")';
+    }
+    // Default sensible question directly to the IP
+    return 'Ask the IP: "Could you describe what specific symptoms or pain you are feeling right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kya takleef ya dard mehsoos ho raha hai?")';
+  }
+
+  // If not third-party caller, replace third-person references to caller with direct 2nd-person "you" / "your"
+  if (!isThirdParty) {
+    questionText = questionText
+      .replace(/\bdid the (?:caller|person|patient)\b/gi, "did you")
+      .replace(/\bdoes the (?:caller|person|patient)\b/gi, "do you")
+      .replace(/\bis the (?:caller|person|patient)\b/gi, "are you")
+      .replace(/\bhas the (?:caller|person|patient)\b/gi, "have you")
+      .replace(/\bcan the (?:caller|person|patient)\b/gi, "can you")
+      .replace(/\bwas the (?:caller|person|patient)\b/gi, "were you")
+      .replace(/\btheir (head|body|arm|leg|chest|back|mind|vision)\b/gi, "your $1")
+      .replace(/\bthe (?:caller's|person's|patient's)\b/gi, "your")
+      .replace(/(["']\s*)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
+  }
+
+  return questionText;
 }
 
 /**
@@ -668,6 +1207,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   let referralDestination;
   let referralReason;
 
+  const dispensaryStatus = getDispensaryOperatingStatus();
+
+  const isNacoHIV =
+    /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(cleanInput) ||
+    prevRef.includes("naco") ||
+    prevRef.includes("1097");
+
   if (directIntent) {
     referralDestination = directIntent.destination;
     referralReason = directIntent.reason;
@@ -677,6 +1223,9 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   } else if (isPsych) {
     referralDestination = "Psychological Counselling Department";
     referralReason = "Caller exhibits emotional distress or psychological crisis; forward to Psychological Counselling / Tele-MANAS (14416).";
+  } else if (isNacoHIV) {
+    referralDestination = "NACO 1097 Helpline";
+    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
   } else if (is104PhoneDoctor) {
     referralDestination = "104 Medical Team";
     referralReason = "Caller requested tele-doctor phone consultation; transfer call queue to 104 Medical Team.";
@@ -694,6 +1243,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     [
       "108 Ambulance",
       "Psychological Counselling Department",
+      "NACO 1097 Helpline",
       "104 Medical Team",
       "e-Sanjeevani",
       "Nearest Pharmacy",
@@ -707,9 +1257,43 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   } else if (severity === "High") {
     referralDestination = "ESIC Hospital";
     referralReason = "Severe condition requiring specialist examination and hospital casualty/OPD care today.";
+  } else if (!dispensaryStatus.isOpen) {
+    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
+    if (!hospitalOpdStatus.isOpen) {
+      referralDestination = "104 Medical Team";
+      referralReason = `ESIS Dispensaries and Hospital regular OPD are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    } else if (severity === "Moderate") {
+      referralDestination = "ESIC Hospital";
+      referralReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). ESIC Hospital OPD is open until 4:00 PM for doctor examination today.`;
+    } else {
+      referralDestination = "104 Medical Team";
+      referralReason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    }
   } else {
     referralDestination = "ESIS Dispensary";
     referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
+  }
+
+  // Ensure closed dispensary or closed hospital is never assigned when closed
+  if (referralDestination === "ESIS Dispensary" && !dispensaryStatus.isOpen) {
+    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
+    if (!hospitalOpdStatus.isOpen) {
+      referralDestination = "104 Medical Team";
+      referralReason = `ESIS Dispensaries and Hospital regular OPD are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    } else if (severity === "Moderate") {
+      referralDestination = "ESIC Hospital";
+      referralReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). Guide caller to nearest ESIC Hospital OPD today.`;
+    } else {
+      referralDestination = "104 Medical Team";
+      referralReason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    }
+  } else if (referralDestination === "ESIC Hospital" && severity !== "High") {
+    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
+    if (!hospitalOpdStatus.isOpen) {
+      // Non-emergency caller outside hospital OPD hours -> route to 104 Medical Team (doctor on call)
+      referralDestination = "104 Medical Team";
+      referralReason = `Hospital regular OPD is currently closed. Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    }
   }
 
   const userTurnsCount = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
@@ -790,49 +1374,100 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     probingQuestion = `Ask the IP: "${probingQuestion.replace(/^["']|["']$/g, "")}"`;
   }
 
+  // Enforce strictly ONE clinical question per turn (never combine with 'and are you', etc.)
+  probingQuestion = enforceSingleQuestion(probingQuestion);
+  probingQuestion = sanitizeClinicalQuestion(probingQuestion, allContext, cleanInput);
+  probingQuestion = enforceSingleQuestion(probingQuestion);
+
   const isAskingDuration =
     /\b(when did|how long|how many days|how many months|how many years|duration|since when|kab se|kitne din|kitna samay|kitne mahine|kitne saal)\b/i.test(
       probingQuestion
     );
 
-  // Retain the AI-generated dynamic suggested answers whenever available; never overwrite them!
   let suggestedAnswers;
-  if (Array.isArray(raw.suggestedAnswers) && raw.suggestedAnswers.length >= 2) {
-    suggestedAnswers = raw.suggestedAnswers
+  const rawOptions = raw.suggestedAnswers || raw.options || raw.answers;
+  const isCompoundOption = Array.isArray(rawOptions) && rawOptions.some(ans => typeof ans === "string" && (ans.length > 120 || /^[1-4]\)\s/m.test(ans)));
+  const isCannedGenericAnswers = Array.isArray(rawOptions) && rawOptions.some(ans => 
+    typeof ans === "string" && (
+      ans.includes("experiencing this right now") ||
+      ans.includes("symptom is not present") ||
+      ans.includes("comes and goes intermittently") ||
+      ans.includes("experiencing this symptom")
+    )
+  );
+
+  if (Array.isArray(rawOptions) && rawOptions.length >= 2 && !isCompoundOption && !isCannedGenericAnswers) {
+    suggestedAnswers = rawOptions
       .map((ans) => (typeof ans === "string" ? ans.trim() : String(ans)))
       .filter((ans) => ans.length > 0);
-  } else if (isAskingDuration) {
-    suggestedAnswers = [
-      "< 2 hours (Sudden / Acute)",
-      "1 to 3 days (Recent)",
-      "1 to 2 weeks",
-      "1 to 6 months",
-      "1 year or more (Chronic)",
-    ];
+
+    // Validate semantic alignment between probingQuestion and suggestedAnswers
+    const qLower = probingQuestion.toLowerCase();
+    const joinedAnswers = suggestedAnswers.join(" ").toLowerCase();
+
+    // Mismatch 1: Question asks for anatomical location (where/which part/thigh/knee/calf/ankle), but answers give pain severity rating (8-10, severe, moderate, mild)
+    const isAskingLocation = /\b(where|location|which part|thigh|knee|calf|ankle|shin|foot|kahan|kis hisse)\b/i.test(qLower);
+    const answersAreSeverity = /\b(8-10|5-7|2-4|unbearable|moderate|mild discomfort|throbbing ache)\b/i.test(joinedAnswers);
+    const answersHaveLocation = /\b(knee|calf|thigh|ankle|foot|joint|muscle|back|neck|stomach|abdomen|arm|shoulder|wrist|area|spot|body|head)\b/i.test(joinedAnswers);
+
+    // Mismatch 2: Question asks for duration/time (how long, since when, kab se, kitne din), but answers give severity or generic text
+    const isAskingDuration = /\b(how long|since when|when did|how many (?:hours|days|weeks|months)|duration|kab se|kitne din|kitna samay)\b/i.test(qLower);
+    const answersHaveDuration = /\b(hours|days|weeks|months|years|yesterday|today|recent|acute|chronic|sudden|persistent|ongoing)\b/i.test(joinedAnswers);
+
+    // Mismatch 3: Question asks for age (how old, age of), but answers do not have age
+    const isAskingAge = /\b(how old|age of|patient'?s? age|father'?s? age|mother'?s? age|kitni umar)\b/i.test(qLower);
+    const answersHaveAge = /\b(years|elderly|adult|minor|child|umar)\b/i.test(joinedAnswers);
+
+    // Mismatch 4: Casualties options returned when question is NOT asking about disaster/casualties
+    const isAskingCasualties = /\b(how many\s+(?:people|persons?|casualties|workers?|victims?)|casualties|injured people|kitne log ghayal)\b/i.test(qLower);
+    const answersHaveCasualties = /\b(casualties|person injured|trapped in vehicle|multiple people hurt)\b/i.test(joinedAnswers);
+
+    // Mismatch 5: Question is screening/yes-no, but answers give numbers or duration
+    const isYesNo = /\b(do you (?:have|feel|experience)|are you (?:having|experiencing)|is there (?:any)|did you (?:hit|fall|take))\b/i.test(qLower) && !isAskingDuration && !isAskingLocation;
+    const answersHaveYesNo = /\b(yes|no|manageable|intermittently|definitely|not at all)\b/i.test(joinedAnswers);
+
+    if (
+      (isAskingLocation && answersAreSeverity && !answersHaveLocation) ||
+      (isAskingDuration && !answersHaveDuration) ||
+      (isAskingAge && !answersHaveAge) ||
+      (!isAskingCasualties && answersHaveCasualties) ||
+      (isYesNo && !answersHaveYesNo && !answersHaveDuration)
+    ) {
+      suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych);
+    }
   } else {
-    suggestedAnswers = [
-      "Symptoms started today",
-      "Moderate discomfort",
-      "Fever / cold / mild body ache",
-      "Need guidance on daily medicines",
-    ];
+    suggestedAnswers = generateContextualAnswers(probingQuestion, cleanInput, isPsych);
+  }
+
+  const isSelfHarmTrauma =
+    /\b(cut.*wrist|wrist.*cut|bleeding.*cut|cut.*hand|overdose|drank poison|poisoning|hanging|sleeping pills|nass kaat|khoon nikal)\b/i.test(allContext) ||
+    (/\b(cut|bleeding|wound|khoon)\b/i.test(allContext) && /\b(sad|depress|die|suicid|jaan|mar ja|alone|unwanted)\b/i.test(allContext));
+
+  const isDual = Boolean(raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
+  const secondaryRef = raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
+
+  let finalCondition = raw.suspectedCondition;
+  if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
+    finalCondition = "Traumatic Fall / Impact Injury Assessment";
+  } else if (isPsych) {
+    finalCondition = raw.suspectedCondition || "Psychological Distress / Anxiety Crisis";
+  } else if (is104PhoneDoctor) {
+    finalCondition = "104 Tele-Doctor Consultation";
+  } else if (!finalCondition) {
+    finalCondition = "Under Clinical Assessment";
   }
 
   return {
     probingQuestion,
     suggestedAnswers,
-    suspectedCondition:
-      raw.suspectedCondition ||
-      (isPsych
-        ? "Psychological Distress / Anxiety Crisis"
-        : is104PhoneDoctor
-        ? "104 Tele-Doctor Consultation"
-        : "Under Clinical Assessment"),
+    suspectedCondition: finalCondition,
     isPsychiatric: isPsych,
     severity,
     severityScore,
     referralDestination,
     referralReason,
+    is_dual_protocol: isDual,
+    call_referral_secondary: secondaryRef,
     redFlagsDetected: Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : [],
     duration,
     isReadyForSummary: Boolean(raw.isReadyForSummary || (history.length >= 6) || is104PhoneDoctor),
@@ -885,7 +1520,73 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   }
 
-  // 1. Psychological Distress / Depression / Loneliness / Crisis
+  // 1. Combined Self-Harm / Traumatic Hemorrhage with Psychological Distress
+  const isSelfHarmTrauma =
+    /\b(cut.*wrist|wrist.*cut|bleeding.*cut|cut.*hand|overdose|drank poison|poisoning|hanging|sleeping pills|nass kaat|khoon nikal)\b/i.test(cleanInput) ||
+    (/\b(cut|bleeding|wound|khoon)\b/i.test(cleanInput) && /\b(sad|depress|die|suicid|jaan|mar ja|alone|unwanted)\b/i.test(cleanInput));
+
+  if (isSelfHarmTrauma) {
+    const harmSteps = [
+      {
+        id: "harm_bleeding_pressure",
+        condition: !hasAsked(["pressure", "clean cloth", "dabav", "kapda"]) && !cleanInput.includes("holding pressure"),
+        question:
+          'Ask the IP: "I hear you, please stay calm and stay on the line with me; help is being organized right now. Can you take a clean cloth and press it firmly on the wound without letting go?" (Hinglish: "Main aapke saath hoon, kripya shaant rahein aur phone par bane rahein. Kya aap saaf kapde se ghaav ko lagataar mazbooti se daba kar rakh pa rahe hain?")',
+        options: [
+          "Holding firm pressure on wound with cloth",
+          "Bleeding is heavy, feeling dizzy or faint",
+          "Someone is here with me helping hold pressure",
+          "Need immediate 108 emergency ambulance dispatch",
+        ],
+      },
+      {
+        id: "harm_dizziness_status",
+        condition: !hasAsked(["dizzy", "chakkar", "faint", "behosh"]),
+        question:
+          'Ask the IP: "Please keep that pressure firmly on the wound. Are you feeling dizzy, faint, or weak right now?" (Hinglish: "Kripya ghaav ko lagataar dabakar rakhein. Kya aapko abhi chakkar, behoshi ya kamzori mehsoos ho rahi hai?")',
+        options: [
+          "Yes, feeling very dizzy and faint",
+          "A little faint, but conscious and alert",
+          "No dizziness, holding pressure firmly",
+          "Vision is getting blurry / feeling cold",
+        ],
+      },
+      {
+        id: "harm_companion_support",
+        condition: true,
+        question:
+          'Ask the IP: "108 Ambulance is being alerted for immediate dispatch. Is there anyone nearby with you right now who can assist you?" (Hinglish: "108 Ambulance ko turant bheja ja raha hai. Kya aapke paas koi maujood hai jo madad kar sake?")',
+        options: [
+          "I am alone, please dispatch ambulance fast",
+          "A family member / friend is with me now",
+          "Neighbor is coming to help hold pressure",
+          "Waiting by the door for the ambulance",
+        ],
+      },
+    ];
+
+    const currentStep = harmSteps.find((s) => s.condition) || harmSteps[harmSteps.length - 1];
+
+    return {
+      probingQuestion: enforceSingleQuestion(currentStep.question),
+      suggestedAnswers: currentStep.options,
+      suspectedCondition: "Acute Self-Harm / Traumatic Hemorrhage with Psychiatric Crisis",
+      isPsychiatric: true,
+      severity: "High",
+      severityScore: 9,
+      referralDestination: "108 Ambulance",
+      referralReason: "Immediate traumatic hemorrhage requiring 108 Emergency Ambulance dispatch, alongside crisis mental health stabilization (Tele-MANAS 14416).",
+      redFlagsDetected: ["Acute Self-Harm / Traumatic Hemorrhage", "High-Risk Psychological Crisis"],
+      duration: "Reported today",
+      isReadyForSummary: true,
+      is_dual_protocol: true,
+      call_referral_secondary: "Psychological Counselling Department",
+      call_referral_secondary_reason: "Crisis emotional de-escalation & mental health counselling support (Tele-MANAS 14416).",
+      clinicalSummary: "Caller presents with acute self-harm trauma with bleeding and severe psychological distress. Immediate dual protocol activated: 108 Ambulance trauma dispatch with Psychological Counselling co-referral.",
+    };
+  }
+
+  // 2. Psychological Distress / Depression / Loneliness / Crisis
   const isPsych =
     /\b(suicid\w*|mar ja\w*|jaan de dunga|depress\w*|udaas\b|\brona\b|hopeless\b|anxiety\b|ghabrahat\b|mental health|akelepan\b|\bpareshan\b|\bdie\b|kill myself|crying\b|lonely\b|niraash\b|not wanting to live|self-harm)\b/i.test(
       cleanInput
@@ -902,7 +1603,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["kis baat se", "causing you the most", "stress recently", "troubling you"]) &&
           !/\b(work|job|boss|family|paisa|money|debt|health|bimar|loss|grief|trouble|fight|quarrel|husband|wife)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "I understand how heavy and lonely this feels for you right now, and you do not have to carry this alone. May I ask what has been causing you the most stress or pain recently? Is it family, work pressure, health, or personal troubles? (Hindi: मैं समझ सकता/सकती हूँ कि आप कितना अकेला और निराश महसूस कर रहे हैं। क्या आप बता सकते हैं कि हाल ही में किस बात से आपको सबसे ज्यादा तनाव या तकलीफ हो रही है?)"',
+          'Ask the IP: "I understand how heavy and lonely this feels for you right now, and you do not have to carry this alone. What has been causing you the most stress or pain recently?" (Hinglish: "Main samajh sakta hoon ki aap kitna akele aur pareshan mehsoos kar rahe hain. Kya aap bata sakte hain ki haal hi me kis baat se sabse zyada stress ya takleef ho rahi hai?")',
         options: [
           "Heavy work pressure & workplace stress",
           "Family dispute / Relationship difficulties",
@@ -917,11 +1618,11 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["kitne samay", "carrying this sadness", "affecting your sleep", "how long"]) &&
           !/\b(week|month|year|day|ghante|saal|din|mahine|insomnia|neend|bhook)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "Dealing with that must be emotionally exhausting. For how long have you been carrying this sadness, and has it been affecting your sleep, appetite, or daily peace of mind? (Hindi: यह मानसिक बोझ बहुत थका देने वाला होता है। आप कितने समय से ऐसा महसूस कर रहे हैं, और क्या इससे आपकी नींद और भूख प्रभावित हो रही है?)"',
+          'Ask the IP: "Dealing with that must be emotionally exhausting. Since how long have you been carrying this sadness or emotional distress?" (Hinglish: "Yeh mansik bojh sach me bahut thaka dene wala hota hai. Aap kitne samay se aisa mehsoos kar rahe hain?")',
         options: [
           "Past few days / Sudden overwhelming breakdown",
-          "1 to 2 weeks / Insomnia and loss of appetite",
-          "1 to 6 months / Continuous sadness and crying",
+          "1 to 2 weeks / Continuous sadness",
+          "1 to 6 months / Ongoing emotional struggle",
           "More than a year / Longstanding struggle",
         ],
       },
@@ -932,7 +1633,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["nuksaan", "self-harm", "harming yourself", "jan dene", "giving up"]) &&
           !/\b(self-harm|harming myself|not wanting to live|give up|giving up|jaan de|mar ja|suicid|nuksaan)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "Your life is truly precious to us. In these deep moments of darkness, have you felt like giving up or had thoughts of harming yourself? (Hindi: आपकी जान बहुत अनमोल है। क्या बहुत ज्यादा निराशा में आपके मन में खुद को नुकसान पहुँचाने या जान देने का विचार आया है?)"',
+          'Ask the IP: "Your life is truly precious to us. In these deep moments of darkness, have you had thoughts of harming yourself?" (Hinglish: "Aapki jaan bahut anmol hai. Kya bahut zyada nirasha me aapke mann me khud ko nuksan pahunchane ya jaan dene ka vichar aaya hai?")',
         options: [
           "Yes, having thoughts of self-harm / wanting to give up",
           "No thoughts of self-harm, just deeply sad and exhausted",
@@ -944,7 +1645,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "psych_handover",
         condition: true,
         question:
-          'Ask the IP: "Thank you for trusting me with that. Please know you are not alone, and help is available right now. Are you currently in a safe place, and is someone with you? We are connecting you immediately to our Psychological Counselling Department and Tele-MANAS (14416) for free support. (Hindi: मुझपर भरोसा करने के लिए धन्यवाद। क्या आप अभी सुरक्षित स्थान पर हैं? हम तुरंत आपको मानसिक स्वास्थ्य परामर्श टीम (Tele-MANAS 14416) से जोड़ रहे हैं।)"',
+          'Ask the IP: "Thank you for trusting me with that. Please know you are not alone, and help is available right now. Are you currently in a safe place right now? We are connecting you immediately to our Psychological Counselling Department and Tele-MANAS (14416) for free support." (Hinglish: "Mujhpar bharosa karne ke liye dhanyawad. Kripya jaanein ki aap akele nahi hain. Kya aap abhi kisi safe jagah par hain?")',
         options: [
           "Yes, please connect me to the counsellor right now",
           "I am at home alone, please connect urgently",
@@ -957,7 +1658,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const currentStep = psychSteps.find((s) => s.condition) || psychSteps[psychSteps.length - 1];
 
     return {
-      probingQuestion: currentStep.question,
+      probingQuestion: enforceSingleQuestion(currentStep.question),
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Psychological Distress / Depression Crisis",
       isPsychiatric: true,
@@ -986,7 +1687,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["kis jagah", "where did the accident", "exact location", "landmark"]) &&
           !/\b(road|highway|factory|floor|street|colony|area|mins ago|hours ago|just now|landmark|guwahati|tinsukia|dibrugarh)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "Please stay as calm as possible, help is being organized. What is the exact location, road, or factory landmark of the accident, and when did it occur? (Hindi: कृपया शांत रहें, मदद भेजी जा रही है। दुर्घटना किस जगह, सड़क या फैक्ट्री में हुई है, और किस समय हुई?)"',
+          'Ask the IP: "Please stay as calm as possible, help is being organized. What is the exact location, road, or factory landmark of the accident?" (Hinglish: "Kripya shaant rahein, madad bheji ja rahi hai. Durghatna kis jagah, road ya factory me hui hai?")',
         options: [
           "Road / highway accident — happened just now (<15 mins)",
           "Workplace / factory machine injury (<1 hour)",
@@ -1000,7 +1701,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["kitne log", "how many casualties", "trapped", "behosh"]) &&
           !/\b(1 worker|2 worker|\d+ worker|\d+ people|\d+ casualties|trapped|unconscious|single person)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "How many people or workers are injured, and is anyone trapped inside the vehicle/machinery or unconscious? (Hindi: कुल कितने लोग घायल हैं, क्या कोई मशीन या वाहन में फंसा हुआ है या बेहोश है?)"',
+          'Ask the IP: "How many people or workers are injured?" (Hinglish: "Kul kitne log ya workers ghayal hain?")',
         options: [
           "1 person injured — conscious with severe pain",
           "2 or more casualties — multiple people hurt",
@@ -1014,7 +1715,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           !hasAsked(["khoon bah raha", "bleeding", "direct pressure", "fracture", "active spurting"]) &&
           !/\b(applying pressure|pressure applied|tourniquet|bandaged)\b/i.test(cleanInput),
         question:
-          'Ask the IP: "Is there active spurting bleeding or open bone fractures? If bleeding, apply firm direct pressure with a clean cloth immediately. (Hindi: क्या बहुत तेज खून बह रहा है या हड्डी टूटी है? यदि खून बह रहा है तो तुरंत साफ कपड़े से दबाकर रखें।)"',
+          'Ask the IP: "Is there active spurting bleeding from the wound? If yes, apply firm direct pressure with a clean cloth immediately." (Hinglish: "Kya ghaav se tez khoon beh raha hai? Agar haan toh turant saaf kapde se daba kar rakhein.")',
         options: [
           "Heavy bleeding — applying firm pressure now",
           "Suspected fracture — unable to move limb",
@@ -1026,7 +1727,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "trauma_dispatch",
         condition: true,
         question:
-          'Ask the IP: "108 Emergency Ambulance is being dispatched to your location. Please keep the patient still and warm. Can the ambulance reach directly? (Hindi: 108 एम्बुलेंस को सूचित किया जा रहा है। क्या एम्बुलेंस सीधे वहां पहुंच सकती है?)"',
+          'Ask the IP: "108 Emergency Ambulance is being dispatched to your location. Can the ambulance reach your location directly?" (Hinglish: "108 Ambulance ko coordinate kiya ja raha hai. Kya ambulance seedhe aapki location tak pahunch sakti hai?")',
         options: [
           "Yes, ambulance can reach directly on road",
           "Guiding ambulance from main entrance",
@@ -1039,7 +1740,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const currentStep = traumaSteps.find((s) => s.condition) || traumaSteps[traumaSteps.length - 1];
 
     return {
-      probingQuestion: currentStep.question,
+      probingQuestion: enforceSingleQuestion(currentStep.question),
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Occupational Trauma / Acute Accident",
       isPsychiatric: false,
@@ -1065,9 +1766,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "cardiac_character",
         condition: !hasAsked(["crushing", "heavy pressure", "left arm", "dabav"]),
         question:
-          'Ask the IP: "Chest pain must be evaluated urgently. Is the pain feeling like heavy crushing pressure, and is it spreading to your left arm, neck, or jaw? (Hindi: सीने का दर्द गंभीर हो सकता है। क्या सीने पर भारी दबाव महसूस हो रहा है, और क्या दर्द बाएं हाथ या जबड़े की तरफ जा रहा है?)"',
+          'Ask the IP: "Chest pain must be evaluated urgently. Does the pain feel like heavy crushing pressure?" (Hinglish: "Seene ka dard gambhir ho sakta hai. Kya seene par bhaari dabav mehsoos ho raha hai?")',
         options: [
-          "Yes, crushing heavy pressure radiating to left arm",
+          "Heavy crushing pressure radiating to left arm",
           "Sharp stinging chest pain when breathing in",
           "Burning sensation in chest / acidity feeling",
           "Dull heaviness with cold sweating and nausea",
@@ -1077,7 +1778,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "cardiac_duration",
         condition: !hasAsked(["kitni der se", "how long has this chest", "duration"]),
         question:
-          'Ask the IP: "How long has this chest tightness or pain been going on, and are you having any cold sweating or dizziness? (Hindi: यह सीने का दर्द कितनी देर से हो रहा है, और क्या आपको ठंडा पसीना या चक्कर आ रहे हैं?)"',
+          'Ask the IP: "How long has this chest tightness or pain been going on?" (Hinglish: "Yeh seene ka dard kitni der se ho raha hai?")',
         options: [
           "< 20 minutes (Sudden onset with sweating)",
           "1 to 2 hours of continuous pressure",
@@ -1089,7 +1790,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "cardiac_breathlessness",
         condition: !hasAsked(["sans lene me", "breathless", "history of heart", "sugar"]),
         question:
-          'Ask the IP: "Are you struggling to breathe while sitting still, and do you have a known history of heart disease, high BP, or diabetes? (Hindi: क्या आपको बैठे-बैठे भी सांस लेने में तकलीफ हो रही है, और क्या आपको पहले से बीपी या दिल की बीमारी है?)"',
+          'Ask the IP: "Are you struggling to breathe while sitting still?" (Hinglish: "Kya aapko baithe-baithe bhi saans lene me takleef ho rahi hai?")',
         options: [
           "Severe breathlessness — gasping for air",
           "Known high blood pressure / diabetes patient",
@@ -1101,7 +1802,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "cardiac_dispatch",
         condition: true,
         question:
-          'Ask the IP: "Please sit upright, do not exert yourself, and loosen tight clothing. We are triggering 108 Emergency Ambulance to transport you to the nearest hospital casualty. Is someone with you? (Hindi: कृपया आराम से बैठ जाएं और मेहनत न करें। हम 108 एम्बुलेंस भेज रहे हैं। क्या कोई आपके साथ है?)"',
+          'Ask the IP: "Please sit upright, do not exert yourself, and loosen tight clothing. We are triggering 108 Emergency Ambulance to transport you to the nearest hospital casualty. Is someone with you?" (Hinglish: "Kripya aaram se baith jayein aur exertion na karein. Hum 108 Ambulance bhej rahe hain. Kya koi aapke saath hai?")',
         options: [
           "Yes, family member is with me",
           "I am alone, please send ambulance immediately",
@@ -1114,7 +1815,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const currentStep = cardiacSteps.find((s) => s.condition) || cardiacSteps[cardiacSteps.length - 1];
 
     return {
-      probingQuestion: currentStep.question,
+      probingQuestion: enforceSingleQuestion(currentStep.question),
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Suspected Acute Coronary Syndrome",
       isPsychiatric: false,
@@ -1140,13 +1841,13 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(cleanInput)) {
     conditionLabel = "Suspected Snake / Animal Bite Envenomation";
     currentStep = {
-      title: "Bite Location & Envenomation Signs",
-      question: 'Ask the IP: "Where on your body did the bite happen, and can you see puncture marks, bleeding, or rapid swelling?" (Hindi: "काटने का निशान शरीर पर कहाँ है, और क्या आपको सूजन, सुन्नता या दर्द महसूस हो रहा है?")',
+      title: "Bite Location Inquiry",
+      question: 'Ask the IP: "Where on your body did the snake bite occur?" (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")',
       options: [
-        "Bite on hand / arm with spreading swelling",
-        "Bite on foot / leg with severe pain",
-        "Puncture marks visible, no severe swelling yet",
-        "Mild insect sting with local redness",
+        "Bite is on foot / ankle",
+        "Bite is on lower leg",
+        "Bite is on hand / fingers",
+        "Bite is on arm / wrist",
       ],
       severity: "High",
     };
@@ -1154,12 +1855,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Acute Weakness & Postural Dizziness";
     currentStep = {
       title: "Onset & Orthostatic Instability",
-      question: 'Ask the IP: "Did this weakness and dizziness come on suddenly, and are you able to stand or walk without feeling faint?" (Hindi: "क्या यह कमजोरी और चक्कर अचानक शुरू हुए, और क्या आप बिना चक्कर आए खड़े हो पा रहे हैं?")',
+      question: 'Ask the IP: "Did this dizziness and weakness come on suddenly today?" (Hinglish: "Kya yeh kamzori aur chakkar aaj achanak shuru hue?")',
       options: [
-        "Sudden severe dizziness, cannot stand up",
-        "Dizziness when standing up from bed or chair",
-        "Gradual weakness ongoing for 2 to 3 days",
-        "Mild dizziness with hunger or fatigue",
+        "Sudden severe onset today",
+        "Gradual weakness over past 2 to 3 days",
+        "Comes only when standing up from bed or chair",
+        "Mild fatigue with lightheadedness",
       ],
       severity: "Moderate",
     };
@@ -1167,9 +1868,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Suspected Acute Coronary Syndrome";
     currentStep = {
       title: "Cardiac Ischemia Evaluation",
-      question: 'Ask the IP: "Is the chest pain feeling like heavy crushing pressure, and is it spreading to your left arm, neck, or jaw?" (Hindi: "क्या सीने में भारी दबाव महसूस हो रहा है, और क्या दर्द बाएं हाथ या जबड़े की तरफ जा रहा है?")',
+      question: 'Ask the IP: "Is the chest pain feeling like heavy crushing pressure spreading to your left arm?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baayein haath ki taraf ja raha hai?")',
       options: [
-        "Heavy crushing chest pressure with sweating",
+        "Heavy crushing chest pressure radiating to left arm",
         "Sharp stinging chest pain when breathing in",
         "Burning sensation in chest / acidity feeling",
         "Dull heaviness with cold sweating and nausea",
@@ -1180,10 +1881,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Acute Respiratory Distress / Bronchospasm";
     currentStep = {
       title: "Respiratory Distress Assessment",
-      question: 'Ask the IP: "Are you having difficulty speaking in full sentences, or do you hear wheezing sounds while breathing?" (Hindi: "क्या आपको सांस लेने में बहुत जोर लगाना पड़ रहा है या सीने से सीटी जैसी आवाज आ रही है?")',
+      question: 'Ask the IP: "Are you having difficulty breathing while sitting still right now?" (Hinglish: "Kya aapko is samay baithe-baithe bhi saans lene me takleef ho rahi hai?")',
       options: [
         "Severe breathlessness even while resting",
-        "Breathlessness when walking or talking",
+        "Breathlessness only when walking or talking",
         "Wheezing sound with tight chest feeling",
         "Mild breathlessness manageable",
       ],
@@ -1193,12 +1894,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Febrile Illness / Pyrexia under Investigation";
     currentStep = {
       title: "Febrile Pattern & Chills",
-      question: 'Ask the IP: "How high is your fever, and are you experiencing chills with shivering or body ache?" (Hindi: "बुखार कितना तेज़ है, और क्या आपको ठंड लगकर कपकपी या शरीर में दर्द हो रहा है?")',
+      question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
       options: [
-        "High fever (>102°F) with shivering chills",
-        "Moderate fever ongoing for 2 to 3 days",
-        "Low-grade fever with mild cold and cough",
-        "Fever coming and going in spikes",
+        "Started today (< 24 hours)",
+        "2 to 3 days (Recent)",
+        "4 to 7 days (Ongoing)",
+        "More than a week (Persistent)",
       ],
       severity: "Moderate",
     };
@@ -1206,12 +1907,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Acute Gastroenteritis / Dehydration Risk";
     currentStep = {
       title: "Gastrointestinal Fluid Loss",
-      question: 'Ask the IP: "How many times have you vomited or passed loose stools today, and are you able to keep drinking fluids?" (Hindi: "आज कितनी बार उल्टी या दस्त हुए हैं, और क्या आप पानी पी पा रहे हैं?")',
+      question: 'Ask the IP: "How many times have you vomited or passed loose stools today?" (Hinglish: "Aaj aapko kitni baar ulti ya dast hue hain?")',
       options: [
-        "Frequent vomiting (>5 times), cannot keep fluids down",
+        "Frequent vomiting (> 5 times), cannot keep fluids down",
         "Watery loose motions 3 to 4 times with weakness",
         "Mild nausea with stomach upset after food",
-        "Vomiting once or twice, able to drink water",
+        "Vomited once or twice, able to drink water",
       ],
       severity: "Moderate",
     };
@@ -1219,7 +1920,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     conditionLabel = "Acute Cephalea / Migraine under Investigation";
     currentStep = {
       title: "Headache Character & Warning Signs",
-      question: 'Ask the IP: "Is this headache a sudden unbearable thunderclap pain, or a throbbing pain on one side of your head?" (Hindi: "क्या यह सर दर्द अचानक बहुत तेज़ हुआ, या सर के एक तरफ धड़कन जैसा दर्द है?")',
+      question: 'Ask the IP: "Could you describe the type of headache pain you are feeling?" (Hinglish: "Kya aap bata sakte hain ki aapko kis tarah ka sirdard mehsoos ho raha hai?")',
       options: [
         "Sudden explosive severe headache unlike any before",
         "One-sided throbbing headache with nausea",
@@ -1228,15 +1929,28 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       ],
       severity: "Moderate",
     };
-  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|gira|fall|trauma)\b/i.test(cleanInput)) {
+  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped)\b/i.test(cleanInput)) {
+    conditionLabel = "Traumatic Fall / Impact Injury Assessment";
+    currentStep = {
+      title: "Fall Impact & Injury Screening",
+      question: 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar par chot lagi ya sharir ke kisi hisse me dard hai?")',
+      options: [
+        "Hit my head, feeling dizzy or dazed",
+        "Severe pain in arm / leg / back",
+        "Unable to get up from the floor",
+        "Bruised and sore, but can move limbs",
+      ],
+      severity: "Moderate",
+    };
+  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|trauma)\b/i.test(cleanInput)) {
     conditionLabel = "Traumatic Injury / Wound Assessment";
     currentStep = {
       title: "Trauma & Hemorrhage Check",
-      question: 'Ask the IP: "Is there active continuous bleeding from the wound, or inability to move the injured limb?" (Hindi: "क्या चोट से लगातार खून बह रहा है, या चोट वाले अंग को हिलाने में असमर्थ हैं?")',
+      question: 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")',
       options: [
         "Heavy active bleeding requiring immediate pressure",
-        "Suspected fracture / limb deformity and swelling",
         "Deep cut but bleeding stopped with cloth",
+        "Suspected fracture / limb deformity and swelling",
         "Minor scrape or superficial cut with mild pain",
       ],
       severity: "High",
@@ -1247,7 +1961,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const displayComplaint = cleanComplaint || conditionLabel || "this complaint";
     currentStep = {
       title: "Complaint Character & Functional Impact",
-      question: `Ask the IP: "Could you describe specifically how the ${displayComplaint} feels, and did it start suddenly today or develop gradually?" (Hindi: "क्या आप बता सकते हैं कि यह समस्या कब और कैसे शुरू हुई, और क्या यह अचानक हुई या धीरे-धीरे?")`,
+      question: `Ask the IP: "Could you describe how the ${displayComplaint} feels right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kaisa mehsoos ho raha hai?")`,
       options: [
         "Started suddenly today with significant discomfort",
         "Gradually worsening over the last 2 to 3 days",
@@ -1268,12 +1982,26 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   let referralDestination;
   let referralReason;
 
+  const fallbackDispensaryStatus = getDispensaryOperatingStatus();
+  const isNacoHIV = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease)\b/i.test(cleanInput);
+
   if (severity === "High" && /chest pain|heart|stroke|unconscious|poison|snake|bite/i.test(cleanInput)) {
     referralDestination = "108 Ambulance";
     referralReason = "Acute emergency requiring immediate ambulance dispatch.";
+  } else if (isNacoHIV) {
+    referralDestination = "NACO 1097 Helpline";
+    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
   } else if (severity === "High") {
     referralDestination = "ESIC Hospital";
     referralReason = "Severe condition requiring secondary hospital casualty or OPD evaluation today.";
+  } else if (!fallbackDispensaryStatus.isOpen) {
+    if (severity === "Moderate") {
+      referralDestination = "ESIC Hospital";
+      referralReason = `ESIS Dispensaries are currently closed (${fallbackDispensaryStatus.reason}). Guide caller to nearest ESIC Hospital casualty or urgent OPD today.`;
+    } else {
+      referralDestination = "104 Medical Team";
+      referralReason = `ESIS Dispensaries are currently closed (${fallbackDispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    }
   } else {
     referralDestination = "ESIS Dispensary";
     referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
@@ -1291,6 +2019,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   if (!probingText.startsWith("Ask the IP:")) {
     probingText = `Ask the IP: "${probingText}"`;
   }
+  probingText = enforceSingleQuestion(probingText);
+  probingText = sanitizeClinicalQuestion(probingText, cleanInput, cleanInput);
+  probingText = enforceSingleQuestion(probingText);
 
   return {
     probingQuestion: probingText,

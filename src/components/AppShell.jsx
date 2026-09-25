@@ -136,42 +136,14 @@ export function AppShell({ activePage = "home", children }) {
     loadStats();
   }, [loadStats]);
 
+  // Cache-enabled stats refresher (served from server memory cache with 0 Firestore reads)
   useEffect(() => {
     loadStats();
-  }, [loadStats, refreshKey]);
-
-  // Real-time Firestore cases listener: updates stats immediately when case is added or deleted
-  useEffect(() => {
-    let unsubscribe = null;
-    try {
-      const db = getFirestoreDb();
-      unsubscribe = onSnapshot(
-        collection(db, "cases"),
-        (snap) => {
-          const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
-          snap.docs.forEach((d) => {
-            const level = d.data().triage?.urgency_level;
-            if (level && by_urgency[level] !== undefined) {
-              by_urgency[level]++;
-            }
-          });
-          setStats({
-            total: snap.size,
-            by_urgency,
-          });
-        },
-        () => {
-          loadStats();
-        }
-      );
-    } catch (e) {
+    const interval = setInterval(() => {
       loadStats();
-    }
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [loadStats]);
+    }, 45000); // 45 seconds polling
+    return () => clearInterval(interval);
+  }, [loadStats, refreshKey]);
 
   const handleCallerConnected = useCallback((info) => {
     setIncomingCallerInfo(info ? { ...info, _ts: Date.now() } : null);
