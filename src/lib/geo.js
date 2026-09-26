@@ -1,41 +1,11 @@
 // Geo utilities: Haversine distance calculation, dynamic facility-based location resolution, and proximity routing
 
 /**
- * Normalizes and guards facility coordinates against corrupted entries.
- * Specifically guarantees that ESIC Beltola Hospital (Guwahati) and ESIC Tinsukia Hospital
- * always maintain their correct, distinct geographic coordinates.
+ * Normalizes facility coordinates directly from the database/facility directory.
  */
 export function cleanFacilityCoordinates(facilities = []) {
   if (!Array.isArray(facilities)) return [];
-
-  return facilities.map((f) => {
-    if (!f) return f;
-    const name = (f.name || "").toLowerCase();
-
-    // Guard ESIC Hospital Beltola in Khanapara, Guwahati, Kamrup Metro
-    if (name.includes("beltola")) {
-      return {
-        ...f,
-        latitude: 26.121567,
-        longitude: 91.808542,
-        pincode: f.pincode || "781022",
-        district: f.district || "Kamrup Metropolitan",
-      };
-    }
-
-    // Guard ESIC Hospital Tinsukia in Bordoloi Nagar, Tinsukia
-    if (name.includes("tinsukia") && (name.includes("hospital") || f.facility_type === "Hospital")) {
-      return {
-        ...f,
-        latitude: 27.49962,
-        longitude: 95.356849,
-        pincode: f.pincode || "786126",
-        district: f.district || "Tinsukia",
-      };
-    }
-
-    return f;
-  });
+  return facilities.filter(Boolean);
 }
 
 export function isHospital(f) {
@@ -297,13 +267,25 @@ export function resolveCallerLocation(input, facilities = []) {
     };
   }
 
-  // 5. DEFAULT FALLBACK: ESIC Hospital Beltola, Guwahati
+  // 5. DEFAULT FALLBACK: Dynamic default from active facility database
+  const defaultFac = cleanFacs.find((f) => f.latitude != null && f.longitude != null) || cleanFacs[0];
+  if (defaultFac && defaultFac.latitude != null && defaultFac.longitude != null) {
+    return {
+      latitude: defaultFac.latitude,
+      longitude: defaultFac.longitude,
+      pincode: cleanPin || defaultFac.pincode || null,
+      district: defaultFac.district || null,
+      method: "default",
+      matched: `Default Location (${defaultFac.name || defaultFac.district || "Guwahati"})`,
+    };
+  }
+
   return {
     latitude: 26.121567,
     longitude: 91.808542,
     pincode: cleanPin || "781022",
     method: "default",
-    matched: "Default Location (Beltola, Guwahati)",
+    matched: "Default Location",
   };
 }
 

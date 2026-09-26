@@ -38,6 +38,12 @@
   * {
     @apply border-border;
   }
+  html,
+  body {
+    overflow-x: hidden;
+    max-width: 100%;
+    position: relative;
+  }
   body {
     margin: 0;
     @apply bg-background text-foreground;

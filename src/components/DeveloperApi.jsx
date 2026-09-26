@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { API, API_KEY, api } from "../lib/api";
 
 const SAMPLE = {
-  caller_name: "Ramesh Kalita",
+  caller_name: "Akash Gupta",
   phone: "9876543210",
-  age: 48,
+  age: 45,
   sex: "Male",
   symptom_notes:
     "Chhati me tej dard, baayein haath me jhanjhanahat aur thanda pasina. 40 minute se ho raha hai.",
@@ -16,7 +16,7 @@ const SAMPLE = {
   severity_reported: 9,
   city: "Guwahati",
   district: "Kamrup Metropolitan",
-  pincode: "781022",
+  pincode: "781005",
   source_app: "worker-app-android",
 };
 

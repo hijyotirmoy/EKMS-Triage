@@ -6,13 +6,25 @@ import { evaluateTriage, summarizeRedFlags } from "@/lib/triageEngine";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function generateCaseRef() {
-  const d = new Date();
-  const yy = String(d.getFullYear()).slice(-2);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `CASE-${yy}${mm}${dd}-${rand}`;
+function getAgentCode(rawAgent) {
+  if (!rawAgent) return "A1";
+  const str = String(rawAgent).toUpperCase();
+  if (str.includes("3")) return "A3";
+  if (str.includes("2")) return "A2";
+  if (str.includes("1")) return "A1";
+  return "A1";
+}
+
+function generateCaseRef(agentId, urgencyLevel) {
+  const agentCode = getAgentCode(agentId);
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const l1 = letters.charAt(Math.floor(Math.random() * letters.length));
+  const l2 = letters.charAt(Math.floor(Math.random() * letters.length));
+  const num = Math.floor(Math.random() * 10000) + 1;
+  const numStr = String(num).padStart(5, "0");
+  const urgStr = String(urgencyLevel || "Routine").trim().toUpperCase();
+  const urgLetter = urgStr.charAt(0) || "R";
+  return `C${agentCode}${l1}${l2}${numStr}${urgLetter}`;
 }
 
 export async function POST(request) {
@@ -33,24 +45,48 @@ export async function POST(request) {
     const ekmsCtx = intake.ekms_ai_context || {};
     const tState = ekmsCtx.triageState || ekmsCtx;
     const explicitReferral = (tState?.referralDestination || "").toLowerCase();
-    const notes = `${intake.symptom_notes || ""} ${tState?.symptom || ""} ${tState?.condition || ""}`.toLowerCase();
+    const callerUtterances = Array.isArray(ekmsCtx.chatHistory)
+      ? ekmsCtx.chatHistory
+          .filter((m) => m.sender === "user" || m.role === "user")
+          .map((m) => m.text || m.content || "")
+          .join(" ")
+      : "";
+    const callerSpokenText = `${intake.symptom_notes || ""} ${callerUtterances}`.trim().toLowerCase();
+    const notes = `${callerSpokenText} ${tState?.symptom || ""}`.toLowerCase();
 
-    const isPsychiatricCase = Boolean(
+    const isNacoHIV =
+      /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(notes) ||
+      explicitReferral.includes("naco") ||
+      explicitReferral.includes("1097");
+
+    const isPsychiatricCase = !isNacoHIV && Boolean(
       triage.is_psychiatric ||
       tState?.isPsychiatric ||
       ekmsCtx?.isPsychiatric ||
       explicitReferral.includes("psych") ||
-      explicitReferral.includes("counsel") ||
+      (explicitReferral.includes("counsel") && !isNacoHIV) ||
       explicitReferral.includes("manas") ||
       explicitReferral.includes("14416") ||
       /\b(suicid|mar ja|jaan de dunga|depress|udaas|hopeless|anxiety|ghabrahat|die\b|kill myself|self-harm|self harm|crying)\b/i.test(notes)
     );
 
+    if (isNacoHIV) {
+      triage.is_psychiatric = false;
+      triage.call_108 = false;
+      triage.call_referral_primary = "NACO 1097 Helpline";
+      triage.referral_destination = "NACO 1097 Helpline";
+      triage.recommended_facility_type = "NACO 1097 Helpline (HIV / AIDS / STI)";
+      triage.recommended_action = "Transfer call directly to National AIDS Helpline (1097) for 24x7 counseling and ICTC/ART support.";
+      triage.summary_en = "Caller inquiry regarding HIV / AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer directly to NACO 1097 Toll-Free Helpline.";
+    }
+
     const isSevere =
-      triage.urgency_level === "Emergency" ||
-      triage.urgency_level === "Urgent" ||
-      Number(intake.severity_reported) >= 7 ||
-      (triage.urgency_score && triage.urgency_score >= 7);
+      !isNacoHIV && (
+        triage.urgency_level === "Emergency" ||
+        triage.urgency_level === "Urgent" ||
+        Number(intake.severity_reported) >= 7 ||
+        (triage.urgency_score && triage.urgency_score >= 7)
+      );
 
     // If explicit caller preference was detected, respect it
     if (explicitReferral.includes("108")) {
@@ -89,8 +125,8 @@ export async function POST(request) {
     triage.call_referral_secondary = triage.call_referral_secondary || triage.secondary_referral_destination;
 
     // Ensure red flags strictly reflect caller-reported symptoms without hallucinations
-    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(notes);
-    triage.red_flags = summarizeRedFlags(triage.red_flags, notes, isSafe);
+    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(callerSpokenText);
+    triage.red_flags = summarizeRedFlags(triage.red_flags, callerSpokenText, isSafe);
 
     triage.primary_complaint =
       triage.primary_complaint ||
@@ -108,7 +144,7 @@ export async function POST(request) {
     // 2. Resolve location & rank nearest facilities (always nearest from pincode, hospital first if severe, dispensary first if normal/moderate)
     const facilities = await getFacilities();
     const resolved_location = resolveCallerLocation(intake, facilities);
-    const nearest_facilities = rankNearestFacilities(resolved_location, facilities, 5, isSevere && !isPsychiatricCase);
+    const nearest_facilities = rankNearestFacilities(resolved_location, facilities, facilities.length, isSevere && !isPsychiatricCase);
 
     const topFacility = nearest_facilities?.[0];
     const hasSpecialReferral =
@@ -195,10 +231,13 @@ export async function POST(request) {
     }
 
     const latency_ms = Date.now() - startTime;
-    const case_ref = generateCaseRef();
+    const rawAgent = intake.agent_id || intake.agent || "A1";
+    const case_ref = generateCaseRef(rawAgent, triage.urgency_level);
+    const agentCode = getAgentCode(rawAgent);
 
     const casePayload = {
       case_ref,
+      agent_id: agentCode,
       intake: {
         caller_name: intake.caller_name || null,
         phone: intake.phone || null,
@@ -212,7 +251,7 @@ export async function POST(request) {
         pincode: intake.pincode || null,
         latitude: intake.latitude != null ? Number(intake.latitude) : null,
         longitude: intake.longitude != null ? Number(intake.longitude) : null,
-        agent_id: intake.agent_id || null,
+        agent_id: agentCode,
         source_app: intake.source_app || "console",
       },
       ekms_ai_context: intake.ekms_ai_context || null,
@@ -232,6 +271,8 @@ export async function POST(request) {
     return NextResponse.json({
       case_ref,
       case_id: saved.id || case_ref,
+      agent_id: agentCode,
+      intake: casePayload.intake,
       triage,
       resolved_location,
       nearest_facilities,

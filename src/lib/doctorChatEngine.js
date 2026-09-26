@@ -11,6 +11,7 @@ import {
   getDiseaseProbingProtocol,
 } from "./clinicalAdaptiveEngine.js";
 import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus } from "./triageEngine.js";
+import { groqChatCompletion } from "./groqPool.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
@@ -39,7 +40,7 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "severity": "High" | "Moderate" | "Mild",
   "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "ESIC Hospital" | "ESIS Dispensary" | "104 Medical Team" | "e-Sanjeevani" | "Nearest Pharmacy" | "Forward to Doctor" | null,
   "referralReason": "Clear action for operator" | null,
-  "redFlagsDetected": ["list of red flags if any"],
+  "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
   "duration": "detected duration or accident time",
   "isReadyForSummary": true | false,
   "clinicalSummary": "Concise structured triage summary in English"
@@ -329,23 +330,7 @@ export async function processDoctorConsultationTurn({
   // =========================================================================
 
   // --- Priority 1: Groq Cloud AI API with Multi-Key Pool (Ultra-fast, high clinical accuracy) ---
-  const groqKeys = [];
-  if (process.env.GROQ_API_KEY) groqKeys.push(process.env.GROQ_API_KEY);
-  if (process.env.GROQ_API_KEYS) {
-    groqKeys.push(...process.env.GROQ_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean));
-  }
-  for (let i = 1; i <= 30; i++) {
-    const k = process.env[`GROQ_API_KEY_${i}`];
-    if (k && !groqKeys.includes(k)) groqKeys.push(k);
-  }
-
-  if (groqKeys.length > 0) {
-    const groqCandidateModels = [
-      { name: "qwen/qwen3.8-27b", maxTokens: 384, temperature: 0.3 },
-      { name: "allam-2-7b", maxTokens: 384, temperature: 0.3 },
-    ];
-
-    // Sliding window of last 3 turns saves tokens while clinical context retains full state
+  try {
     const conversationMessages = [
       { role: "system", content: SYSTEM_PROMPT },
       ...history.slice(-3).map((m) => ({
@@ -363,53 +348,23 @@ Respond strictly in valid JSON format:
       },
     ];
 
-    // Iterate through available Groq keys (failover on 429/quota)
-    for (let keyIdx = 0; keyIdx < groqKeys.length; keyIdx++) {
-      const activeGroqKey = groqKeys[keyIdx];
+    const groqResult = await groqChatCompletion({
+      messages: conversationMessages,
+      candidateModels: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b"],
+      response_format: { type: "json_object" },
+      temperature: 0.3,
+      max_tokens: 384,
+      timeoutMs: 6500,
+    });
 
-      for (const { name: model, maxTokens, temperature } of groqCandidateModels) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 7000);
-
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${activeGroqKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model,
-              messages: conversationMessages,
-              response_format: { type: "json_object" },
-              temperature,
-              max_tokens: maxTokens,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (res.ok) {
-            const data = await res.json();
-            const content = data.choices?.[0]?.message?.content;
-            if (content) {
-              const parsed = JSON.parse(content);
-              if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-                return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
-              }
-            }
-          } else {
-            console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) status ${res.status}`);
-            if (res.status === 429) {
-              console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} limit reached (429), auto-shifting to next Groq key...`);
-              break; // Shift to next key immediately
-            }
-          }
-        } catch (err) {
-          console.warn(`[AI Cascade] Groq Key ${keyIdx + 1} (${model}) error:`, err.message);
-        }
+    if (groqResult?.content) {
+      const parsed = JSON.parse(groqResult.content);
+      if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+        return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
       }
     }
+  } catch (groqErr) {
+    console.warn("[AI Cascade] Groq multi-key pool fallback:", groqErr.message);
   }
 
   // --- Priority 2: Google Gemini AI API ---
@@ -1226,11 +1181,17 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       cleanInput
     );
 
-  const isPsych = Boolean(
+  const isNacoHIV =
+    /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(cleanInput) ||
+    prevRef.includes("naco") ||
+    prevRef.includes("1097") ||
+    prevRef.includes("hiv");
+
+  const isPsych = !isNacoHIV && Boolean(
     userTextHasPsych ||
       raw.isPsychiatric ||
       prevState.isPsychiatric ||
-      /psych|counsel|manas|14416/i.test(allContext)
+      /psych|tele-manas|tele manas|14416|mental health/i.test(allContext)
   );
 
   const isEmergency108 =
@@ -1239,8 +1200,12 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   const directIntent = detectDirectCallerReferralIntent(cleanInput);
 
+  const isAdviceSeeking =
+    /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(cleanInput);
+
   const is104PhoneDoctor =
     /\b(104|phone consultation|phone doctor|tele consultation|tele-consultation|tele doctor|tele-doctor|call with 104|104 doctor|doctor on call|telephonic doctor|phone pe doctor|phone par doctor|call.*104)\b/i.test(cleanInput) ||
+    (isAdviceSeeking && (raw.severity === "Mild" || prevState.severity === "Mild" || (!raw.severity && !prevState.severity))) ||
     (prevRef.includes("104") && !/\b(hospital|aspatal|dispensary|clinic|ambulance|108|pharmacy|chemist)\b/i.test(cleanInput));
 
   const isESanjeevani =
@@ -1266,11 +1231,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   let referralReason;
 
   const dispensaryStatus = getDispensaryOperatingStatus();
-
-  const isNacoHIV =
-    /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(cleanInput) ||
-    prevRef.includes("naco") ||
-    prevRef.includes("1097");
 
   if (directIntent) {
     referralDestination = directIntent.destination;
@@ -1526,6 +1486,52 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     finalCondition = "Under Clinical Assessment";
   }
 
+  const userUtterances = [
+    cleanInput,
+    ...history
+      .filter((m) => m.sender === "user" || m.role === "user")
+      .map((m) => (typeof m.content === "string" ? m.content : m.text || "")),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  const callerDeniesFever =
+    /\b(no fever|nehi|nahi|not having fever|without fever|fever nahi|bukhar nahi|no chills|mild discomfort|just not feeling good)\b/i.test(
+      userUtterances
+    ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever)\b/i.test(userUtterances);
+
+  const filteredRedFlags = (Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : []).filter(
+    (f) => {
+      if (!f || typeof f !== "string") return false;
+      const fLower = f.toLowerCase();
+      if (
+        fLower.includes("fever") ||
+        fLower.includes("bukhar") ||
+        fLower.includes("chills") ||
+        fLower.includes("pyrexia")
+      ) {
+        if (callerDeniesFever) return false;
+        return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|10[2-5]\s*(?:°|f|deg))\b/i.test(
+          userUtterances
+        );
+      }
+      if (fLower.includes("self-harm") || fLower.includes("suicid")) {
+        return /\b(wanna die|want to die|kill myself|mar jaunga|jaan de dunga|suicid)\b/i.test(
+          userUtterances
+        );
+      }
+      if (fLower.includes("chest") || fLower.includes("cardiac") || fLower.includes("coronary")) {
+        return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(
+          userUtterances
+        );
+      }
+      if (fLower.includes("bleed") || fLower.includes("wound") || fLower.includes("cut")) {
+        return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(userUtterances);
+      }
+      return true;
+    }
+  );
+
   return {
     probingQuestion,
     suggestedAnswers,
@@ -1537,7 +1543,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     referralReason,
     is_dual_protocol: isDual,
     call_referral_secondary: secondaryRef,
-    redFlagsDetected: Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : [],
+    redFlagsDetected: filteredRedFlags,
     duration,
     isReadyForSummary: Boolean(raw.isReadyForSummary || (history.length >= 6) || is104PhoneDoctor),
     clinicalSummary:

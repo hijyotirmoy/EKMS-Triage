@@ -11,11 +11,12 @@ export default function Home() {
 
   return (
     <AppShell activePage="home">
-      {({ meta, bump, incomingCallerInfo, callSession }) => (
+      {({ meta, bump, incomingCallerInfo, currentAgent, callSession }) => (
         <TriageConsole
           meta={meta}
           onCaseCreated={bump}
           incomingCaller={incomingCallerInfo}
+          currentAgent={currentAgent}
           callSession={callSession}
         />
       )}

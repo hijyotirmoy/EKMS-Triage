@@ -27,10 +27,18 @@ const INITIAL_SYMPTOM_SHORTCUTS = [
   { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
   { icon: "🤢", label: "Vomiting & Nausea", text: "Continuous vomiting and unable to keep fluids" },
   { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
-  { icon: "🫁", label: "Breathlessness / Asthma", text: "Difficulty breathing and wheezing sound" },
-  { icon: "🦵", label: "Leg Pain & Swelling", text: "Severe leg pain and swelling in calf" },
   { icon: "🥘", label: "Abdominal / Stomach Pain", text: "Severe stomach cramps and gastric pain" },
   { icon: "🩸", label: "Workplace Injury / Cut", text: "Deep cut and bleeding from injury at work" },
+  { icon: "🎗️", label: "HIV / AIDS", text: "Caller inquiry regarding HIV / AIDS symptoms, testing, PEP, or sexual health counseling" },
+];
+
+const MOBILE_SYMPTOM_SHORTCUTS = [
+  { icon: "❤️", label: "Chest Pain / Pressure", text: "Severe chest pain and heavy pressure" },
+  { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
+  { icon: "🎗️", label: "HIV / AIDS", text: "Caller inquiry regarding HIV / AIDS symptoms, testing, PEP, or sexual health counseling" },
+  { icon: "⚡", label: "Weakness & Dizziness", text: "Patient has extreme weakness and dizziness" },
+  { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
+  { icon: "🧠", label: "Depression / Counsel", text: "Caller feels deeply depressed, hopeless, and crying" },
 ];
 
 function formatReferralDestination(dest) {
@@ -354,7 +362,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   };
 
   return (
-    <div className="rounded-xl border border-emerald-500/30 bg-card overflow-hidden shadow-sm">
+    <div className="rounded-xl border border-emerald-500/30 bg-card overflow-hidden shadow-sm w-full max-w-full min-w-0">
       {/* 1. EKMS AI Triage & Referral Header */}
       <div className="border-b border-border/50 bg-secondary/30 px-3.5 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -372,16 +380,16 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
           </div>
 
           {/* Diagnostic & Referral Status Indicators */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5 max-w-[70%] sm:max-w-none">
             {clinicalState.suspectedCondition && (
-              <span className="flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100/90 px-2 py-0.5 text-[11px] font-bold text-emerald-950 shadow-2xs">
-                <Activity className="h-3 w-3 text-emerald-700" />
-                <span className="max-w-[170px] truncate">{clinicalState.suspectedCondition}</span>
+              <span className="flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100/90 px-1.5 py-0.5 sm:px-2 text-[10px] sm:text-[11px] font-bold text-emerald-950 shadow-2xs">
+                <Activity className="h-3 w-3 text-emerald-700 shrink-0" />
+                <span className="max-w-[100px] sm:max-w-[170px] truncate">{clinicalState.suspectedCondition}</span>
               </span>
             )}
             {clinicalState.severity && messages.length > 0 && (
               <span
-                className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border shadow-2xs ${
+                className={`rounded-md px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border shadow-2xs ${
                   clinicalState.severity === "High"
                     ? "bg-rose-100 text-rose-950 border-rose-300"
                     : clinicalState.severity === "Moderate"
@@ -393,9 +401,9 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
               </span>
             )}
             {clinicalState.referralDestination && (
-              <span className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary shadow-2xs">
-                <PhoneForwarded className="h-3 w-3" />
-                <span className="max-w-[280px] truncate">{formatReferralDestination(clinicalState.referralDestination)}</span>
+              <span className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold text-primary shadow-2xs">
+                <PhoneForwarded className="h-3 w-3 shrink-0" />
+                <span className="max-w-[110px] sm:max-w-[280px] truncate">{formatReferralDestination(clinicalState.referralDestination)}</span>
               </span>
             )}
           </div>
@@ -405,26 +413,44 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       {/* 2. Chat Conversation Box */}
       <div
         ref={chatContainerRef}
-        className="min-h-[490px] max-h-[640px] space-y-3.5 p-4 text-xs sm:text-sm overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className="min-h-[380px] sm:min-h-[490px] max-h-[640px] space-y-3.5 p-3 sm:p-4 text-xs sm:text-sm overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {/* Quick-Start Shortcuts */}
         {messages.length === 0 && (
-          <div className="space-y-3 py-3 text-center">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-600/50 bg-emerald-50 px-4 py-2.5 text-xs sm:text-sm font-bold text-emerald-950 shadow-xs">
-              <Sparkles className="h-4 w-4 text-emerald-700 shrink-0" />
-              <span>Type the caller&apos;s symptoms below or click a primary complaint to start adaptive clinical probing:</span>
+          <div className="space-y-2.5 sm:space-y-3 py-2 sm:py-3 text-center">
+            <div className="inline-flex items-center gap-1.5 sm:gap-2 rounded-xl border border-emerald-600/50 bg-emerald-50 px-3 py-2 sm:px-4 sm:py-2.5 text-[11px] sm:text-sm font-bold text-emerald-950 shadow-xs">
+              <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-700 shrink-0" />
+              <span>Type symptoms below or choose a primary complaint:</span>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-1.5 pt-2 max-w-xl mx-auto">
+            {/* Mobile View: 6 Beautiful Small Symptom Pills in a clean 2-column grid */}
+            <div className="grid grid-cols-2 gap-1.5 pt-1 sm:hidden max-w-sm mx-auto">
+              {MOBILE_SYMPTOM_SHORTCUTS.map((s, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleUserSubmit(s.text)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-2.5 py-1.5 text-[10.5px] font-semibold text-foreground transition-all hover:border-emerald-600 hover:bg-emerald-50 active:scale-95 shadow-2xs text-left"
+                >
+                  <span className="text-xs shrink-0">{s.icon}</span>
+                  <span className="truncate">{s.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Desktop View: Beautiful Symptom Pills */}
+            <div className="hidden sm:flex flex-wrap justify-center gap-2 pt-2.5 max-w-2xl mx-auto">
               {INITIAL_SYMPTOM_SHORTCUTS.map((s, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => handleUserSubmit(s.text)}
-                  className="flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[11px] font-semibold text-foreground transition-all hover:border-emerald-600 hover:bg-emerald-50 hover:-translate-y-0.5 active:scale-95 shadow-2xs"
+                  className="group flex items-center gap-2 rounded-full border border-border/80 bg-white/95 pl-2.5 pr-4 py-1.5 text-xs font-semibold text-foreground transition-all duration-200 hover:border-emerald-600 hover:bg-emerald-50 hover:text-emerald-950 hover:-translate-y-0.5 hover:shadow-xs active:scale-95 shadow-2xs cursor-pointer"
                 >
-                  <span>{s.icon}</span>
-                  <span>{s.label}</span>
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] transition-colors group-hover:bg-emerald-100/90 shrink-0">
+                    {s.icon}
+                  </span>
+                  <span className="tracking-tight">{s.label}</span>
                 </button>
               ))}
             </div>
@@ -458,7 +484,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                 <div className="max-w-[88%] rounded-lg border border-border bg-secondary/50 px-3.5 py-2.5 text-foreground leading-relaxed">
                   <div className="flex items-start gap-2">
                     <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" />
-                    <div className="space-y-0.5 flex-1">
+                    <div className="space-y-0.5 flex-1 min-w-0">
                       <p className="text-xs sm:text-sm font-medium">
                         <span className="font-bold text-emerald-900">Ask the IP: </span>
                         &ldquo;{cleanQuestionText || m.text}&rdquo;
@@ -473,13 +499,13 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                 <div className="w-full rounded-xl border border-emerald-500/70 bg-emerald-50/70 p-3.5 shadow-xs space-y-3">
                   <div className="flex items-start gap-2.5">
                     <Bot className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-                    <div className="space-y-0.5 flex-1">
-                      <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center justify-between gap-1">
                         <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950">
                           Ask the IP:
                         </span>
                         {m.suspectedCondition ? (
-                          <span className="text-[10px] font-bold text-emerald-900">
+                          <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-900 bg-emerald-100/60 px-2 py-0.5 rounded border border-emerald-600/30">
                             Investigating: {m.suspectedCondition}
                           </span>
                         ) : (
@@ -495,7 +521,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                   {/* Clickable Suggested Answers */}
                   {m.options && m.options.length > 0 && (
                     <div className="border-t border-emerald-500/30 pt-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px] font-bold text-emerald-950">
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] font-bold text-emerald-950">
                         <span>Likely Answers from IP (Click to select):</span>
                         <span className="text-[10px] text-slate-600 font-medium">
                           or type exact answer below
@@ -508,7 +534,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                             type="button"
                             disabled={loading}
                             onClick={() => handleUserSubmit(opt)}
-                            className="group flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-950 transition-all hover:-translate-y-0.5 hover:border-emerald-700 hover:bg-emerald-100 hover:shadow-xs active:scale-95 text-left disabled:opacity-50"
+                            className="group flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-white px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10.5px] sm:text-[11px] font-semibold text-emerald-950 transition-all hover:-translate-y-0.5 hover:border-emerald-700 hover:bg-emerald-100 hover:shadow-xs active:scale-95 text-left disabled:opacity-50"
                           >
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 shrink-0" />
                             <span>{opt}</span>
@@ -544,7 +570,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
               }
             }}
             placeholder="Type what the caller said / answers (English / हिंदी / Hinglish)..."
-            className="flex-1 rounded-md border border-border/80 bg-background px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-emerald-500"
+            className="flex-1 min-w-0 rounded-md border border-border/80 bg-background px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-emerald-500"
           />
           <button
             type="button"

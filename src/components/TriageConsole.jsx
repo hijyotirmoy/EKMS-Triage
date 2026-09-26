@@ -39,16 +39,16 @@ const EMPTY = {
 };
 
 const inputCls =
-  "w-full rounded-md border border-border/80 bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-colors duration-200 focus:border-primary/70 focus:bg-background";
+  "w-full rounded-md border border-border/80 bg-secondary/50 px-2.5 py-1.5 text-xs sm:px-3 sm:py-2 sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-colors duration-200 focus:border-primary/70 focus:bg-background";
 
 const Field = ({ label, children, className = "" }) => (
-  <div className={className}>
-    <label className="field-label">{label}</label>
+  <div className={`min-w-0 ${className}`}>
+    <label className="field-label text-[10px] sm:text-[11px] mb-1 sm:mb-1.5 truncate">{label}</label>
     {children}
   </div>
 );
 
-export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession }) => {
+export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgent, callSession }) => {
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -61,6 +61,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
   const [isLookingUp, setIsLookingUp] = useState(false);
   const lastLookedUpRef = useRef("");
   const chatRef = useRef(null);
+  const outcomeRef = useRef(null);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -298,8 +299,26 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     setLoading(true);
     setActiveRightTab("triage");
     setResult(null);
+
+    let rawAgent = currentAgent?.agentId;
+    if (!rawAgent) {
+      try {
+        const stored = localStorage.getItem("ekms_active_agent");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          rawAgent = parsed?.agentId;
+        }
+      } catch (e) {}
+    }
+    const agentCode = rawAgent && String(rawAgent).includes("3")
+      ? "A3"
+      : rawAgent && String(rawAgent).includes("2")
+      ? "A2"
+      : "A1";
+
     const payload = {
       ...form,
+      agent_id: agentCode,
       symptom_notes: compiledNotes,
       age: form.age === "" ? null : Number(form.age),
       severity_reported: Number(form.severity_reported),
@@ -312,11 +331,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     try {
       const { data } = await api.post("/triage", payload);
       setResult(data);
+      setActiveRightTab("triage");
       onCaseCreated?.();
       toast.success(`${data.triage.urgency_level} — ${data.case_ref}`);
       if (form.phone) {
         lastLookedUpRef.current = "";
         lookupCaller(form.phone);
+      }
+      if (typeof window !== "undefined" && window.innerWidth < 1024) {
+        setTimeout(() => {
+          outcomeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Triage failed. Please retry.");
@@ -325,10 +350,122 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
     }
   };
 
+  const renderHistoryContent = () => {
+    if (!callerHistory || callerHistory.length === 0) return null;
+    const HISTORY_PER_PAGE = 10;
+    const totalPages = Math.ceil(callerHistory.length / HISTORY_PER_PAGE) || 1;
+    const currentPage = Math.min(Math.max(1, historyPage), totalPages);
+    const paginatedHistory = callerHistory.slice(
+      (currentPage - 1) * HISTORY_PER_PAGE,
+      currentPage * HISTORY_PER_PAGE
+    );
+
+    return (
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-primary shrink-0" />
+            <h3 className="text-sm font-bold text-foreground">
+              Caller Past History ({callerHistory.length} {callerHistory.length === 1 ? "call" : "calls"} recorded)
+            </h3>
+          </div>
+          <span className="mono text-[11px] text-muted-foreground">
+            +91 {form.phone}
+          </span>
+        </div>
+
+        <div className="space-y-3.5">
+          {paginatedHistory.map((item, idx) => (
+            <div
+              key={item.case_ref || idx}
+              className="rounded-lg border border-border/70 bg-card p-3.5 sm:p-4 shadow-2xs transition-colors hover:border-primary/50"
+            >
+              {/* Top Bar: Date, Time, Case Ref, Urgency Badge */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                    <CalendarClock className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span>
+                      {new Date(item.created_at).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <span className="mono text-[11px] text-primary/80">
+                    {item.case_ref}
+                  </span>
+                </div>
+                <UrgencyBadge level={item.urgency_level} score={item.urgency_score} size="sm" />
+              </div>
+
+              {/* Reason for Call / Symptoms */}
+              <div className="mt-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Reason for Call / Symptoms
+                </p>
+                <p className="mt-1 text-xs text-foreground/90 leading-relaxed font-medium">
+                  {item.reason || item.summary || "No complaint notes logged"}
+                </p>
+              </div>
+
+              {/* Navigation Provided by Agent */}
+              <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-400 p-3 text-xs shadow-2xs">
+                <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-950">
+                  <Navigation className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                  <span>Navigation Provided by Agent</span>
+                </div>
+                <p className="mt-1 text-xs font-semibold text-emerald-950 leading-relaxed">
+                  {item.navigation || item.recommended_action || "Standard consultation / triage guidance"}
+                </p>
+                {item.recommended_facility_type && (
+                  <p className="mt-1.5 text-[11px] text-emerald-900 font-bold border-t border-emerald-300 pt-1.5">
+                    Routed Facility: <span className="underline font-extrabold">{item.recommended_facility_type}</span>
+                    {item.nearest_facility ? ` (${item.nearest_facility})` : ""}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3">
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+              className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" /> Previous page
+            </button>
+
+            <span className="text-xs text-muted-foreground font-medium">
+              Page <strong className="text-foreground">{currentPage}</strong> of <strong>{totalPages}</strong> ({callerHistory.length} calls)
+            </span>
+
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
+              className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next page <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-      <form onSubmit={submit} className="panel p-5 sm:p-6" data-testid="intake-form">
-        <div className="mb-4 flex items-center justify-between gap-4">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] w-full max-w-full overflow-x-hidden min-w-0">
+      <form onSubmit={submit} className="panel p-3.5 sm:p-6 w-full max-w-full min-w-0" data-testid="intake-form">
+        <div className="mb-3.5 sm:mb-4 flex items-center justify-between gap-4">
           <h2 className="text-xl font-bold sm:text-2xl">Caller intake</h2>
           <button
             type="button"
@@ -357,10 +494,10 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           </button>
         </div>
 
-        {/* 1. Caller Demographic Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* 1. Caller Demographic Fields - 2 in a row on mobile */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
           {callerFoundInfo && (
-            <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex items-center justify-between rounded-md bg-emerald-50 border border-emerald-400 px-3 py-1.5 text-xs text-emerald-950 font-bold shadow-2xs">
+            <div className="col-span-2 sm:col-span-2 lg:col-span-4 flex items-center justify-between rounded-md bg-emerald-50 border border-emerald-400 px-3 py-1.5 text-xs text-emerald-950 font-bold shadow-2xs">
               <div className="flex items-center gap-2">
                 <UserCheck className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
                 <span>
@@ -390,7 +527,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               className={inputCls}
               value={form.caller_name}
               onChange={set("caller_name")}
-              placeholder="Ramesh Kalita"
+              placeholder="Akash Gupta"
             />
           </Field>
           <Field
@@ -425,7 +562,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
                   lookupCaller(form.phone);
                 }
               }}
-              placeholder="98XXXXXXXX"
+              placeholder="987XXXXXXX"
             />
           </Field>
           <Field label="Age">
@@ -437,7 +574,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               className={inputCls}
               value={form.age}
               onChange={set("age")}
-              placeholder="42"
+              placeholder="45"
             />
           </Field>
           <Field label="Sex">
@@ -455,8 +592,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           </Field>
         </div>
 
-        {/* 2. Location Fields (seamlessly styled matching demographic fields) */}
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        {/* 2. Location Fields - 2 in a row on mobile */}
+        <div className="mt-2.5 sm:mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
           <Field label="City / town">
             <input
               data-testid="intake-form-city"
@@ -479,13 +616,13 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
               ))}
             </select>
           </Field>
-          <Field label="Pincode">
+          <Field label="Pincode" className="col-span-2 sm:col-span-1">
             <input
               data-testid="intake-form-pincode"
               className={inputCls}
               value={form.pincode}
               onChange={set("pincode")}
-              placeholder="781022"
+              placeholder="781005"
               maxLength={6}
             />
           </Field>
@@ -531,117 +668,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
           )}
         </button>
 
-        {/* 6. Caller Consultation History - unboxed, shows 10 per page with pagination */}
-        {callerHistory && callerHistory.length > 0 && (() => {
-          const HISTORY_PER_PAGE = 10;
-          const totalPages = Math.ceil(callerHistory.length / HISTORY_PER_PAGE) || 1;
-          const currentPage = Math.min(Math.max(1, historyPage), totalPages);
-          const paginatedHistory = callerHistory.slice(
-            (currentPage - 1) * HISTORY_PER_PAGE,
-            currentPage * HISTORY_PER_PAGE
-          );
-
-          return (
-            <div className="mt-6 border-t border-border/70 pt-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
-                <div className="flex items-center gap-2">
-                  <History className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">
-                    Caller Past History ({callerHistory.length} {callerHistory.length === 1 ? "call" : "calls"} recorded)
-                  </h3>
-                </div>
-                <span className="mono text-[11px] text-muted-foreground">
-                  +91 {form.phone}
-                </span>
-              </div>
-
-              <div className="space-y-3.5">
-                {paginatedHistory.map((item, idx) => (
-                  <div
-                    key={item.case_ref || idx}
-                    className="rounded-lg border border-border/70 bg-card p-4 shadow-2xs transition-colors hover:border-primary/50"
-                  >
-                    {/* Top Bar: Date, Time, Case Ref, Urgency Badge */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                          <CalendarClock className="h-3.5 w-3.5 text-primary shrink-0" />
-                          <span>
-                            {new Date(item.created_at).toLocaleString("en-IN", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                        <span className="mono text-[11px] text-primary/80">
-                          {item.case_ref}
-                        </span>
-                      </div>
-                      <UrgencyBadge level={item.urgency_level} score={item.urgency_score} size="sm" />
-                    </div>
-
-                    {/* Reason for Call / Symptoms */}
-                    <div className="mt-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Reason for Call / Symptoms
-                      </p>
-                      <p className="mt-1 text-xs text-foreground/90 leading-relaxed font-medium">
-                        {item.reason || item.summary || "No complaint notes logged"}
-                      </p>
-                    </div>
-
-                    {/* Navigation Provided by Agent */}
-                    <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-400 p-3 text-xs shadow-2xs">
-                      <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-950">
-                        <Navigation className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
-                        <span>Navigation Provided by Agent</span>
-                      </div>
-                      <p className="mt-1 text-xs font-semibold text-emerald-950 leading-relaxed">
-                        {item.navigation || item.recommended_action || "Standard consultation / triage guidance"}
-                      </p>
-                      {item.recommended_facility_type && (
-                        <p className="mt-1.5 text-[11px] text-emerald-900 font-bold border-t border-emerald-300 pt-1.5">
-                          Routed Facility: <span className="underline font-extrabold">{item.recommended_facility_type}</span>
-                          {item.nearest_facility ? ` (${item.nearest_facility})` : ""}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3">
-                  <button
-                    type="button"
-                    disabled={currentPage === 1}
-                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                    className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" /> Previous page
-                  </button>
-
-                  <span className="text-xs text-muted-foreground font-medium">
-                    Page <strong className="text-foreground">{currentPage}</strong> of <strong>{totalPages}</strong> ({callerHistory.length} calls)
-                  </span>
-
-                  <button
-                    type="button"
-                    disabled={currentPage === totalPages}
-                    onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
-                    className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Next page <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {/* Desktop Caller Consultation History - rendered only on desktop (lg and above) inside the form */}
+        {callerHistory && callerHistory.length > 0 && (
+          <div className="hidden lg:block mt-6 border-t border-border/70 pt-5">
+            {renderHistoryContent()}
+          </div>
+        )}
       </form>
 
       {/* Right Side: Live Scribe Window OR Triage Result Panel */}
@@ -657,9 +689,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
         const currentRightView = activeRightTab || "scribe";
 
         return (
-          <div className="flex flex-col">
+          <div ref={outcomeRef} className="flex flex-col w-full min-w-0 scroll-mt-16">
             {/* Always visible tab toggle bar so agent can access Call Transcript & Triage Outcome at any time */}
-            <div className="mb-2.5 flex items-center justify-between gap-2">
+            <div className="mb-2.5 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-secondary/50 p-1 text-xs">
                 <button
                   type="button"
@@ -724,7 +756,14 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, callSession
                 onStopManualRecording={callSession?.stopManualRecording}
               />
             ) : (
-              <TriageResultPanel result={result} loading={loading} />
+              <TriageResultPanel result={result} loading={loading} callerIntake={form} />
+            )}
+
+            {/* Mobile Caller Consultation History - rendered AFTER Triage Outcome / Call Transcript on mobile (< lg) */}
+            {callerHistory && callerHistory.length > 0 && (
+              <div className="block lg:hidden mt-5 panel p-3.5 sm:p-5 w-full">
+                {renderHistoryContent()}
+              </div>
             )}
           </div>
         );

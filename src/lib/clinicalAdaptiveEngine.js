@@ -3012,12 +3012,13 @@ export function processTranscriptionForAi(rawSpeech, currentClinicalState = {}, 
   // 3. Extract clinical entities via NLP
   const nlp = extractClinicalEntities(text, "probing", currentClinicalState);
 
-  // Check specific intent requests (104, 108, e-Sanjeevani, Pharmacy, Psychiatric)
+  // Check specific intent requests (104, 108, e-Sanjeevani, Pharmacy, Psychiatric, NACO)
   const is104 = /\b(104|phone consultation|phone doctor|tele consultation|tele-consultation|tele doctor|tele-doctor|call with 104|104 doctor|doctor on call)\b/i.test(normalized);
   const is108 = /\b(108|ambulance|emergency vehicle|108 call)\b/i.test(normalized);
   const isESanjeevani = /\b(e sanjeevani|esanjeevani|online doctor|video consultation)\b/i.test(normalized);
   const isPharmacy = /\b(pharmacy|chemist|dawai ki dukan|medicine refill)\b/i.test(normalized);
-  const isPsychiatric = /\b(tele manas|tele-manas|psychiat|counseling|depression|suicid|mental health)\b/i.test(normalized);
+  const isNaco = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti)\b/i.test(normalized);
+  const isPsychiatric = !isNaco && /\b(tele manas|tele-manas|psychiat|psychological counsel|depression|suicid|mental health)\b/i.test(normalized);
 
   const hasClinicalContent = Boolean(
     nlp.primarySymptom ||
@@ -3025,7 +3026,7 @@ export function processTranscriptionForAi(rawSpeech, currentClinicalState = {}, 
     nlp.detectedDuration ||
     nlp.cleanSeverity ||
     nlp.probingAnswer ||
-    is104 || is108 || isESanjeevani || isPharmacy || isPsychiatric
+    is104 || is108 || isESanjeevani || isPharmacy || isNaco || isPsychiatric
   );
 
   if (!hasClinicalContent) {

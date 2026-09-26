@@ -11,6 +11,120 @@ const inputCls =
 
 const PAGE_SIZE = 50;
 
+export function getReferralBadge(c) {
+  const t = c?.triage || {};
+  const dest = (
+    t.call_referral_primary ||
+    t.referral_destination ||
+    t.recommended_facility_type ||
+    ""
+  ).toLowerCase();
+
+  const notes = `${c?.intake?.symptom_notes || ""} ${dest}`.toLowerCase();
+
+  if (
+    dest.includes("naco") ||
+    dest.includes("1097") ||
+    notes.includes("hiv") ||
+    notes.includes("aids")
+  ) {
+    return {
+      label: "NACO 1097 Helpline",
+      icon: "🎗️",
+      color: "bg-rose-800 text-white border-rose-900",
+    };
+  }
+  if (t.call_108 || dest.includes("108") || dest.includes("ambulance")) {
+    return {
+      label: "108 Ambulance Dispatch",
+      icon: "🚨",
+      color: "bg-rose-700 text-white border-rose-800",
+    };
+  }
+  if (
+    t.is_psychiatric ||
+    dest.includes("manas") ||
+    dest.includes("psych") ||
+    dest.includes("14416")
+  ) {
+    return {
+      label: "Psychiatric Team / Tele-MANAS",
+      icon: "🧠",
+      color: "bg-purple-700 text-white border-purple-800",
+    };
+  }
+  if (dest.includes("tie") || dest.includes("empanelled")) {
+    return {
+      label: "Tie-Up Facility",
+      icon: "🏥",
+      color: "bg-cyan-700 text-white border-cyan-800",
+    };
+  }
+  if (dest.includes("hospital") || dest.includes("casualty")) {
+    return {
+      label: "ESIC Hospital (Casualty / OPD Today)",
+      icon: "🏥",
+      color: "bg-amber-700 text-white border-amber-800",
+    };
+  }
+  if (
+    dest.includes("104") ||
+    dest.includes("tele-doctor") ||
+    dest.includes("medical team") ||
+    dest.includes("health helpline") ||
+    dest.includes("advice")
+  ) {
+    return {
+      label: "104 Health Helpline",
+      icon: "📞",
+      color: "bg-blue-700 text-white border-blue-800",
+    };
+  }
+  if (dest.includes("sanjeevani") || dest.includes("telemedicine")) {
+    return {
+      label: "e-Sanjeevani Online Doctor",
+      icon: "💻",
+      color: "bg-sky-700 text-white border-sky-800",
+    };
+  }
+  if (dest.includes("pharmacy") || dest.includes("chemist")) {
+    return {
+      label: "Empanelled Pharmacy / Chemist",
+      icon: "💊",
+      color: "bg-teal-700 text-white border-teal-800",
+    };
+  }
+  if (dest.includes("doctor") || dest.includes("officer")) {
+    return {
+      label: "Medical Officer Escalation",
+      icon: "👨‍⚕️",
+      color: "bg-indigo-700 text-white border-indigo-800",
+    };
+  }
+  return {
+    label: "ESIS Dispensary",
+    icon: "🩺",
+    color: "bg-emerald-700 text-white border-emerald-800",
+  };
+}
+
+export function getAgentCode(c) {
+  const explicit = c?.agent_id || c?.intake?.agent_id || c?.agent || c?.intake?.agent;
+  if (explicit) {
+    const s = String(explicit).toUpperCase();
+    if (s.includes("3")) return "A3";
+    if (s.includes("2")) return "A2";
+    if (s.includes("1")) return "A1";
+  }
+  const ref = String(c?.case_ref || "").toUpperCase();
+  const m = ref.match(/^C(A[1-3])/);
+  if (m) return m[1];
+  // Stable fallback for legacy cases
+  let hash = 0;
+  for (let i = 0; i < ref.length; i++) hash = (hash + ref.charCodeAt(i)) % 2;
+  return `A${hash + 1}`;
+}
+
 export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   const [cases, setCases] = useState([]);
   const [urgency, setUrgency] = useState("all");
@@ -194,7 +308,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
         </div>
       ) : (
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm" data-testid="case-log-table">
+          <table className="w-full min-w-[850px] text-left text-sm" data-testid="case-log-table">
             <thead>
               <tr className="border-b border-border/70 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="w-8 py-2 pr-2 text-center">
@@ -207,11 +321,11 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                   />
                 </th>
                 <th className="py-2 pr-3 font-semibold">Case</th>
+                <th className="py-2 pr-3 font-semibold">Agent</th>
                 <th className="py-2 pr-3 font-semibold">Caller</th>
                 <th className="py-2 pr-3 font-semibold">Complaint</th>
                 <th className="py-2 pr-3 font-semibold">Urgency</th>
                 <th className="py-2 pr-3 font-semibold">Navigation</th>
-                <th className="py-2 pr-3 font-semibold">Nearest</th>
                 <th className="py-2 pr-3 font-semibold">Time</th>
                 <th className="py-2 text-right font-semibold">Action</th>
               </tr>
@@ -235,6 +349,11 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                     />
                   </td>
                   <td className="mono py-3 pr-3 text-xs text-primary/90">{c.case_ref}</td>
+                  <td className="py-3 pr-3">
+                    <span className="inline-flex items-center justify-center rounded bg-secondary/80 px-2 py-0.5 font-mono text-xs font-bold text-foreground border border-border/60">
+                      {getAgentCode(c)}
+                    </span>
+                  </td>
                   <td className="py-3 pr-3">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="font-medium text-foreground">{c.intake?.caller_name || "—"}</p>
@@ -263,23 +382,18 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                       testId="case-log-urgency-badge"
                     />
                   </td>
-                  <td className="max-w-[280px] py-3 pr-3 text-xs leading-snug">
-                    <p
-                      className="line-clamp-2 text-foreground/90 font-medium"
-                      title={c.triage?.recommended_action || c.triage?.recommended_facility_type}
-                    >
-                      {c.triage?.recommended_action || c.triage?.recommended_facility_type || "—"}
-                    </p>
-                    {c.triage?.recommended_facility_type && c.triage?.recommended_action && (
-                      <span className="mt-0.5 block text-[10px] text-muted-foreground/80">
-                        {c.triage.recommended_facility_type}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 pr-3 text-xs text-muted-foreground">
-                    {c.nearest_facilities?.[0]
-                      ? `${c.nearest_facilities[0].name} · ${c.nearest_facilities[0].distance_km} km`
-                      : "—"}
+                  <td className="py-3 pr-3">
+                    {(() => {
+                      const badge = getReferralBadge(c);
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
+                        >
+                          <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
+                          <span className="truncate">{badge.label}</span>
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="mono py-3 pr-3 text-[11px] text-muted-foreground whitespace-nowrap">
                     {new Date(c.created_at).toLocaleString("en-IN", {

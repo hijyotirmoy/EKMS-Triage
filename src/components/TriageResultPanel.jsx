@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
+import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
+import { isHospital, isDispensary, isTieUp } from "../lib/geo";
 
 export const ACTION_DIRECTIVES = {
   NACO_1097: {
@@ -33,6 +35,8 @@ export const ACTION_DIRECTIVES = {
     badge: "NACO 1097 Helpline",
     badgeColor: "bg-rose-800 text-white font-bold",
     cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
+    panelLightTint: "border-rose-300/80 bg-rose-50/50 dark:bg-rose-950/25",
+    topBar: "bg-rose-800",
     icon: "🎗️",
     summary:
       "Caller is inquiring about HIV, AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer immediately to the National AIDS Control Organisation (NACO) 24x7 Toll-Free Helpline (1097).",
@@ -49,6 +53,8 @@ export const ACTION_DIRECTIVES = {
     badge: "108 Ambulance Dispatch",
     badgeColor: "bg-rose-700 text-white font-bold",
     cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
+    panelLightTint: "border-rose-300/80 bg-rose-50/50 dark:bg-rose-950/25",
+    topBar: "bg-rose-700",
     icon: "🚨",
     summary: "",
     checklist: [
@@ -64,6 +70,8 @@ export const ACTION_DIRECTIVES = {
     badge: "Psychiatric Team / Tele-MANAS",
     badgeColor: "bg-purple-700 text-white font-bold",
     cardBorder: "border-purple-400 bg-purple-50 text-purple-950 shadow-xs",
+    panelLightTint: "border-purple-300/80 bg-purple-50/50 dark:bg-purple-950/25",
+    topBar: "bg-purple-700",
     icon: "🧠",
     summary:
       "Caller is in emotional crisis, experiencing depression, severe anxiety, or thoughts of self-harm. The agent must speak with warm empathy and transfer to mental health professionals.",
@@ -80,6 +88,8 @@ export const ACTION_DIRECTIVES = {
     badge: "ESIC Hospital (Casualty / OPD Today)",
     badgeColor: "bg-amber-700 text-white font-bold",
     cardBorder: "border-amber-400 bg-amber-50 text-amber-950 shadow-xs",
+    panelLightTint: "border-amber-300/80 bg-amber-50/50 dark:bg-amber-950/25",
+    topBar: "bg-amber-700",
     icon: "🏥",
     summary: "",
     checklist: [
@@ -95,6 +105,8 @@ export const ACTION_DIRECTIVES = {
     badge: "ESIS Dispensary",
     badgeColor: "bg-emerald-700 text-white font-bold",
     cardBorder: "border-emerald-500 bg-emerald-50 text-emerald-950 shadow-xs",
+    panelLightTint: "border-emerald-300/80 bg-emerald-50/50 dark:bg-emerald-950/25",
+    topBar: "bg-emerald-700",
     icon: "🩺",
     summary:
       "Condition is suitable for primary clinic level care. Direct the IP to their registered or nearest ESIS Dispensary for doctor consultation and free medicine dispensing.",
@@ -111,6 +123,8 @@ export const ACTION_DIRECTIVES = {
     badge: "104 Health Helpline",
     badgeColor: "bg-blue-700 text-white font-bold",
     cardBorder: "border-blue-400 bg-blue-50 text-blue-950 shadow-xs",
+    panelLightTint: "border-blue-300/80 bg-blue-50/50 dark:bg-blue-950/25",
+    topBar: "bg-blue-700",
     icon: "📞",
     summary:
       "Caller requests direct medical advice or consultation with a government doctor over the phone. Transfer call to the 104 Medical Team.",
@@ -127,6 +141,8 @@ export const ACTION_DIRECTIVES = {
     badge: "e-Sanjeevani Online Doctor",
     badgeColor: "bg-sky-700 text-white font-bold",
     cardBorder: "border-sky-400 bg-sky-50 text-sky-950 shadow-xs",
+    panelLightTint: "border-sky-300/80 bg-sky-50/50 dark:bg-sky-950/25",
+    topBar: "bg-sky-700",
     icon: "💻",
     summary:
       "Advise the patient to consult government specialist doctors online from home without visiting a crowded hospital facility.",
@@ -143,6 +159,8 @@ export const ACTION_DIRECTIVES = {
     badge: "Empanelled Pharmacy / Chemist",
     badgeColor: "bg-teal-700 text-white font-bold",
     cardBorder: "border-teal-400 bg-teal-50 text-teal-950 shadow-xs",
+    panelLightTint: "border-teal-300/80 bg-teal-50/50 dark:bg-teal-950/25",
+    topBar: "bg-teal-700",
     icon: "💊",
     summary:
       "Guide caller to the nearest registered dispensary store or empanelled chemist for free prescription medicines, ORS, or first-aid supplies.",
@@ -159,6 +177,8 @@ export const ACTION_DIRECTIVES = {
     badge: "Medical Officer Escalation",
     badgeColor: "bg-indigo-700 text-white font-bold",
     cardBorder: "border-indigo-400 bg-indigo-50 text-indigo-950 shadow-xs",
+    panelLightTint: "border-indigo-300/80 bg-indigo-50/50 dark:bg-indigo-950/25",
+    topBar: "bg-indigo-700",
     icon: "👨‍⚕️",
     summary:
       "Complex clinical scenario requiring direct clinical evaluation. Escalate caller to the on-duty Medical Officer workstation.",
@@ -175,6 +195,8 @@ export const ACTION_DIRECTIVES = {
     badge: "Tie-Up Facility",
     badgeColor: "bg-cyan-700 text-white font-bold",
     cardBorder: "border-cyan-400 bg-cyan-50 text-cyan-950 shadow-xs",
+    panelLightTint: "border-cyan-300/80 bg-cyan-50/50 dark:bg-cyan-950/25",
+    topBar: "bg-cyan-700",
     icon: "🏥",
     summary: "",
     checklist: [
@@ -189,11 +211,11 @@ export function mapDestinationToDirectiveId(dest) {
   if (!dest || typeof dest !== "string") return "ESIS_DISPENSARY";
   const d = dest.toLowerCase();
   if (d.includes("108") || d.includes("ambulance")) return "CALL_108";
-  if (d.includes("manas") || d.includes("psych") || d.includes("counsel")) return "TELE_MANAS";
-  if (d.includes("naco") || d.includes("1097")) return "NACO_1097";
+  if (d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("pep")) return "NACO_1097";
+  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team") || d.includes("health helpline") || d.includes("advice")) return "TELE_104";
+  if (d.includes("manas") || d.includes("psych") || (d.includes("counsel") && !d.includes("naco") && !d.includes("hiv"))) return "TELE_MANAS";
   if (d.includes("tie") || d.includes("empanelled")) return "TIE_UP_FACILITY";
   if (d.includes("hospital") || d.includes("casualty")) return "ESIC_HOSPITAL";
-  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team")) return "TELE_104";
   if (d.includes("sanjeevani") || d.includes("telemedicine")) return "E_SANJEEVANI";
   if (d.includes("pharmacy") || d.includes("chemist")) return "NEAREST_PHARMACY";
   if (d.includes("forward to doctor") || d.includes("medical officer")) return "FORWARD_DOCTOR";
@@ -202,12 +224,27 @@ export function mapDestinationToDirectiveId(dest) {
 }
 
 export function resolveDirectiveIds(t, result) {
-  const primaryDest =
+  // Check if caller inquiry is explicitly NACO 1097 / HIV
+  const intakeText = `${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
+  const isNacoHIV = /\b(hiv|aids|naco|1097|post.?exposure|pep\b|anti.?retroviral|art\s*center)\b/i.test(intakeText);
+
+  let primaryDest =
     t?.call_referral_primary ||
     t?.referral_destination ||
     result?.ekms_ai_context?.triageState?.referralDestination ||
-    result?.ekms_ai_context?.referralDestination ||
-    "ESIS Dispensary";
+    result?.ekms_ai_context?.referralDestination;
+
+  if (!primaryDest) {
+    if (isNacoHIV) {
+      primaryDest = "NACO 1097 Helpline";
+    } else if (t?.call_108) {
+      primaryDest = "108 Ambulance Dispatch";
+    } else if (t?.is_psychiatric) {
+      primaryDest = "Psychiatric Team / Tele-MANAS";
+    } else {
+      primaryDest = "ESIS Dispensary";
+    }
+  }
 
   const secondaryDest =
     t?.call_referral_secondary ||
@@ -328,7 +365,7 @@ const Loading = () => (
   </div>
 );
 
-export const TriageResultPanel = ({ result, loading }) => {
+export const TriageResultPanel = ({ result, loading, callerIntake }) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
 
@@ -344,6 +381,72 @@ export const TriageResultPanel = ({ result, loading }) => {
     ACTION_DIRECTIVES[manualDirectiveId || directiveIds.primaryId] || ACTION_DIRECTIVES.ESIS_DISPENSARY;
   const secondaryDirective =
     ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
+
+  const dispensaryStatus = useMemo(() => getDispensaryOperatingStatus(), []);
+  const isWeekend = dispensaryStatus.isWeekend;
+
+  const isFacilityRequired = [
+    "ESIC_HOSPITAL",
+    "ESIS_DISPENSARY",
+    "TIE_UP_FACILITY",
+    "CALL_108",
+    "NEAREST_PHARMACY",
+  ].includes(activeDirective.id);
+
+  // Filter and dynamically organize facilities based on weekend operating status and referral selection
+  const dynamicFacilities = useMemo(() => {
+    if (!Array.isArray(facs) || facs.length === 0) return [];
+
+    // Filter out closed facilities on weekends (Dispensaries closed on Saturday & Sunday)
+    const openFacs = facs.filter((f) => {
+      if (isWeekend && (f.is_dispensary || isDispensary(f))) {
+        return false;
+      }
+      return true;
+    });
+
+    const getTag = (f) => {
+      if (isHospital(f)) return "Hospital · 24x7 Casualty";
+      if (isTieUp(f)) return "Empanelled Tie-Up Hospital";
+      if (isDispensary(f)) return "ESIS Dispensary";
+      return f.facility_type || "Medical Facility";
+    };
+
+    // If a physical facility visit is NOT strictly required (e.g. 104 tele-doctor, Tele-MANAS, NACO 1097, e-Sanjeevani):
+    // Show the nearest open facilities to the caller strictly sorted by distance
+    if (!isFacilityRequired) {
+      return openFacs.slice(0, 6).map((f) => ({
+        ...f,
+        facility_tag: getTag(f),
+      }));
+    }
+
+    // If a physical facility IS required (Hospital, Tie-Up, Dispensary, 108, Pharmacy):
+    // Prioritize nearest facilities matching the active directive, followed by remaining nearest
+    const matchesDirective = (f) => {
+      if (activeDirective.id === "TIE_UP_FACILITY") return f.is_tie_up || isTieUp(f);
+      if (activeDirective.id === "ESIC_HOSPITAL") return f.is_hospital || isHospital(f);
+      if (activeDirective.id === "ESIS_DISPENSARY") return f.is_dispensary || isDispensary(f);
+      if (activeDirective.id === "NEAREST_PHARMACY") {
+        return (
+          f.facility_type?.toLowerCase().includes("pharmacy") ||
+          f.name?.toLowerCase().includes("pharmacy") ||
+          f.name?.toLowerCase().includes("chemist")
+        );
+      }
+      if (activeDirective.id === "CALL_108") return f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f);
+      return true;
+    };
+
+    const matchingFacs = openFacs.filter(matchesDirective);
+    const matchingKeys = new Set(matchingFacs.map((f) => f.id || f.name));
+    const otherFacs = openFacs.filter((f) => !matchingKeys.has(f.id || f.name));
+
+    return [...matchingFacs, ...otherFacs].slice(0, 6).map((f) => ({
+      ...f,
+      facility_tag: getTag(f),
+    }));
+  }, [facs, isWeekend, isFacilityRequired, activeDirective.id]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -361,9 +464,15 @@ export const TriageResultPanel = ({ result, loading }) => {
       result?.ekms_ai_context?.redFlagsDetected;
     if (Array.isArray(ctxFlags)) raw.push(...ctxFlags);
 
-    // Look ONLY at actual caller-reported text, never circular AI summaries
-    const callerText = `${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
-    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(callerText);
+    // Look ONLY at actual caller-reported text, never circular AI summaries or bot assistant prompts
+    const callerChat = Array.isArray(result?.ekms_ai_context?.chatHistory)
+      ? result.ekms_ai_context.chatHistory
+          .filter((m) => m.sender === "user" || m.role === "user")
+          .map((m) => m.text || m.content || "")
+          .join(" ")
+      : "";
+    const callerText = `${result?.intake?.symptom_notes || ""} ${callerChat}`.toLowerCase().trim();
+    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(callerText);
 
     return summarizeRedFlags(raw, callerText, isSafe);
   }, [t, result]);
@@ -420,29 +529,71 @@ export const TriageResultPanel = ({ result, loading }) => {
   );
 
   return (
-    <div className="space-y-5 rise" data-testid="triage-result">
-      <div className="panel overflow-hidden">
-        <div className={`h-1 w-full ${s.bar}`} />
+    <div className="space-y-5 rise w-full max-w-full min-w-0" data-testid="triage-result">
+      <div
+        className={`panel overflow-hidden transition-all duration-300 ${
+          activeDirective.panelLightTint || "bg-card border-border"
+        }`}
+      >
+        <div
+          className={`h-1.5 w-full transition-colors duration-300 ${
+            activeDirective.topBar || s.bar
+          }`}
+        />
         <div className="p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="eyebrow">Triage outcome</p>
-              <div className="mt-2 flex items-center gap-3">
+              <div className="mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3">
                 <UrgencyBadge level={t.urgency_level} score={t.urgency_score} />
-                {t.is_psychiatric && (
+                {activeDirective.id === "NACO_1097" ? (
+                  <span
+                    data-testid="triage-naco-1097"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-800 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    🎗️ NACO 1097 HELPLINE
+                  </span>
+                ) : activeDirective.id === "CALL_108" || t.call_108 ? (
+                  <span
+                    data-testid="triage-call-108"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    <AlertOctagon className="h-3.5 w-3.5" /> CALL 108 NOW
+                  </span>
+                ) : activeDirective.id === "TELE_104" ? (
+                  <span
+                    data-testid="triage-tele-104"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-blue-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    <PhoneCall className="h-3.5 w-3.5" /> 104 HEALTH HELPLINE
+                  </span>
+                ) : activeDirective.id === "TELE_MANAS" ? (
                   <span
                     data-testid="triage-tele-manas"
                     className="inline-flex items-center gap-1.5 rounded-full border border-purple-300 bg-purple-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
                   >
                     <PhoneCall className="h-3.5 w-3.5" /> TELE-MANAS 14416
                   </span>
-                )}
-                {t.call_108 && (
+                ) : activeDirective.id === "ESIC_HOSPITAL" ? (
                   <span
-                    data-testid="triage-call-108"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                    data-testid="triage-esic-hospital"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
                   >
-                    <AlertOctagon className="h-3.5 w-3.5" /> CALL 108 NOW
+                    <Building2 className="h-3.5 w-3.5" /> ESIC HOSPITAL
+                  </span>
+                ) : activeDirective.id === "TIE_UP_FACILITY" ? (
+                  <span
+                    data-testid="triage-tie-up"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300 bg-cyan-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    <Building2 className="h-3.5 w-3.5" /> TIE-UP FACILITY
+                  </span>
+                ) : (
+                  <span
+                    data-testid="triage-esis-dispensary"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    <Stethoscope className="h-3.5 w-3.5" /> {activeDirective.badge || "ESIS DISPENSARY"}
                   </span>
                 )}
               </div>
@@ -454,40 +605,8 @@ export const TriageResultPanel = ({ result, loading }) => {
           </p>
           <p className="mt-1 text-xs text-muted-foreground/80">{s.label}</p>
 
-          {/* UNIFIED Call Triage, Referral & Directive Decision Summary Card */}
-          <div
-            className={`mt-5 w-full rounded-xl border p-4 sm:p-5 shadow-sm transition-all space-y-4 ${
-              activeDirective.cardBorder ||
-              "border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/25 text-foreground"
-            }`}
-            data-testid="agent-action-box"
-          >
-            {/* 1. Header: Call Triage & Action Decision Summary */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-current/15 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="text-2xl shrink-0">
-                  {activeDirective.icon || <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />}
-                </span>
-                <div>
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block">
-                    Call Triage &amp; Action Directive · {activeDirective.category}
-                  </span>
-                  <h4 className="text-sm sm:text-base font-black tracking-tight">
-                    {activeDirective.title}
-                  </h4>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded bg-emerald-700 px-2.5 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-                  Assessed
-                </span>
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-2xs ${activeDirective.badgeColor}`}
-                >
-                  {activeDirective.badge}
-                </span>
-              </div>
-            </div>
+          {/* Unified Clinical Assessment & Action items directly inside Triage outcome panel */}
+          <div className="mt-5 space-y-4 pt-1">
 
             {/* 2. Clinical Assessment Overview Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -554,30 +673,36 @@ export const TriageResultPanel = ({ result, loading }) => {
               )}
             </div>
 
-            {/* 4. Decision Switcher Buttons (Placed directly above Red Flags with upgraded modern UI/UX) */}
-            <div className="rounded-xl border border-current/15 bg-background/70 dark:bg-slate-900/70 backdrop-blur-xs p-3.5 shadow-2xs space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <SlidersHorizontal className="h-3.5 w-3.5 text-primary opacity-80" />
-                  <span className="text-[11px] font-black uppercase tracking-wider text-foreground">
-                    Decision Switcher
-                  </span>
-                  <span className="text-[10px] text-muted-foreground font-medium hidden sm:inline">
-                    (Guidance for referral channels)
-                  </span>
+            {/* 4. Decision Switcher Buttons (Redesigned with clean responsive grid and modern clinical controls) */}
+            <div className="rounded-xl border border-current/15 bg-background/80 dark:bg-slate-900/80 backdrop-blur-sm p-4 shadow-2xs space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black uppercase tracking-wider text-foreground block">
+                      Decision Switcher
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-medium">
+                      Select or switch referral destination channel
+                    </span>
+                  </div>
                 </div>
                 {manualDirectiveId && (
                   <button
                     type="button"
                     onClick={() => setManualDirectiveId(null)}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/80 transition-colors bg-primary/10 hover:bg-primary/20 px-2.5 py-1 rounded-full cursor-pointer shadow-2xs"
+                    className="inline-flex items-center gap-1.5 text-[10px] font-bold text-primary hover:text-primary/90 transition-colors bg-primary/10 hover:bg-primary/15 px-2.5 py-1 rounded-full cursor-pointer shadow-2xs"
                   >
                     <RotateCcw className="h-3 w-3" />
-                    <span>Reset to Primary AI Recommendation</span>
+                    <span>Reset to AI Primary</span>
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
+
+              {/* Clean structured responsive grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {Object.values(ACTION_DIRECTIVES).map((dir) => {
                   const isSelected = dir.id === activeDirective.id;
                   const isPrimary = dir.id === directiveIds.primaryId;
@@ -587,46 +712,118 @@ export const TriageResultPanel = ({ result, loading }) => {
                       key={dir.id}
                       type="button"
                       onClick={() => setManualDirectiveId(dir.id)}
-                      className={`group relative inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      className={`group relative flex items-center justify-between gap-2 rounded-xl p-2.5 text-left text-xs font-bold transition-all duration-200 cursor-pointer ${
                         isSelected
-                          ? `${dir.badgeColor} ring-2 ring-offset-1 ring-primary/40 shadow-sm scale-[1.02]`
-                          : "bg-background/95 dark:bg-slate-800 text-foreground border border-border/80 hover:bg-secondary/80 hover:border-foreground/25 hover:scale-[1.01]"
+                          ? `${dir.badgeColor} ring-2 ring-offset-1 ring-current shadow-md scale-[1.01]`
+                          : "bg-background/95 dark:bg-slate-800/90 text-foreground border border-border/80 hover:bg-secondary/70 hover:border-foreground/25 hover:shadow-2xs"
                       }`}
                     >
-                      <span className="text-sm shrink-0 leading-none">{dir.icon}</span>
-                      <span className="tracking-tight">{dir.badge}</span>
-                      {isPrimary && !isSelected && (
-                        <span className="ml-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 border border-amber-400/40">
-                          ⭐ Primary
-                        </span>
-                      )}
-                      {isSecondary && !isSelected && (
-                        <span className="ml-1 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[9px] font-extrabold px-1.5 py-0.5 border border-blue-400/40">
-                          ⭐ Secondary
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-base shrink-0 leading-none">{dir.icon}</span>
+                        <div className="min-w-0">
+                          <p className="truncate tracking-tight leading-snug">{dir.badge}</p>
+                          <p
+                            className={`text-[10px] font-medium truncate ${
+                              isSelected ? "text-white/80" : "text-muted-foreground"
+                            }`}
+                          >
+                            {dir.category || "Referral Directive"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-1">
+                        {isPrimary && (
+                          <span
+                            className={`rounded text-[9px] font-extrabold px-1.5 py-0.5 border ${
+                              isSelected
+                                ? "bg-white/20 text-white border-white/30"
+                                : "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-400/40"
+                            }`}
+                          >
+                            ⭐ Primary
+                          </span>
+                        )}
+                        {isSecondary && !isPrimary && (
+                          <span
+                            className={`rounded text-[9px] font-extrabold px-1.5 py-0.5 border ${
+                              isSelected
+                                ? "bg-white/20 text-white border-white/30"
+                                : "bg-blue-500/15 text-blue-800 dark:text-blue-300 border-blue-400/40"
+                            }`}
+                          >
+                            ⭐ Secondary
+                          </span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* 5. Red Flags Present (Housed cleanly inside the assessment card) */}
-            {allRedFlags.length > 0 && (
-              <div className="rounded-lg border border-red-300 bg-rose-50/90 dark:bg-rose-950/40 p-3 shadow-2xs">
-                <p className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700 dark:text-red-400">
-                  <ShieldAlert className="h-4 w-4 text-red-600" /> Red flags present
+            {/* 5. Point-wise Clinical Red Flags Box (AI Processed based on IP condition) */}
+            <div
+              className={`rounded-xl border p-3.5 shadow-2xs ${
+                allRedFlags.length > 0
+                  ? "border-red-300 bg-rose-50/90 dark:bg-rose-950/40"
+                  : "border-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/30"
+              }`}
+              data-testid="triage-red-flags-box"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <p
+                  className={`flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider ${
+                    allRedFlags.length > 0
+                      ? "text-red-700 dark:text-red-400"
+                      : "text-emerald-800 dark:text-emerald-300"
+                  }`}
+                >
+                  {allRedFlags.length > 0 ? (
+                    <>
+                      <ShieldAlert className="h-4 w-4 text-red-600" />
+                      Clinical Red Flags Detected ({allRedFlags.length} points)
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      Clinical Red Flags Assessment
+                    </>
+                  )}
                 </p>
-                <ul className="space-y-1 text-xs sm:text-sm text-red-900 dark:text-red-200 font-medium" data-testid="triage-red-flags-list">
-                  {allRedFlags.map((f, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
-                      <span className="font-semibold">{f}</span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${
+                    allRedFlags.length > 0
+                      ? "bg-red-600 text-white"
+                      : "bg-emerald-600 text-white"
+                  }`}
+                >
+                  {allRedFlags.length > 0 ? "High Alert" : "Stable"}
+                </span>
+              </div>
+
+              {allRedFlags.length > 0 ? (
+                <ul
+                  className="space-y-1.5 text-xs sm:text-sm text-red-950 dark:text-red-200"
+                  data-testid="triage-red-flags-list"
+                >
+                  {allRedFlags.map((flag, idx) => (
+                    <li
+                      key={idx}
+                      className="flex items-start gap-2 py-0.5 text-red-950 dark:text-red-200"
+                    >
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-600" />
+                      <span className="font-semibold leading-snug">{flag}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
+              ) : (
+                <div className="flex items-center gap-2 py-1 text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>No acute red-flag hemodynamic signs detected from caller inquiry.</span>
+                </div>
+              )}
+            </div>
 
             {/* 6. Directive Guidance Summary */}
             {activeDirective.summary && (
@@ -647,79 +844,116 @@ export const TriageResultPanel = ({ result, loading }) => {
                 </div>
               ))}
             </div>
+
+            {/* Referral Forwarding Dispatch Button & Confirmation */}
+            <CaseHandoverForwarding
+              result={result}
+              activeDirective={activeDirective}
+              allRedFlags={allRedFlags}
+              callerIntake={callerIntake}
+            />
           </div>
         </div>
       </div>
 
-      <div className="panel p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="panel p-5 sm:p-6" data-testid="triage-facilities-list">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3.5">
           <div>
-            <h3 className="text-lg font-bold">Facilities</h3>
+            <h3 className="text-base sm:text-lg font-bold text-foreground">
+              {isFacilityRequired
+                ? "Nearest Facilities Directory"
+                : "Nearest Facilities to Caller"}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isFacilityRequired ? (
+                <>
+                  Prioritized for in-person visit:{" "}
+                  <span className="font-bold text-foreground">
+                    {activeDirective.badge}
+                  </span>
+                </>
+              ) : (
+                <>
+                  Primary directive is tele-consultation (
+                  <span className="font-bold text-foreground">
+                    {activeDirective.badge}
+                  </span>
+                  ) · Nearest facilities if in-person visit is needed
+                </>
+              )}
+            </p>
           </div>
           {loc && (
-            <span className="mono rounded-full border border-border/70 px-2.5 py-1 text-[11px] text-muted-foreground">
-              <MapPin className="mr-1 inline h-3 w-3" />
-              {loc.matched} · {loc.method}
-            </span>
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-foreground/80 shadow-2xs">
+              <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>{loc.matched}</span>
+            </div>
           )}
         </div>
 
-        {facs?.length ? (
+        {/* Weekend Operating Notice (Dispensaries closed on Saturday & Sunday) */}
+        {isWeekend && (
+          <div className="mt-3.5 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-50/80 dark:bg-amber-950/30 p-3 text-xs text-amber-950 dark:text-amber-200 shadow-2xs">
+            <AlertOctagon className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+            <div>
+              <p className="font-extrabold text-xs">
+                Weekend Schedule Active ({dispensaryStatus.reason || "Saturday / Sunday"}):
+              </p>
+              <p className="text-[11.5px] text-amber-900 dark:text-amber-300 mt-0.5 leading-snug">
+                ESIS Dispensaries are closed on weekends (Hours: Mon–Fri 10:00 AM – 3:00 PM). Closed dispensaries are hidden from the directory. Only open 24x7 Casualty &amp; Empanelled Tie-Up Hospitals are displayed.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {dynamicFacilities?.length ? (
           <ul className="mt-4 space-y-3">
-            {facs.map((f, i) => (
+            {dynamicFacilities.map((f, i) => (
               <li
-                key={f.id || i}
+                key={f.id || f.name + i}
                 data-testid="facility-card-item"
-                className={`group rounded-md border p-4 transition-all duration-200 ${
-                  i === 0
-                    ? "border-primary/60 bg-primary/5 shadow-xs"
-                    : "border-border/70 bg-secondary/40 hover:border-primary/50"
-                }`}
+                className="group rounded-xl border border-border/70 bg-card/60 hover:bg-card hover:border-primary/50 p-4 transition-all duration-200 shadow-2xs"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                      {i === 0 && (
-                        <span className="rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[10px] font-bold text-primary">
-                          ⭐ Recommended Facility
-                        </span>
-                      )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                      <span className="rounded-md bg-secondary/80 border border-border/70 px-2 py-0.5 text-[10.5px] font-bold text-foreground/90">
+                        {f.facility_tag}
+                      </span>
                       {f.is_exact_pincode && (
-                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                        <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
                           🎯 Pincode Match ({f.pincode})
                         </span>
                       )}
-                      {f.facility_category_label && (
-                        <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {f.facility_category_label}
-                        </span>
-                      )}
                     </div>
-                    <p className="flex items-center gap-2 text-sm font-semibold">
-                      <Building2 className="h-4 w-4 shrink-0 text-primary/80" />
+                    <p className="flex items-center gap-2 text-sm font-bold text-foreground">
+                      <Building2 className="h-4 w-4 shrink-0 text-primary" />
                       <span className="truncate">{f.name}</span>
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{f.address}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
+                      <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
                         {f.facility_type}
                       </span>
                       <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
                         {f.district}
                       </span>
                       {f.pincode && (
-                        <span className="mono text-muted-foreground/80">{f.pincode}</span>
+                        <span className="mono text-muted-foreground/80 font-bold">{f.pincode}</span>
+                      )}
+                      {f.phone && (
+                        <span className="mono text-primary font-bold">{f.phone}</span>
                       )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="mono text-lg font-semibold text-primary">{f.distance_km} km</p>
+                  <div className="text-right shrink-0">
+                    <p className="mono text-lg font-bold text-primary">{f.distance_km} km</p>
                     <div className="mt-2 flex justify-end gap-1.5">
                       <button
                         data-testid="facility-send-sms-button"
                         onClick={() => dispatchSms(f)}
                         title="Copy address to SMS the caller"
-                        className="rounded border border-border/70 p-1.5 text-muted-foreground transition-colors duration-200 hover:border-primary/60 hover:text-primary"
+                        className="rounded-lg border border-border/80 bg-background p-2 text-muted-foreground transition-colors hover:border-primary hover:text-primary cursor-pointer shadow-2xs"
                       >
                         <MessageSquare className="h-3.5 w-3.5" />
                       </button>
@@ -729,7 +963,7 @@ export const TriageResultPanel = ({ result, loading }) => {
                         rel="noreferrer"
                         data-testid="facility-maps-link"
                         title="Open in Google Maps"
-                        className="rounded border border-border/70 p-1.5 text-muted-foreground transition-colors duration-200 hover:border-primary/60 hover:text-primary"
+                        className="rounded-lg border border-border/80 bg-background p-2 text-muted-foreground transition-colors hover:border-primary hover:text-primary cursor-pointer shadow-2xs"
                       >
                         <Navigation className="h-3.5 w-3.5" />
                       </a>
@@ -740,7 +974,7 @@ export const TriageResultPanel = ({ result, loading }) => {
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-muted-foreground">No facilities found near this location.</p>
+          <p className="mt-4 text-sm text-muted-foreground">No open facilities found near this location.</p>
         )}
       </div>
     </div>

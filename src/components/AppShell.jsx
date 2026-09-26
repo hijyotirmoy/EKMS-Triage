@@ -199,7 +199,7 @@ export function AppShell({ activePage = "home", children }) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden">
       <Toaster
         position="top-right"
         theme="light"
@@ -245,7 +245,7 @@ export function AppShell({ activePage = "home", children }) {
             <Link
               href="/cases"
               data-testid="header-case-count"
-              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+              className={`hidden sm:flex mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "cases"
                   ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
                   : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
@@ -259,7 +259,7 @@ export function AppShell({ activePage = "home", children }) {
             {/* Facilities count link -> opens /facilities */}
             <Link
               href="/facilities"
-              className={`mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+              className={`hidden sm:flex mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "facilities"
                   ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
                   : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
@@ -271,7 +271,7 @@ export function AppShell({ activePage = "home", children }) {
             </Link>
 
             {/* Logged in Agent Badge */}
-            <div className="flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
+            <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
               <span>{currentAgent.agentId}</span>
             </div>
@@ -338,7 +338,31 @@ export function AppShell({ activePage = "home", children }) {
               </button>
             </div>
 
-            <div className="mt-5 flex-1 space-y-1.5">
+            {/* Mobile quick status pills */}
+            <div className="mt-3 flex items-center justify-between gap-2 border-b border-border/60 pb-3 sm:hidden">
+              <div className="flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                <span>{currentAgent.agentId}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                <Link
+                  href="/cases"
+                  onClick={() => setMenuOpen(false)}
+                  className="mono rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
+                >
+                  Cases: <span className="text-emerald-800">{stats?.total ?? "—"}</span>
+                </Link>
+                <Link
+                  href="/facilities"
+                  onClick={() => setMenuOpen(false)}
+                  className="mono rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
+                >
+                  Fac: <span className="text-emerald-800">{meta?.facility_count ?? "—"}</span>
+                </Link>
+              </div>
+            </div>
+
+            <div className="mt-4 flex-1 space-y-1.5">
               {NAV_ITEMS.map(({ id, href, label, icon: Icon }) => {
                 const isActive = activePage === id;
                 return (
@@ -388,7 +412,7 @@ export function AppShell({ activePage = "home", children }) {
               </div>
             </div>
 
-            <div className="border-t border-border pt-4 text-xs text-muted-foreground space-y-2">
+            <div className="border-t border-border pt-3.5 text-xs text-muted-foreground space-y-2.5">
               <div className="flex items-center justify-between">
                 <div>
                   Logged in as:{" "}
@@ -408,6 +432,32 @@ export function AppShell({ activePage = "home", children }) {
                   Log Out
                 </button>
               </div>
+
+              <div className="border-t border-border/60 pt-2.5 space-y-1 text-[11px] leading-relaxed">
+                <div className="flex items-center gap-1 font-medium text-muted-foreground">
+                  <span>©</span>
+                  <a
+                    href="https://ekms.in/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-red-600 hover:underline"
+                  >
+                    EKMS
+                  </a>
+                  <span className="font-semibold text-foreground">Triage</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Designed and Developed by{" "}
+                  <a
+                    href="https://jyotirmoychoudhury.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-primary hover:underline transition-colors"
+                  >
+                    Jyotirmoy Choudhury
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -420,7 +470,7 @@ export function AppShell({ activePage = "home", children }) {
         onCallUpdate={setCallSession}
       />
 
-      <main className="mx-auto max-w-[1500px] px-3.5 py-3 pb-12 sm:px-6 sm:py-4 sm:pb-16">
+      <main className="mx-auto w-full max-w-[1500px] px-2.5 sm:px-6 py-2.5 sm:py-4 pb-12 sm:pb-16 overflow-x-hidden">
         {typeof children === "function"
           ? children({
               meta,

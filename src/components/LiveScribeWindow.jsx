@@ -87,7 +87,7 @@ export const LiveScribeWindow = ({
   };
 
   return (
-    <div className="panel flex flex-col h-[600px] overflow-hidden border border-border shadow-md">
+    <div className="panel flex flex-col h-[600px] overflow-hidden border border-border shadow-md w-full max-w-full min-w-0">
       {/* 1. Header Bar */}
       <div className="border-b border-border bg-secondary/30 px-3.5 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -226,9 +226,9 @@ export const LiveScribeWindow = ({
           </div>
         ) : isCallActive ? (
           <div className="mt-2 flex items-center justify-between rounded-md bg-emerald-50 border border-emerald-400 px-2.5 py-1 text-[10px] text-emerald-950 font-bold shadow-2xs">
-            <div className="flex items-center gap-1.5">
-              <Headphones className="h-3 w-3 text-emerald-700 animate-pulse" />
-              <span>Two-way live call · Headset mic = Agent (You), Remote stream = Caller (IP)</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Headphones className="h-3 w-3 text-emerald-700 animate-pulse shrink-0" />
+              <span className="truncate sm:whitespace-normal">Two-way live call · Headset mic = Agent (You), Remote stream = Caller (IP)</span>
             </div>
             <div className="flex items-center gap-0.5">
               <span className="h-1.5 w-0.5 bg-emerald-600 animate-pulse" />

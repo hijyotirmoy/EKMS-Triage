@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { groqWhisperTranscription } from "@/lib/groqPool";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -136,46 +137,26 @@ export async function POST(request) {
       }
     }
 
-    // 2. High-speed Fallback: Groq Whisper Large V3 (model: whisper-large-v3)
-    if (groqKey) {
-      try {
-        const groqFormData = new FormData();
-        groqFormData.append("file", audioFile, "audio.webm");
-        groqFormData.append("model", "whisper-large-v3");
-        groqFormData.append("prompt", medicalVocabularyPrompt);
-        if (isoLang && ["en", "hi"].includes(isoLang)) {
-          groqFormData.append("language", isoLang);
-        }
+    // 2. High-speed Fallback: Groq Whisper Large V3 with Multi-Key Pool Rotation
+    try {
+      const groqResult = await groqWhisperTranscription({
+        audioFile,
+        model: "whisper-large-v3",
+        prompt: medicalVocabularyPrompt,
+        language: isoLang && ["en", "hi"].includes(isoLang) ? isoLang : null,
+        timeoutMs: 8000,
+      });
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${groqKey}`,
-          },
-          body: groqFormData,
-          signal: controller.signal,
+      if (groqResult?.text) {
+        const cleanText = scrubWhisperHallucinations(groqResult.text.trim());
+        return NextResponse.json({
+          text: cleanText,
+          source: "groq-whisper",
+          engine: "whisper-large-v3",
         });
-
-        clearTimeout(timeoutId);
-
-        if (groqRes.ok) {
-          const result = await groqRes.json();
-          const cleanText = scrubWhisperHallucinations((result.text || "").trim());
-          return NextResponse.json({
-            text: cleanText,
-            source: "groq-whisper",
-            engine: "whisper-large-v3",
-          });
-        } else {
-          const errText = await groqRes.text();
-          console.warn("Groq Whisper error:", groqRes.status, errText);
-        }
-      } catch (err) {
-        console.warn("Groq Whisper fallback exception:", err.message);
       }
+    } catch (err) {
+      console.warn("Groq Whisper multi-key pool fallback exception:", err.message);
     }
 
     return NextResponse.json(

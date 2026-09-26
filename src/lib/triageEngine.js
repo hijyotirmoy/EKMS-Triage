@@ -1,5 +1,6 @@
 // Clinical Triage Evaluation Engine
 // Supports Anthropic Claude, Google Gemini, or intelligent rule-based clinical triage
+import { groqChatCompletion } from "./groqPool.js";
 
 /**
  * Evaluates whether ESIS Dispensaries are currently open in Assam (IST UTC+5:30).
@@ -68,6 +69,15 @@ export function getHospitalOpdOperatingStatus(date = new Date()) {
  * Retains only symptoms and red flags actually reported by the IP.
  * Never fabricates synthetic self-harm, bleeding, or suicidal narratives if caller denies or didn't report them.
  */
+/**
+ * Summarizes clinical red flags strictly based on what the IP explicitly reported.
+ * 
+ * Rules:
+ * - Only symptoms explicitly reported by the caller and NOT denied are valid red flags.
+ * - If the caller denies a symptom (e.g. "nehi", "no", "nahi", "no fever", "safe"), it must NEVER be listed as a red flag.
+ * - Never add synthetic red flags that were not told by the IP or that are unrelated.
+ * - Never match helpline numbers (e.g. 104, 108, 1097, 14416) as medical temperatures or symptoms!
+ */
 export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSafe = false) {
   const points = [];
   const seen = new Set();
@@ -83,51 +93,193 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   };
 
   const text = (textContext || "").toLowerCase();
-  const isSafe = callerSaidSafe || /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(text);
 
-  // 1. Process caller/clinician-reported raw flags directly (DO NOT fabricate synthetic ones)
+  // Explicit caller negations
+  const deniesFever =
+    /\b(no fever|nehi|nahi|not having fever|without fever|fever nahi|bukhar nahi|no chills|mild discomfort|just not feeling good)\b/i.test(text) &&
+    !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever)\b/i.test(text);
+  const isSafe =
+    callerSaidSafe ||
+    /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(text);
+  const deniesChestPain = /\b(no chest pain|chhati me dard nahi|no pain in chest)\b/i.test(text);
+  const deniesBleeding = /\b(no bleed|khoon nahi|no cut)\b/i.test(text);
+
+  // Check if a raw flag is genuinely supported by what the IP actually said
+  const isFlagSupportedByCaller = (flagStr) => {
+    if (!flagStr || typeof flagStr !== "string") return false;
+    const fLower = flagStr.toLowerCase();
+
+    // Fever checks
+    if (
+      fLower.includes("fever") ||
+      fLower.includes("bukhar") ||
+      fLower.includes("pyrexia") ||
+      fLower.includes("chills")
+    ) {
+      if (deniesFever) return false;
+      // Must have actual fever words in text (excluding helpline 104!)
+      return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|10[2-5]\s*(?:°|f|deg))\b/i.test(
+        text
+      );
+    }
+
+    // Suicidal / Self-harm checks
+    if (
+      fLower.includes("self-harm") ||
+      fLower.includes("suicid") ||
+      fLower.includes("ending life") ||
+      fLower.includes("kill")
+    ) {
+      if (isSafe) return false;
+      return /\b(wanna die|want to die|kill myself|mar jaunga|jaan de dunga|suicid)\b/i.test(text);
+    }
+
+    // Chest pain / Cardiac checks
+    if (
+      fLower.includes("chest") ||
+      fLower.includes("cardiac") ||
+      fLower.includes("coronary") ||
+      fLower.includes("angina") ||
+      fLower.includes("myocardial")
+    ) {
+      if (deniesChestPain) return false;
+      return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(text);
+    }
+
+    // Bleeding / Cut checks
+    if (
+      fLower.includes("bleed") ||
+      fLower.includes("hemorrhage") ||
+      fLower.includes("wound") ||
+      fLower.includes("laceration")
+    ) {
+      if (deniesBleeding) return false;
+      return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(text);
+    }
+
+    // Breathlessness checks
+    if (
+      fLower.includes("breath") ||
+      fLower.includes("respiratory") ||
+      fLower.includes("dyspnea") ||
+      fLower.includes("suffocat")
+    ) {
+      return /\b(breath|saans|gasp|suffocat|wheez|asthma)\b/i.test(text);
+    }
+
+    // Unconscious / Faint checks
+    if (
+      fLower.includes("unconscious") ||
+      fLower.includes("faint") ||
+      fLower.includes("syncope") ||
+      fLower.includes("blackout") ||
+      fLower.includes("collapse")
+    ) {
+      return /\b(unconscious|behosh|fainted|blackout|collapsed)\b/i.test(text);
+    }
+
+    // Seizure / Convulsion
+    if (
+      fLower.includes("seizure") ||
+      fLower.includes("convulsion") ||
+      fLower.includes("fit") ||
+      fLower.includes("mirgi")
+    ) {
+      return /\b(seizure|convulsion|fit|daura|mirgi)\b/i.test(text);
+    }
+
+    // Vomiting / Dehydration
+    if (fLower.includes("vomit") || fLower.includes("dehydrat")) {
+      // If caller explicitly can drink fluids, it's not acute severe dehydration
+      if (fLower.includes("dehydrat") && /\b(can drink|drinking fluid|paani pi)\b/i.test(text)) {
+        return false;
+      }
+      return /\b(vomit|ulti|blood in vomit|hematemesis|cannot keep fluid|dehydrat)\b/i.test(text);
+    }
+
+    // General severe condition
+    if (fLower.includes("accident") || fLower.includes("trauma") || fLower.includes("fall")) {
+      return /\b(accident|hit|fall|chot|gir gaya)\b/i.test(text);
+    }
+
+    if (fLower.includes("snake") || fLower.includes("poison") || fLower.includes("bite")) {
+      return /\b(snake|saap|bite|poison|zeher)\b/i.test(text);
+    }
+
+    // If flag doesn't match any known pattern, only keep if keywords appear in caller's text
+    const words = fLower
+      .split(/\s+/)
+      .filter(
+        (w) =>
+          w.length > 4 &&
+          !["reported", "caller", "patient", "clinical", "urgent", "immediate"].includes(w)
+      );
+    return words.some((w) => text.includes(w));
+  };
+
+  // 1. Process caller/clinician-reported raw flags directly, filtering out unverified / hallucinated flags
   if (Array.isArray(rawFlags)) {
     for (const f of rawFlags) {
       if (!f || typeof f !== "string") continue;
-      const lower = f.toLowerCase();
-      // If caller stated they are safe, strictly filter out false self-harm / suicidal flags
-      if (isSafe && (lower.includes("self-harm") || lower.includes("suicid") || lower.includes("laceration") || lower.includes("bleeding") || lower.includes("trauma casualty"))) {
-        continue;
+      if (isFlagSupportedByCaller(f)) {
+        addPoint(f);
+        if (points.length >= 4) break;
       }
-      // Never include synthetic uncontrolled bleeding flags unless actual trauma/wound was reported by caller
-      if (lower.includes("uncontrolled bleeding") && !/\b(bleed|blood|khoon|cut\s*wrist)\b/i.test(text)) {
-        continue;
-      }
-      addPoint(f);
-      if (points.length >= 4) break;
     }
   }
 
-  // 2. If room for flags, check ONLY what was reported by the IP in text
+  // 2. Synthesize ONLY what was actually reported by the IP in text
   if (points.length < 4) {
     // Cardiac / Severe respiratory (Only if caller explicitly mentioned)
-    if (/\b(crushing chest|dil ka dard|chhati me dard|chest pain|severe breathlessness|saans lene me bahut takleef)\b/i.test(text)) {
-      addPoint("Severe chest pain / breathing difficulty reported by IP");
+    if (
+      !deniesChestPain &&
+      /\b(crushing chest|dil ka dard|chhati me dard|severe chest pain|left arm pain|pressure on chest)\b/i.test(
+        text
+      )
+    ) {
+      addPoint("Severe chest pain / pressure reported by IP");
     }
-    // High Fever
-    if (/\b(high fever|tez bukhar|103|104|chills and rigors)\b/i.test(text)) {
+    if (
+      /\b(severe breathlessness|saans lene me bahut takleef|gasping for air|suffocating)\b/i.test(
+        text
+      )
+    ) {
+      addPoint("Severe shortness of breath reported by IP");
+    }
+    // High Fever (NEVER match 104 helpline!)
+    if (
+      !deniesFever &&
+      /\b(high fever|tez bukhar|chills and rigors|shivering with fever|10[2-5]\s*(?:°|f|deg))\b/i.test(
+        text
+      )
+    ) {
       addPoint("High fever with chills reported by IP");
     }
     // Loss of consciousness / collapse
-    if (/\b(unconscious|behosh|fainted|blackout)\b/i.test(text)) {
+    if (/\b(unconscious|behosh|fainted|blackout|collapsed)\b/i.test(text)) {
       addPoint("Loss of consciousness / fainting episode reported by IP");
     }
     // Heavy bleeding / open wound
-    if (/\b(heavy bleed|khoon beh raha|fracture|deep wound)\b/i.test(text)) {
+    if (
+      !deniesBleeding &&
+      /\b(heavy bleed|khoon beh raha|fracture|deep wound|arterial bleed)\b/i.test(text)
+    ) {
       addPoint("Traumatic injury / bleeding reported by IP");
     }
     // Suicidal intent (ONLY if caller explicitly stated and is NOT safe)
-    if (!isSafe && /\b(wanna die|want to die|kill myself|mar jaunga|jaan dena chahta)\b/i.test(text)) {
+    if (
+      !isSafe &&
+      /\b(wanna die|want to die|kill myself|mar jaunga|jaan dena chahta)\b/i.test(text)
+    ) {
       addPoint("Explicit thoughts of ending life reported by IP");
     }
-    // Emotional distress (Safe)
-    if (points.length === 0 && /\b(depress|udaas|rona|mental health|anxiety|ghabrahat|emotional distress|panic|crying)\b/i.test(text)) {
-      addPoint("Emotional distress & anxiety reported by IP");
+    // Convulsions / seizures
+    if (/\b(seizure|convulsions|fits|mirgi ka daura)\b/i.test(text)) {
+      addPoint("Seizure / convulsions reported by IP");
+    }
+    // Blood in vomit
+    if (/\b(blood in vomit|khoon ki ulti|hematemesis)\b/i.test(text)) {
+      addPoint("Blood in vomit (hematemesis) reported by IP");
     }
   }
 
@@ -182,11 +334,11 @@ export async function evaluateTriage(intake) {
   // Check ESIS Dispensary operating hours (Mon–Fri, 10:00 AM – 3:00 PM; Closed Sat & Sun)
   const dispensaryStatus = getDispensaryOperatingStatus();
 
-  const isPsych = Boolean(
+  const isPsych = !isNacoHIV && Boolean(
     tState?.isPsychiatric ||
     ekmsCtx?.isPsychiatric ||
     (tState?.referralDestination && tState.referralDestination.toLowerCase().includes("psych")) ||
-    (tState?.referralDestination && tState.referralDestination.toLowerCase().includes("manas")) ||
+    (tState?.referralDestination && (tState.referralDestination.toLowerCase().includes("manas") || tState.referralDestination.includes("14416"))) ||
     /\b(suicid|mar ja|jaan de dunga|depress|udaas|hopeless|anxiety|ghabrahat|die\b|kill myself|self-harm|crying|cut.*wrist|end life|mental health|stress|grief|sadness)\b/i.test(allText)
   );
 
@@ -317,11 +469,20 @@ export async function evaluateTriage(intake) {
       isDualProtocol = false;
       call108 = false;
     } else {
-      // 7. ROUTINE DURING OPEN HOURS (10 AM - 3 PM):
-      primaryReferral = "ESIS Dispensary";
-      primaryReason = "Routine outpatient evaluation and free medicine dispensing (Open Mon–Fri, 10:00 AM – 3:00 PM).";
-      secondaryReferral = "e-Sanjeevani";
-      secondaryReason = "Government online telemedicine portal for tele-consultation from home.";
+      // 7. ROUTINE / MILD DURING OPEN HOURS:
+      const needsDoctorAdvice = /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(allText);
+
+      if (needsDoctorAdvice || effectiveSeverity <= 4 || tState?.severity === "Mild") {
+        primaryReferral = "104 Medical Team";
+        primaryReason = "Condition is not serious / mild; caller requires medical advice or tele-consultation. Transfer call to 104 Medical Team for 24x7 doctor consultation over the phone.";
+        secondaryReferral = "ESIS Dispensary";
+        secondaryReason = "Visit nearest registered ESIS Dispensary for physical doctor checkup and free medicine dispensing during OPD hours.";
+      } else {
+        primaryReferral = "ESIS Dispensary";
+        primaryReason = "Routine outpatient evaluation and free medicine dispensing (Open Mon–Fri, 10:00 AM – 3:00 PM).";
+        secondaryReferral = "104 Medical Team";
+        secondaryReason = "104 Health Helpline tele-doctor consultation for medical advice over the phone.";
+      }
       isDualProtocol = false;
       call108 = false;
     }
@@ -329,7 +490,10 @@ export async function evaluateTriage(intake) {
     let summaryEn = "";
     let summaryHi = "";
 
-    if (isPsych && hasSelfHarmAction) {
+    if (isNacoHIV) {
+      summaryEn = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential counseling (1097), and ICTC testing referral indicated.";
+      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; गोपनीय परामर्श (1097) और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+    } else if (isPsych && hasSelfHarmAction) {
       summaryEn = `Caller in acute emotional crisis with ${selfHarmActionEn}, presenting a life safety risk requiring emergency 108 ambulance dispatch and psychiatric intervention.`;
       summaryHi = `कॉलर गंभीर मानसिक संकट में है और उसने ${selfHarmActionHi} की है; तुरंत 108 एम्बुलेंस और मनोचिकित्सकीय सहायता आवश्यक है।`;
     } else if (isPsych && callerHasSuicideWords) {
@@ -338,9 +502,10 @@ export async function evaluateTriage(intake) {
     } else if (isPsych) {
       summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via Tele-MANAS (14416).";
       summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; टेली-मानस (14416) द्वारा परामर्श आवश्यक है।";
-    } else if (isNacoHIV) {
-      summaryEn = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential counseling (1097), and ICTC testing referral indicated.";
-      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; गोपनीय परामर्श (1097) और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+    } else if (primaryReferral === "104 Medical Team" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
+      const cond = tState?.condition || tState?.suspectedCondition || "mild symptoms";
+      summaryEn = `Caller inquires regarding ${cond}; condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.`;
+      summaryHi = `कॉलर को ${cond} संबंधी चिकित्सकीय सलाह की आवश्यकता है; स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श उपयुक्त है।`;
     } else {
       const cond = tState?.condition || tState?.suspectedCondition || "symptoms";
       summaryEn = `Caller reports ${cond} with reported severity ${severity}/10 (${duration}), requiring prompt medical evaluation.`;
@@ -539,63 +704,31 @@ ${JSON.stringify(intake, null, 2)}`,
     }
   }
 
-  // 3. Groq Cloud Multi-Key AI triage evaluation (Secondary/Fallback)
-  const groqKeys = [
-    process.env.GROQ_API_KEY,
-    process.env.GROQ_API_KEY_2,
-    process.env.GROQ_API_KEY_3,
-    process.env.GROQ_API_KEY_4,
-    process.env.GROQ_API_KEY_5,
-  ].filter(Boolean);
-  if (groqKeys.length > 0) {
-    const groqCandidateModels = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"];
-    for (const gKey of groqKeys) {
-      let keyQuotaHit = false;
-      for (const gModel of groqCandidateModels) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 7000);
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${gKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: gModel,
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    "You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.",
-                },
-                {
-                  role: "user",
-                  content: JSON.stringify(intake),
-                },
-              ],
-              response_format: { type: "json_object" },
-              max_tokens: 800,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-          if (res.ok) {
-            const data = await res.json();
-            const text = data.choices?.[0]?.message?.content;
-            if (text) {
-              return normalizeTriageDecision(JSON.parse(text), intake);
-            }
-          } else if (res.status === 429) {
-            keyQuotaHit = true;
-            break;
-          }
-        } catch (e) {
-          console.warn("[Triage Cascade] Groq triage evaluation fallback:", e.message);
-        }
-      }
-      if (keyQuotaHit) continue;
+  // 3. Groq Cloud Multi-Key AI triage evaluation (Secondary/Fallback across 21 keys)
+  try {
+    const groqResult = await groqChatCompletion({
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify(intake),
+        },
+      ],
+      candidateModels: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b"],
+      response_format: { type: "json_object" },
+      max_tokens: 800,
+      timeoutMs: 7000,
+    });
+
+    if (groqResult?.content) {
+      return normalizeTriageDecision(JSON.parse(groqResult.content), intake);
     }
+  } catch (groqErr) {
+    console.warn("[Triage Cascade] Groq multi-key pool fallback:", groqErr.message);
   }
 
   // 3. Deterministic Clinical Evaluation Engine (Fallback or offline)
@@ -806,6 +939,8 @@ function normalizeTriageDecision(triage, intake) {
 
   // 1. HIV / AIDS / Sexual Disease: NACO 1097 Helpline
   if (isNacoHIV) {
+    triage.is_psychiatric = false;
+    triage.call_108 = false;
     triage.referral_destination = "NACO 1097 Helpline";
     triage.referral_reason =
       "National AIDS Control Organisation (NACO) Helpline (Toll-Free 1097); 24x7 confidential counselling, STI guidance, and ART/ICTC testing center locator.";
@@ -815,10 +950,36 @@ function normalizeTriageDecision(triage, intake) {
     triage.recommended_facility_type = "NACO 1097 Helpline (HIV / AIDS / STI Toll-Free)";
     triage.recommended_action =
       "Transfer call to NACO National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counselling, STI support, and ICTC/ART testing center guidance.";
-    triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    if (!triage.primary_complaint) {
+    triage.call_referral_primary = "NACO 1097 Helpline";
+    triage.call_referral_secondary = "ESIC Hospital";
+    if (!triage.summary_en || triage.summary_en.includes("distress") || triage.summary_en.includes("psychological") || triage.summary_en.includes("Tele-MANAS")) {
+      triage.summary_en = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential counseling (1097), and ICTC testing referral indicated.";
+      triage.summary_hi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; गोपनीय परामर्श (1097) और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+    }
+    if (!triage.primary_complaint || triage.primary_complaint.includes("Distress") || triage.primary_complaint.includes("Mental")) {
       triage.primary_complaint = "HIV / AIDS / STI Health Consultation";
+    }
+    return triage;
+  }
+
+  // 1b. Non-serious case seeking doctor advice or general health advice -> 104 Medical Team
+  const isAdviceSeeking = /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(notes);
+  const isMild = (triage.urgency_level === "Routine" || triage.urgency_level === "Self-care" || (Number(triage.urgency_score) <= 4));
+
+  if ((isAdviceSeeking || isMild) && !isPsych && !isNacoHIV && !triage.call_108 && triage.urgency_level !== "Emergency") {
+    triage.is_psychiatric = false;
+    triage.call_108 = false;
+    triage.referral_destination = "104 Medical Team";
+    triage.referral_reason = "Condition is non-serious; caller requires medical advice or tele-consultation. Transfer call to 104 Medical Team for 24x7 doctor consultation over the phone.";
+    triage.secondary_referral_destination = "ESIS Dispensary";
+    triage.secondary_referral_reason = "Visit nearest registered ESIS Dispensary for physical doctor checkup and free medicine dispensing during OPD hours.";
+    triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
+    triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation and medical guidance.";
+    triage.call_referral_primary = "104 Medical Team";
+    triage.call_referral_secondary = "ESIS Dispensary";
+    if (!triage.summary_en || triage.summary_en.includes("distress") || triage.summary_en.includes("emergency")) {
+      triage.summary_en = "Condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.";
+      triage.summary_hi = "स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श व स्वास्थ्य सलाह उपयुक्त है।";
     }
     return triage;
   }
