@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EKMS Triage — System Architecture & Workflow Document</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #15803d;
+      --primary-dark: #166534;
+      --primary-light: #f0fdf4;
+      --blue: #2563eb;
+      --blue-light: #eff6ff;
+      --amber: #d97706;
+      --amber-light: #fffbeb;
+      --rose: #e11d48;
+      --rose-light: #fff1f2;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-600: #475569;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+      --font: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font);
+      color: var(--slate-800);
+      background-color: var(--slate-100);
+      line-height: 1.6;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1050px;
+      margin: 30px auto;
+      background: #ffffff;
+      padding: 50px 60px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+    }
+
+    /* Print Controls */
+    .top-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-bottom: 25px;
+    }
+
+    .btn-print {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(21, 128, 61, 0.25);
+      transition: all 0.2s ease;
+    }
+
+    .btn-print:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    /* Header */
+    .doc-header {
+      border-bottom: 2px solid var(--slate-200);
+      padding-bottom: 25px;
+      margin-bottom: 35px;
+    }
+
+    .doc-title {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--slate-900);
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    .doc-subtitle {
+      font-size: 15px;
+      color: var(--slate-600);
+      font-weight: 500;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-green { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .badge-blue { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+    .badge-amber { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .badge-rose { background: #ffe4e6; color: #9f1239; border: 1px solid #fecdd3; }
+    .badge-slate { background: #e2e8f0; color: #334155; }
+
+    /* Section Styles */
+    h2 {
+      font-size: 19px;
+      font-weight: 800;
+      color: var(--slate-900);
+      margin-top: 38px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-left: 4px solid var(--primary);
+      padding-left: 12px;
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-top: 22px;
+      margin-bottom: 10px;
+    }
+
+    p {
+      margin-bottom: 14px;
+      color: #334155;
+    }
+
+    /* Callouts */
+    .callout {
+      background: var(--blue-light);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+
+    .callout-amber {
+      background: var(--amber-light);
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+
+    .callout-title {
+      font-weight: 800;
+      color: var(--blue);
+      font-size: 13px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .callout-amber .callout-title {
+      color: var(--amber);
+    }
+
+    .callout p, .callout-amber p {
+      margin-bottom: 0;
+      font-size: 13.5px;
+      color: #1e3a8a;
+    }
+
+    .callout-amber p {
+      color: #78350f;
+    }
+
+    /* Diagram Containers */
+    .diagram-card {
+      background: #ffffff;
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 25px 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+
+    .diagram-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: var(--slate-600);
+      letter-spacing: 0.8px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Table Styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13px;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--slate-200);
+    }
+
+    th {
+      background: var(--slate-100);
+      color: var(--slate-900);
+      font-weight: 700;
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 2px solid var(--slate-200);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--slate-200);
+      vertical-align: top;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Step Cards Grid */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .step-card {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 10px;
+      padding: 18px;
+      position: relative;
+    }
+
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .step-title {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--slate-900);
+      margin-bottom: 6px;
+    }
+
+    .step-desc {
+      font-size: 12.5px;
+      color: var(--slate-600);
+      margin-bottom: 0;
+      line-height: 1.5;
+    }
+
+    /* Outcome Page Breakdown Components */
+    .outcome-mockup {
+      border: 1.5px solid #cbd5e1;
+      border-radius: 12px;
+      background: #ffffff;
+      padding: 22px;
+      margin: 20px 0;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+    }
+
+    .outcome-section-item {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--slate-200);
+      align-items: start;
+    }
+
+    .outcome-section-item:last-child {
+      border-bottom: none;
+    }
+
+    .element-preview {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .element-explanation {
+      font-size: 13px;
+    }
+
+    .element-title {
+      font-weight: 800;
+      font-size: 13.5px;
+      color: var(--slate-900);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .reason-box {
+      margin-top: 6px;
+      padding: 8px 12px;
+      background: #f8fafc;
+      border-left: 3px solid var(--blue);
+      border-radius: 4px;
+      font-size: 12px;
+      color: #334155;
+    }
+
+    .reason-box strong {
+      color: #1e3a8a;
+    }
+
+    /* Footer */
+    .doc-footer {
+      margin-top: 50px;
+      border-top: 1px solid var(--slate-200);
+      padding-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      color: var(--slate-600);
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* Print Styles */
+    @media print {
+      body {
+        background: #ffffff;
+      }
+      .container {
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+        max-width: 100%;
+      }
+      .top-actions {
+        display: none;
+      }
+      h2 {
+        page-break-after: avoid;
+      }
+      .diagram-card, table, .step-card, .outcome-section-item {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Top Action Bar -->
+    <div class="top-actions">
+      <button class="btn-print" onclick="window.print()">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z"/></svg>
+        Save as PDF / Print Document
+      </button>
+    </div>
+
+    <!-- Document Header -->
+    <header class="doc-header">
+      <h1 class="doc-title">EKMS Triage — System Architecture & Workflow</h1>
+      <p class="doc-subtitle">A comprehensive operational and clinical guide on call evaluation, AI inference cascade, geospatial facility routing, and outcome generation.</p>
+    </header>
+
+    <!-- 1. Executive Overview -->
+    <section>
+      <h2>1. Executive Overview</h2>
+      <p>
+        <strong>EKMS Triage</strong> is an automated clinical navigation system built for helpline operators managing healthcare inquiries from insured workers and their dependents. It provides real-time algorithmic decision support, symptom probing, danger sign detection, and geospatial facility dispatch.
+      </p>
+      
+      <div class="callout">
+        <div class="callout-title">Core Operating Philosophy: Non-Doctor Assistance</div>
+        <p>
+          Call operators are non-physicians. The system strictly analyzes reported symptoms to establish clinical urgency and route the call to the right destination. It does not fabricate disease diagnoses (e.g., Kidney Stone, Appendicitis) and never prescribes medications unless explicitly stated by the caller.
+        </p>
+      </div>
+    </section>
+
+    <!-- 2. Tools and AI Used -->
+    <section>
+      <h2>2. Tools and AI Models Used</h2>
+      <p>
+        The platform combines a multi-provider AI cascade with deterministic clinical rules to guarantee high accuracy, sub-second responses, and 100% operational uptime. <strong>Zero secret credentials, private keys, or internal endpoints are exposed.</strong>
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Technology / Layer</th>
+            <th>Components Used</th>
+            <th>Operational Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Real-Time AI Inference Cascade</strong></td>
+            <td>Ultra-Fast High-Throughput LLMs (LLaMA 3.3 70B & Qwen 2.5 32B)</td>
+            <td>Sub-500ms conversational inference. Dynamically formulates single probing questions, extracts symptom duration/triggers, and delivers instant suggested reply chips.</td>
+          </tr>
+          <tr>
+            <td><strong>Clinical Cross-Validation AI</strong></td>
+            <td>Google Gemini Flash & Anthropic Claude</td>
+            <td>Secondary clinical safety screening, red-flag cross-verification, and high-complexity severity validation.</td>
+          </tr>
+          <tr>
+            <td><strong>Speech Recognition & Voice</strong></td>
+            <td>Browser Web Speech Recognition API</td>
+            <td>Instant bilingual voice transcription (English, Hindi, and Hinglish). Audio is converted directly in the operator's browser without external audio file storage.</td>
+          </tr>
+          <tr>
+            <td><strong>Full-Stack Application Core</strong></td>
+            <td>Next.js 14 App Router, React 18, Tailwind CSS</td>
+            <td>Server-side rendering, secure API routes, real-time reactive interface, and zero-layout-shift UI components.</td>
+          </tr>
+          <tr>
+            <td><strong>Geospatial Intelligence Engine</strong></td>
+            <td>Haversine Distance Algorithm, Pincode GIS Database</td>
+            <td>High-precision mathematical distance calculation between caller location and national ESIC/ESIS facilities, enforcing strict radius rules.</td>
+          </tr>
+          <tr>
+            <td><strong>State Persistence & Feedback Cache</strong></td>
+            <td>Cloud Firestore & In-Memory High-Speed Cache</td>
+            <td>Real-time synchronization of call sessions, case histories, and dynamic human feedback rules across all operator consoles.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 3. Visual Workflow Pipeline -->
+    <section>
+      <h2>3. End-to-End Caller-to-Dispatch Flow</h2>
+      <p>
+        The platform processes each call through a structured 5-stage pipeline, taking raw spoken caller input and translating it into a verified facility referral.
+      </p>
+
+      <!-- SVG Diagram 1: Full System Flow -->
+      <div class="diagram-card">
+        <div class="diagram-title">System Execution Architecture & Pipeline</div>
+        <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="gradGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#16a34a" />
+              <stop offset="100%" stop-color="#15803d" />
+            </linearGradient>
+            <linearGradient id="gradBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3b82f6" />
+              <stop offset="100%" stop-color="#1d4ed8" />
+            </linearGradient>
+            <linearGradient id="gradAmber" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#f59e0b" />
+              <stop offset="100%" stop-color="#d97706" />
+            </linearGradient>
+            <linearGradient id="gradPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#8b5cf6" />
+              <stop offset="100%" stop-color="#6d28d9" />
+            </linearGradient>
+            <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-opacity="0.08"/>
+            </filter>
+          </defs>
+
+          <!-- Stage 1 -->
+          <g transform="translate(30, 40)" filter="url(#shadow)">
+            <rect width="150" height="90" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+            <rect width="150" height="8" rx="4" fill="url(#gradGreen)"/>
+            <text x="75" y="38" font-family="var(--font)" font-weight="800" font-size="12" fill="#0f172a" text-anchor="middle">1. INTAKE</text>
+            <text x="75" y="58" font-family="var(--font)" font-size="10.5" fill="#475569" text-anchor="middle">Caller Speaks Symptoms</text>
+            <text x="75" y="74" font-family="var(--font)" font-size="9.5" fill="#64748b" text-anchor="middle">(Voice / Manual Typing)</text>
+          </g>
+
+          <!-- Arrow 1 to 2 -->
+          <path d="M 180 85 L 215 85" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4"/>
+          <polygon points="215,81 225,85 215,89" fill="#94a3b8"/>
+
+          <!-- Stage 2 -->
+          <g transform="translate(225, 40)" filter="url(#shadow)">
+            <rect width="190" height="90" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+            <rect width="190" height="8" rx="4" fill="url(#gradBlue)"/>
+            <text x="95" y="38" font-family="var(--font)" font-weight="800" font-size="12" fill="#0f172a" text-anchor="middle">2. PROBING ENGINE</text>
+            <text x="95" y="58" font-family="var(--font)" font-size="10.5" fill="#475569" text-anchor="middle">1 Question at a Time</text>
+            <text x="95" y="74" font-family="var(--font)" font-size="9.5" fill="#2563eb" font-weight="600" text-anchor="middle">Eng + Hinglish (~400ms)</text>
+          </g>
+
+          <!-- Arrow 2 to 3 -->
+          <path d="M 415 85 L 450 85" stroke="#94a3b8" stroke-width="2"/>
+          <polygon points="450,81 460,85 450,89" fill="#94a3b8"/>
+
+          <!-- Stage 3 -->
+          <g transform="translate(460, 40)" filter="url(#shadow)">
+            <rect width="190" height="90" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+            <rect width="190" height="8" rx="4" fill="url(#gradAmber)"/>
+            <text x="95" y="38" font-family="var(--font)" font-weight="800" font-size="12" fill="#0f172a" text-anchor="middle">3. SEVERITY EVALUATION</text>
+            <text x="95" y="58" font-family="var(--font)" font-size="10.5" fill="#475569" text-anchor="middle">Calculate Acuity (1-10)</text>
+            <text x="95" y="74" font-family="var(--font)" font-size="9.5" fill="#d97706" font-weight="600" text-anchor="middle">Emergency / Urgent / Routine</text>
+          </g>
+
+          <!-- Arrow 3 to 4 -->
+          <path d="M 650 85 L 685 85" stroke="#94a3b8" stroke-width="2"/>
+          <polygon points="685,81 695,85 685,89" fill="#94a3b8"/>
+
+          <!-- Stage 4 -->
+          <g transform="translate(695, 40)" filter="url(#shadow)">
+            <rect width="175" height="90" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+            <rect width="175" height="8" rx="4" fill="url(#gradPurple)"/>
+            <text x="87" y="38" font-family="var(--font)" font-weight="800" font-size="12" fill="#0f172a" text-anchor="middle">4. 15 KM RADIUS FILTER</text>
+            <text x="87" y="58" font-family="var(--font)" font-size="10.5" fill="#475569" text-anchor="middle">Pincode Distance Matrix</text>
+            <text x="87" y="74" font-family="var(--font)" font-size="9.5" fill="#7c3aed" font-weight="600" text-anchor="middle">ESIC vs Tie-Up Priority</text>
+          </g>
+
+          <!-- Downward Arrow from Stage 4 to Decision -->
+          <path d="M 782 130 L 782 195 L 490 195" stroke="#94a3b8" stroke-width="2" fill="none"/>
+          <polygon points="490,191 480,195 490,199" fill="#94a3b8"/>
+
+          <!-- Step 5 Box: Final Dispatch Outcome -->
+          <g transform="translate(180, 160)" filter="url(#shadow)">
+            <rect width="300" height="75" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+            <text x="150" y="30" font-family="var(--font)" font-weight="800" font-size="13" fill="#166534" text-anchor="middle">5. RECOMMENDED DISPATCH OUTCOME</text>
+            <text x="150" y="50" font-family="var(--font)" font-size="11" fill="#14532d" text-anchor="middle">Primary Facility 01 + Secondary Option 02</text>
+            <text x="150" y="65" font-family="var(--font)" font-size="9.5" fill="#15803d" font-weight="600" text-anchor="middle">Action Steps Checklist & Directions</text>
+          </g>
+
+          <!-- Arrow from Dispatch to Feedback Loop -->
+          <path d="M 330 235 L 330 290" stroke="#94a3b8" stroke-width="2" fill="none"/>
+          <polygon points="326,290 330,300 334,290" fill="#94a3b8"/>
+
+          <!-- Feedback & Learning Layer -->
+          <g transform="translate(80, 300)" filter="url(#shadow)">
+            <rect width="500" height="135" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+            <text x="250" y="24" font-family="var(--font)" font-weight="800" font-size="12" fill="#1e40af" text-anchor="middle">HUMAN-IN-THE-LOOP FEEDBACK & UNLEARNING ENGINE</text>
+            <text x="250" y="39" font-family="var(--font)" font-weight="700" font-size="9.5" fill="#b45309" text-anchor="middle">[Note: Feature Under Active Development / Continuous Improvement]</text>
+            
+            <rect x="25" y="48" width="210" height="62" rx="8" fill="#ffffff" stroke="#bfdbfe"/>
+            <text x="130" y="70" font-family="var(--font)" font-weight="700" font-size="11" fill="#1e3a8a" text-anchor="middle">👍 Accurate Outcome</text>
+            <text x="130" y="86" font-family="var(--font)" font-size="9.5" fill="#475569" text-anchor="middle">Reinforces clinical decision pattern</text>
+            <text x="130" y="99" font-family="var(--font)" font-size="9" fill="#16a34a" font-weight="600" text-anchor="middle">1-Click instant validation</text>
+
+            <rect x="265" y="48" width="210" height="62" rx="8" fill="#ffffff" stroke="#bfdbfe"/>
+            <text x="370" y="70" font-family="var(--font)" font-weight="700" font-size="11" fill="#b45309" text-anchor="middle">👎 Needs Correction</text>
+            <text x="370" y="86" font-family="var(--font)" font-size="9.5" fill="#475569" text-anchor="middle">Agent inputs corrected urgency & reason</text>
+            <text x="370" y="99" font-family="var(--font)" font-size="9" fill="#2563eb" font-weight="600" text-anchor="middle">Instant in-memory prompt adaptation</text>
+
+            <text x="250" y="123" font-family="var(--font)" font-size="9" fill="#64748b" text-anchor="middle">Rules persist in Cloud Firestore with Delete/Unlearn capability</text>
+          </g>
+
+          <!-- Feedback connecting back to Probing & Severity -->
+          <path d="M 80 370 L 40 370 L 40 85 L 225 85" stroke="#2563eb" stroke-width="2" stroke-dasharray="5" fill="none"/>
+          <text x="48" y="240" font-family="var(--font)" font-size="10" font-weight="700" fill="#2563eb" transform="rotate(-90 48,240)">Next Call Learned Rule Injection</text>
+        </svg>
+      </div>
+
+      <!-- Step Cards Breakdown -->
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-title">Intake & Transcription</div>
+          <p class="step-desc">Captures caller demographic details and translates mixed Hinglish/Hindi speech to normalized symptom text.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-title">Clinical Probing</div>
+          <p class="step-desc">Formulates single empathetic questions with realistic suggested answer chips to uncover duration and triggers.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div class="step-title">Severity & Red Flags</div>
+          <p class="step-desc">Classifies urgency into 4 levels (Emergency, Urgent, Routine, Self-care) strictly evaluating caller danger signs.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <div class="step-title">15 KM Radius Routing</div>
+          <p class="step-desc">Prioritizes direct ESIC Hospitals and Dispensaries within 15 km before considering private tie-up facilities.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Anatomy of the Triage Outcome Page (From Short Line to Facility & Reason Behind That) -->
+    <section>
+      <h2>4. Anatomy of the Triage Outcome Page (What is Displayed & Why)</h2>
+      <p>
+        When the operator completes caller probing and clicks <strong>"Generate Triage Outcome"</strong>, the application presents a structured, auditable clinical result card. Below is the exact visual sequence from the top summary line to the recommended facility, along with the operational rationale for each element.
+      </p>
+
+      <div class="outcome-mockup">
+        
+        <!-- Element 1: Status Badge & Short Summary Line -->
+        <div class="outcome-section-item">
+          <div class="element-preview">
+            <span class="badge badge-amber" style="margin-bottom: 6px;">Urgent Priority (Acuity 6/10)</span>
+            <div style="font-weight: 700; font-size: 13px; color: #0f172a;">
+              Urgent medical evaluation recommended within 2 to 4 hours.
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Primary Summary Headline
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>1. Severity Badge & One-Line Summary Headline</span>
+            </div>
+            <p>
+              Displays the color-coded triage acuity level (<strong>RED: Emergency</strong>, <strong>AMBER: Urgent</strong>, <strong>YELLOW: Routine</strong>, <strong>GREEN: Self-Care</strong>) alongside a clear, concise headline in plain language.
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Helpline operators need instant 1-second situational awareness. During a call, the operator cannot read paragraphs of clinical notes; the top banner immediately tells them whether an ambulance is needed or if outpatient clinic referral is sufficient.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 2: Action Urgency & Response Timeframe -->
+        <div class="outcome-section-item">
+          <div class="element-preview">
+            <div style="font-weight: 700; font-size: 12.5px; color: #d97706;">
+              Action Timeframe:
+            </div>
+            <div style="font-weight: 800; font-size: 14px; color: #92400e;">
+              Visit Hospital Casualty / OPD within 2–4 Hours
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>2. Action Directive & Time-to-Treatment Target</span>
+            </div>
+            <p>
+              Provides a concrete operational directive (e.g., <em>"Call 108 Emergency Ambulance Immediately"</em>, <em>"Seek Casualty / OPD within 2 to 4 Hours"</em>, or <em>"Schedule Dispensary Visit in 24 to 48 Hours"</em>).
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Eliminates subjective hesitation or delays by translating clinical scores into an unambiguous, non-negotiable time window for the patient and operator.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 3: Red Flags Alert Box -->
+        <div class="outcome-section-item">
+          <div class="element-preview" style="background: #fff1f2; border-color: #fecdd3;">
+            <div style="font-weight: 800; font-size: 11px; color: #e11d48; text-transform: uppercase; margin-bottom: 4px;">
+              ⚠️ Danger Signs Detected:
+            </div>
+            <ul style="font-size: 11px; color: #9f1239; margin-left: 16px; line-height: 1.5;">
+              <li>Severe progressive pain</li>
+              <li>High fever with chills</li>
+              <li>Inability to keep liquids down</li>
+            </ul>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>3. Red Flags & Danger Signs Box</span>
+            </div>
+            <p>
+              An alert box highlighting any critical symptoms detected during call probing (e.g., radiating chest pain, breathing difficulty, sudden confusion, high fever with altered vitals).
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Ensures life-threatening danger signs are never missed, gives clinical justification for high-urgency routing, and protects patient safety in medico-legal audits.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 4: Caller Primary Complaint / Symptom Presentation -->
+        <div class="outcome-section-item">
+          <div class="element-preview">
+            <div style="font-size: 11px; color: #64748b; font-weight: 600;">Symptom Profile:</div>
+            <div style="font-weight: 800; font-size: 13.5px; color: #0f172a;">Abdominal Pain</div>
+            <div style="font-size: 11px; color: #475569; margin-top: 3px;">
+              Duration: 2 days &bull; Moderate to severe
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>4. Caller Primary Condition / Symptom Presentation</span>
+            </div>
+            <p>
+              Reports the symptom presentation strictly using descriptive clinical terminology grounded in what the caller actually reported (e.g., <em>"Abdominal Pain"</em> or <em>"Persistent Cough with Fever"</em>).
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This (Non-Doctor Protocol):</strong> Tele-triage operators are clinical navigators, not diagnosing physicians. Mentioning diseases like <em>"Kidney Stone"</em> or <em>"Appendicitis"</em> before lab tests creates false alarms, legal liability, and misguides hospital intake.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 5: Recommended Healthcare Facility -->
+        <div class="outcome-section-item">
+          <div class="element-preview" style="background: #f0fdf4; border-color: #86efac;">
+            <span class="badge badge-green" style="margin-bottom: 5px;">Direct Government Facility</span>
+            <div style="font-weight: 800; font-size: 13px; color: #166534;">ESIC Model Hospital</div>
+            <div style="font-size: 11.5px; color: #15803d; font-weight: 700; margin-top: 2px;">
+              📍 Distance: 7.4 km (Within 15 km Radius)
+            </div>
+            <div style="font-size: 10.5px; color: #475569; margin-top: 4px;">
+              Beltola, Guwahati &bull; 24x7 Emergency Casualty
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>5. Recommended Health Facility (Primary & Secondary Referral)</span>
+            </div>
+            <p>
+              Details the exact destination healthcare center with its designation (<strong>ESIC Hospital Casualty</strong>, <strong>ESIS Dispensary</strong>, or <strong>Empanelled Tie-Up Hospital</strong>), precise distance in kilometers, operating hours, and full address.
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This (15 KM Rule):</strong> Direct government ESIC/ESIS centers are prioritized whenever located within 15 km. Private empanelled tie-up hospitals are only unlocked when direct government centers are farther than 15 km, optimizing resource utilization and preventing unnecessary out-of-pocket costs.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 6: Clinical Rationale & Dispatch Reason -->
+        <div class="outcome-section-item">
+          <div class="element-preview">
+            <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 3px;">
+              Dispatch Rationale:
+            </div>
+            <div style="font-size: 11px; color: #334155; line-height: 1.45;">
+              Evaluated as Urgent based on symptom intensity and duration. ESIC Model Hospital (7.4 km) is within the 15 km radius and provides full casualty coverage.
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>6. Clinical Reasoning & Dispatch Rationale</span>
+            </div>
+            <p>
+              A transparent breakdown explaining why this acuity tier was assigned, why this specific facility was chosen over others, and what transport mode is suitable (Ambulance vs Private Vehicle).
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Equips the helpline operator with complete clinical context and empathetic talking points to clearly explain the care plan to an anxious caller or family member.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 7: Supportive First-Aid Instructions -->
+        <div class="outcome-section-item">
+          <div class="element-preview">
+            <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-bottom: 3px;">
+              Immediate Patient Instructions:
+            </div>
+            <ul style="font-size: 11px; color: #475569; margin-left: 16px; line-height: 1.45;">
+              <li>Rest in a comfortable position</li>
+              <li>Keep hydrated with small sips</li>
+              <li>Avoid solid food until doctor review</li>
+            </ul>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>7. First-Aid & Supportive Care Instructions</span>
+            </div>
+            <p>
+              Actionable non-pharmacological supportive advice that the operator reads to the caller for stabilization while traveling or awaiting assistance.
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Keeps the caller calm and safe without dispensing unprescribed medications or contraindicated home remedies.
+            </div>
+          </div>
+        </div>
+
+        <!-- Element 8: AI Self-Learning & Feedback Controls -->
+        <div class="outcome-section-item">
+          <div class="element-preview" style="background: #eff6ff; border-color: #bfdbfe;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 11px; font-weight: 700; color: #1e40af;">AI Self-Learning</span>
+              <span class="badge badge-amber" style="font-size: 9px; padding: 2px 6px;">Under Development</span>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button style="flex: 1; padding: 5px; font-size: 10.5px; font-weight: 700; border-radius: 6px; border: 1px solid #86efac; background: #f0fdf4; color: #166534;">👍 Accurate</button>
+              <button style="flex: 1; padding: 5px; font-size: 10.5px; font-weight: 700; border-radius: 6px; border: 1px solid #fde68a; background: #fffbeb; color: #92400e;">👎 Correct</button>
+            </div>
+            <div style="font-size: 9.5px; color: #b45309; margin-top: 6px; font-weight: 600;">
+              * Note: Feedback feature under continuous improvement.
+            </div>
+          </div>
+          <div class="element-explanation">
+            <div class="element-title">
+              <span>8. Agent Feedback & AI Self-Learning Control</span>
+              <span class="badge badge-amber">Feature Under Development</span>
+            </div>
+            <p>
+              Allows the helpline agent to confirm the outcome or teach the AI the correct urgency/facility in 1 click if they notice an anomaly.
+            </p>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Closes the human-in-the-loop adaptation cycle. Corrections instantly adapt subsequent AI calls without touching code. The <em>Under Development</em> indicator informs agents that the learning engine is undergoing active supervised calibration.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 5. Geospatial 15 KM Radius Rule -->
+    <section>
+      <h2>5. Geospatial Routing Logic & The 15 KM Rule</h2>
+      <p>
+        The platform enforces an operational policy designed to prioritize direct government healthcare resources:
+      </p>
+
+      <!-- SVG Diagram 2: 15 KM Rule Decision Flow -->
+      <div class="diagram-card">
+        <div class="diagram-title">Geospatial Routing & Tie-Up Decision Tree</div>
+        <svg viewBox="0 0 850 320" xmlns="http://www.w3.org/2000/svg">
+          <!-- Start Node -->
+          <rect x="20" y="120" width="180" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+          <text x="110" y="150" font-family="var(--font)" font-weight="800" font-size="12" fill="#0f172a" text-anchor="middle">Caller Location Resolved</text>
+          <text x="110" y="168" font-family="var(--font)" font-size="10.5" fill="#64748b" text-anchor="middle">Calculates Haversine Distances</text>
+
+          <!-- Branch Line -->
+          <path d="M 200 155 L 260 155" stroke="#94a3b8" stroke-width="2"/>
+          <polygon points="260,151 270,155 260,159" fill="#94a3b8"/>
+
+          <!-- Decision Diamond -->
+          <polygon points="360,105 450,155 360,205 270,155" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+          <text x="360" y="148" font-family="var(--font)" font-weight="800" font-size="11" fill="#1e40af" text-anchor="middle">Is ESIC / ESIS</text>
+          <text x="360" y="165" font-family="var(--font)" font-weight="800" font-size="11" fill="#1e40af" text-anchor="middle">within 15 km?</text>
+
+          <!-- Branch YES (Upwards) -->
+          <path d="M 360 105 L 360 45 L 480 45" stroke="#16a34a" stroke-width="2" fill="none"/>
+          <polygon points="480,41 490,45 480,49" fill="#16a34a"/>
+          <text x="390" y="38" font-family="var(--font)" font-weight="800" font-size="11" fill="#16a34a">YES (Within 15 km)</text>
+
+          <!-- Branch NO (Downwards) -->
+          <path d="M 360 205 L 360 265 L 480 265" stroke="#dc2626" stroke-width="2" fill="none"/>
+          <polygon points="480,261 490,265 480,269" fill="#dc2626"/>
+          <text x="390" y="258" font-family="var(--font)" font-weight="800" font-size="11" fill="#dc2626">NO (Beyond 15 km)</text>
+
+          <!-- Outcome YES: Direct ESIC / ESIS -->
+          <g transform="translate(490, 15)">
+            <rect width="330" height="65" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+            <text x="165" y="26" font-family="var(--font)" font-weight="800" font-size="12" fill="#166534" text-anchor="middle">DIRECT GOVERNMENT FACILITY</text>
+            <text x="165" y="44" font-family="var(--font)" font-size="10.5" fill="#15803d" text-anchor="middle">Route to ESIC Hospital (Casualty/OPD) or ESIS Dispensary</text>
+            <text x="165" y="57" font-family="var(--font)" font-weight="700" font-size="9" fill="#b91c1c" text-anchor="middle">STRICTLY PROHIBITS ROUTING TO TIE-UP</text>
+          </g>
+
+          <!-- Outcome NO: Tie-Up Allowed -->
+          <g transform="translate(490, 235)">
+            <rect width="330" height="65" rx="8" fill="#fffbeb" stroke="#fde68a" stroke-width="2"/>
+            <text x="165" y="26" font-family="var(--font)" font-weight="800" font-size="12" fill="#92400e" text-anchor="middle">EMPANELLED TIE-UP FACILITY ALLOWED</text>
+            <text x="165" y="44" font-family="var(--font)" font-size="10.5" fill="#b45309" text-anchor="middle">Route to Nearest Empanelled Hospital for cashless care</text>
+            <text x="165" y="57" font-family="var(--font)" font-size="9.5" fill="#78350f" text-anchor="middle">Valid only when direct government facilities are > 15 km away</text>
+          </g>
+        </svg>
+      </div>
+
+      <h3>Key Rules Summary:</h3>
+      <ul style="margin-left: 20px; line-height: 1.8; color: #334155;">
+        <li><strong>Government Priority:</strong> If an ESIC Hospital or ESIS Dispensary is within 15 km of the caller's location, the system will never assign a private tie-up facility.</li>
+        <li><strong>After-Hours Coverage:</strong> On weekends and after 3:00 PM (when dispensaries are closed), patients within 15 km are directed to the 24x7 ESIC Hospital casualty, backed by 104 Tele-Doctor phone triage.</li>
+        <li><strong>Remote Workers Protection:</strong> Tie-Up hospitals act as a critical safety net exclusively for workers located in distant industrial hubs where government facilities are beyond 15 km.</li>
+      </ul>
+    </section>
+
+    <!-- 6. Self-Learning & Management -->
+    <section>
+      <h2>6. Continuous AI Learning & Feedback Portal</h2>
+      <p>
+        The platform features an active human-in-the-loop learning system that allows operational supervisors and medical officers to fine-tune AI decisions without technical downtime.
+      </p>
+
+      <div class="callout-amber">
+        <div class="callout-title">⚠️ Development Status Note</div>
+        <p>
+          The AI Self-Learning and Agent Feedback subsystem is currently an <strong>active development feature under continuous improvement</strong>. Rules created by agents are logged in Cloud Firestore and can be audited, fine-tuned, or unlearned at any time.
+        </p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Action</th>
+            <th>Mechanism</th>
+            <th>Resulting Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>👍 Accurate Outcome</strong></td>
+            <td>Single click by agent on triage outcome card</td>
+            <td>Reinforces the decision pattern in server memory and database.</td>
+          </tr>
+          <tr>
+            <td><strong>👎 Needs Correction</strong></td>
+            <td>Inline modal: urgency, referral, and clinical rationale</td>
+            <td>Saves a correction rule that dynamically instructs the AI and algorithm to apply the human-specified destination on similar future calls.</td>
+          </tr>
+          <tr>
+            <td><strong>Manage & Unlearn</strong></td>
+            <td>Accessible via Menu Drawer &rarr; <em>AI Learning & Feedback</em></td>
+            <td>Supervisors can review all active rules with pagination (30 per page) and click <strong>"Unlearn"</strong> to delete rules immediately.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Footer -->
+    <footer class="doc-footer">
+      <div>
+        <strong>EKMS Triage Platform</strong> | Operational Architecture & Workflow Document
+      </div>
+      <div>
+        Confidential — Internal Team Document
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

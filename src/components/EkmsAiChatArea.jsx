@@ -14,6 +14,8 @@ import {
   RotateCcw,
   ArrowRight,
   PhoneForwarded,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractClinicalEntities } from "@/lib/clinicalAdaptiveEngine";
@@ -75,10 +77,49 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   });
 
   const [sessionId] = useState(() => "session-" + Math.random().toString(36).substring(2, 9));
+  const [questionFeedbackMap, setQuestionFeedbackMap] = useState({});
   const chatContainerRef = useRef(null);
   const lastProcessedSpeechRef = useRef("");
   const messagesRef = useRef(messages);
   const clinicalStateRef = useRef(clinicalState);
+
+  const handleQuestionFeedback = async (m, isPositive) => {
+    const key = m.id || m.text;
+    if (questionFeedbackMap[key]) return;
+
+    setQuestionFeedbackMap((prev) => ({
+      ...prev,
+      [key]: isPositive ? "positive" : "negative",
+    }));
+
+    try {
+      const payload = {
+        agent_id: "Agent 3",
+        type: "probing",
+        symptom_notes: m.suspectedCondition || clinicalState.suspectedCondition || m.text,
+        is_positive: isPositive,
+        notes: isPositive
+          ? `Agent approved probing question: "${m.text}"`
+          : `Agent flagged question as low relevance: "${m.text}". Needs more direct triage focus.`,
+      };
+
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        if (isPositive) {
+          toast.success("AI Learning: Probing question reinforced!");
+        } else {
+          toast.info("AI Learning: Irrelevant question logged. Probing priorities updated.");
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -159,12 +200,15 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       return;
     }
 
+    const isVoiceInput = Boolean(isFromSpeech);
     const userMsg = {
       id: "user-" + Date.now(),
       sender: "user",
       text: rawText,
       rawText,
-      isNlpExtracted: Boolean(nlp.hasClinicalContent && nlp.cleanKeywords),
+      isVoice: isVoiceInput,
+      isNlpExtracted: isVoiceInput,
+      source: isVoiceInput ? "voice" : "manual",
     };
 
     const updatedMsgsWithUser = [...curMessages, userMsg];
@@ -471,9 +515,16 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
               {/* User Bubble */}
               {m.sender === "user" && (
                 <div className="max-w-[85%] rounded-lg px-3.5 py-2.5 leading-relaxed bg-primary text-primary-foreground font-medium shadow-xs">
-                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-primary-foreground/75 mb-0.5">
-                    <Sparkles className="h-3 w-3" />
-                    <span>Caller Response</span>
+                  <div className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider text-primary-foreground/75 mb-0.5">
+                    <div className="flex items-center gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      <span>Caller Response</span>
+                    </div>
+                    {(m.isVoice === true || m.source === "voice") && (
+                      <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
+                        Voice NLP
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs sm:text-sm font-semibold">{m.text}</p>
                 </div>
@@ -501,16 +552,45 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                     <Bot className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
                     <div className="space-y-0.5 flex-1 min-w-0">
                       <div className="flex flex-wrap items-center justify-between gap-1">
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950">
-                          Ask the IP:
-                        </span>
-                        {m.suspectedCondition ? (
-                          <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-900 bg-emerald-100/60 px-2 py-0.5 rounded border border-emerald-600/30">
-                            Investigating: {m.suspectedCondition}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950">
+                            Ask the IP:
                           </span>
-                        ) : (
-                          <div />
-                        )}
+                          {m.suspectedCondition && (
+                            <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-900 bg-emerald-100/60 px-2 py-0.5 rounded border border-emerald-600/30">
+                              Investigating: {m.suspectedCondition}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Relevance Feedback Buttons */}
+                        <div className="flex items-center gap-1">
+                          {questionFeedbackMap[m.id || m.text] ? (
+                            <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
+                              {questionFeedbackMap[m.id || m.text] === "positive" ? "✓ Relevant" : "✓ Feedback noted"}
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] text-muted-foreground hidden sm:inline mr-0.5">Relevant?</span>
+                              <button
+                                type="button"
+                                title="Mark question as clinically relevant"
+                                onClick={() => handleQuestionFeedback(m, true)}
+                                className="rounded p-1 text-slate-500 hover:text-emerald-700 hover:bg-emerald-200/60 transition-colors cursor-pointer"
+                              >
+                                <ThumbsUp className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Mark question as irrelevant / improve"
+                                onClick={() => handleQuestionFeedback(m, false)}
+                                className="rounded p-1 text-slate-500 hover:text-amber-700 hover:bg-amber-200/60 transition-colors cursor-pointer"
+                              >
+                                <ThumbsDown className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed">
                         {cleanQuestionText || m.text}

@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { getFirestoreDb } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { resolveClientIpAndGeo } from "@/lib/geoIpResolver";
 
 const VALID_AGENTS = [
   { id: "Agent 1", label: "Agent 1 (Triage Desk 1)" },
@@ -108,6 +109,40 @@ export function AgentLogin({ onLoginSuccess }) {
     if (typeof window !== "undefined") {
       localStorage.setItem("ekms_active_agent", JSON.stringify(sessionObj));
     }
+
+    // Resolve advanced real-time client IP, ISP, and precise geolocation
+    try {
+      resolveClientIpAndGeo()
+        .then((geo) => {
+          fetch("/api/admin/usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "record_agent_session",
+              agentId,
+              sessionId: newSessionId,
+              ipAddress: geo.ipAddress,
+              ipType: geo.ipType,
+              location: geo.location,
+              city: geo.city,
+              region: geo.region,
+              country: geo.country,
+              countryCode: geo.countryCode,
+              postal: geo.postal,
+              latitude: geo.latitude,
+              longitude: geo.longitude,
+              isp: geo.isp,
+              org: geo.org,
+              asn: geo.asn,
+              connectionType: geo.connectionType,
+              os: geo.os,
+              browser: geo.browser,
+              userAgent: geo.userAgent,
+            }),
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    } catch {}
 
     toast.success(`Logged in as ${agentId}`);
     setConflictModalOpen(false);

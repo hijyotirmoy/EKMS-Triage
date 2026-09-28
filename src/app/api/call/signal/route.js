@@ -13,48 +13,25 @@ import {
   limit,
 } from "firebase/firestore";
 
-// Local in-memory fallback in case Firestore is unreachable
+// Local in-memory calls store and query cache to eliminate repetitive Firestore reads
 const memoryCalls = new Map();
+let ringingQueryCache = null;
+let ringingQueryCacheTs = 0;
+const RINGING_CACHE_TTL_MS = 10000; // 10 seconds cache for ringing call queries
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const callId = searchParams.get("callId");
   const role = searchParams.get("role"); // 'agent' | 'caller'
   const agentId = searchParams.get("agentId");
+  const now = Date.now();
 
   try {
-    const db = getFirestoreDb();
-
     // 1. Agent checking for incoming ringing calls
     if (role === "agent" && !callId) {
-      // Check Firestore
-      try {
-        const q = query(
-          collection(db, "calls"),
-          where("status", "==", "ringing"),
-          limit(5)
-        );
-        const snap = await getDocs(q);
-        const now = Date.now();
-        for (const docSnap of snap.docs) {
-          const call = docSnap.data();
-          // Valid if updated/created within the last 60 seconds
-          if (call && now - (call.updatedAt || call.createdAt || 0) < 60000) {
-            if (agentId) {
-              const target = (call.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
-              const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
-              if (target !== myAgent) continue;
-            }
-            return NextResponse.json({ activeCall: call });
-          }
-        }
-      } catch (e) {
-        console.warn("Firestore GET ringing calls error:", e.message);
-      }
-
-      // Memory fallback
+      // Step A: Check in-memory active calls first (0 Firestore reads)
       for (const [id, call] of memoryCalls.entries()) {
-        if (call.status === "ringing" && Date.now() - call.updatedAt < 60000) {
+        if (call.status === "ringing" && now - (call.updatedAt || call.createdAt || 0) < 60000) {
           if (agentId) {
             const target = (call.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
             const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
@@ -63,23 +40,83 @@ export async function GET(request) {
           return NextResponse.json({ activeCall: call });
         }
       }
+
+      // Step B: Check in-memory ringing query cache before querying Firestore
+      if (ringingQueryCache !== null && now - ringingQueryCacheTs < RINGING_CACHE_TTL_MS) {
+        if (ringingQueryCache) {
+          if (agentId) {
+            const target = (ringingQueryCache.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+            const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
+            if (target === myAgent) {
+              return NextResponse.json({ activeCall: ringingQueryCache });
+            }
+          } else {
+            return NextResponse.json({ activeCall: ringingQueryCache });
+          }
+        }
+        return NextResponse.json({ activeCall: null });
+      }
+
+      // Step C: Query Firestore at most once every 10s
+      try {
+        const db = getFirestoreDb();
+        const q = query(
+          collection(db, "calls"),
+          where("status", "==", "ringing"),
+          limit(5)
+        );
+        const snap = await getDocs(q);
+        let foundCall = null;
+        for (const docSnap of snap.docs) {
+          const call = docSnap.data();
+          if (call && now - (call.updatedAt || call.createdAt || 0) < 60000) {
+            memoryCalls.set(call.id, call);
+            foundCall = call;
+            break;
+          }
+        }
+        ringingQueryCache = foundCall;
+        ringingQueryCacheTs = now;
+
+        if (foundCall) {
+          if (agentId) {
+            const target = (foundCall.targetAgent || "Agent 1").toLowerCase().replace(/\s+/g, "");
+            const myAgent = agentId.toLowerCase().replace(/\s+/g, "");
+            if (target === myAgent) {
+              return NextResponse.json({ activeCall: foundCall });
+            }
+          } else {
+            return NextResponse.json({ activeCall: foundCall });
+          }
+        }
+      } catch (e) {
+        console.warn("Firestore GET ringing calls error:", e.message);
+      }
+
       return NextResponse.json({ activeCall: null });
     }
 
     // 2. Polling specific call state
     if (callId) {
+      // Check memoryCalls first (0 Firestore reads)
+      const call = memoryCalls.get(callId);
+      if (call && now - (call.updatedAt || 0) < 15000) {
+        return NextResponse.json(call);
+      }
+
       try {
+        const db = getFirestoreDb();
         const docRef = doc(db, "calls", callId);
         const snap = await getDoc(docRef);
         if (snap.exists()) {
-          return NextResponse.json(snap.data());
+          const data = snap.data();
+          memoryCalls.set(callId, data);
+          return NextResponse.json(data);
         }
       } catch (e) {
         console.warn("Firestore GET callId error:", e.message);
       }
 
-      // Memory fallback
-      const call = memoryCalls.get(callId);
       if (call) {
         return NextResponse.json(call);
       }
@@ -125,6 +162,8 @@ export async function POST(request) {
         console.warn("Firestore initiate save error:", e.message);
       }
       memoryCalls.set(newCallId, callData);
+      ringingQueryCache = callData;
+      ringingQueryCacheTs = now;
 
       return NextResponse.json({
         success: true,
@@ -143,6 +182,8 @@ export async function POST(request) {
     const docRef = doc(db, "calls", callId);
 
     if (action === "accept" || action === "answer") {
+      ringingQueryCache = null;
+      ringingQueryCacheTs = 0;
       const updatePayload = {
         status: "connected",
         updatedAt: now,
@@ -231,6 +272,8 @@ export async function POST(request) {
     }
 
     if (action === "hangup" || action === "reject") {
+      ringingQueryCache = null;
+      ringingQueryCacheTs = 0;
       try {
         await updateDoc(docRef, { status: "ended", updatedAt: now });
       } catch (e) {}

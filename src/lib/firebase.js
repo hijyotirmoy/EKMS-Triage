@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const DEFAULT_FIREBASE_CONFIG = {
   apiKey:
@@ -24,6 +25,7 @@ const DEFAULT_FIREBASE_CONFIG = {
 
 let app = null;
 let db = null;
+let auth = null;
 
 export function getFirebaseApp() {
   if (!app) {
@@ -38,6 +40,14 @@ export function getFirestoreDb() {
     db = getFirestore(firebaseApp);
   }
   return db;
+}
+
+export function getFirebaseAuth() {
+  if (!auth) {
+    const firebaseApp = getFirebaseApp();
+    auth = getAuth(firebaseApp);
+  }
+  return auth;
 }
 
 export { DEFAULT_FIREBASE_CONFIG };

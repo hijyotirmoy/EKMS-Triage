@@ -1,7 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, Inbox, ChevronLeft, ChevronRight, Trash2, X } from "lucide-react";
+import {
+  Search,
+  Inbox,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+  X,
+  Eye,
+  Bot,
+  Sparkles,
+  AlertTriangle,
+  ShieldCheck,
+  Building2,
+  MapPin,
+  Clock,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
@@ -136,6 +151,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   const [selectedRefs, setSelectedRefs] = useState(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [selectedCaseForConvo, setSelectedCaseForConvo] = useState(null);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -404,19 +420,34 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                     })}
                   </td>
                   <td className="py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      data-testid={`delete-case-${c.case_ref}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCaseToDelete(c);
-                      }}
-                      title={`Delete case ${c.case_ref}`}
-                      className="inline-flex items-center justify-center rounded-lg border border-rose-300 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800 active:scale-95 shadow-2xs"
-                      aria-label={`Delete case ${c.case_ref}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        data-testid={`view-convo-${c.case_ref}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCaseForConvo(c);
+                        }}
+                        title={`View AI & Agent Consultation for ${c.case_ref}`}
+                        className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100 hover:text-blue-800 active:scale-95 shadow-2xs dark:border-blue-900 dark:bg-blue-950/60 dark:text-blue-300 cursor-pointer"
+                        aria-label={`View conversation for case ${c.case_ref}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`delete-case-${c.case_ref}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCaseToDelete(c);
+                        }}
+                        title={`Delete case ${c.case_ref}`}
+                        className="inline-flex items-center justify-center rounded-lg border border-rose-300 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800 active:scale-95 shadow-2xs dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-300 cursor-pointer"
+                        aria-label={`Delete case ${c.case_ref}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -621,6 +652,343 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
           </div>
         </div>
       )}
+
+      {/* Case Conversation Modal (Eye Icon Pop-up) */}
+      {selectedCaseForConvo && (
+        <CaseConversationModal
+          caseItem={selectedCaseForConvo}
+          onClose={() => setSelectedCaseForConvo(null)}
+        />
+      )}
     </div>
   );
 };
+
+function CaseConversationModal({ caseItem, onClose }) {
+  if (!caseItem) return null;
+
+  const agentCode = getAgentCode(caseItem);
+  const triage = caseItem.triage || {};
+  const intake = caseItem.intake || {};
+  const nearest = caseItem.nearest_facilities?.[0];
+  const refBadge = getReferralBadge(caseItem);
+
+  // Extract explicit chat history if present
+  const rawHistory =
+    caseItem.ekms_ai_context?.chatHistory ||
+    caseItem.chatHistory ||
+    caseItem.chat_history ||
+    [];
+
+  const hasRecordedChat = Array.isArray(rawHistory) && rawHistory.length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+        onClick={onClose}
+      />
+
+      {/* Modal Dialog Card */}
+      <div className="relative z-10 flex flex-col w-full max-w-3xl max-h-[90vh] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-border/80 bg-linear-to-r from-blue-50/70 via-background to-secondary/40 dark:from-blue-950/30 dark:via-background dark:to-secondary/20 p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
+              <Bot className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-foreground">
+                  AI & Agent Consultation
+                </h3>
+                <span className="mono rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-xs font-bold">
+                  {caseItem.case_ref}
+                </span>
+                <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-bold text-foreground border border-border">
+                  Agent {agentCode}
+                </span>
+                <UrgencyBadge level={triage.urgency_level} size="sm" />
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-semibold text-foreground">
+                  Caller: {intake.caller_name || "Anonymous Caller"}
+                </span>
+                {intake.phone && (
+                  <span className="mono font-semibold">({intake.phone})</span>
+                )}
+                {(intake.age || intake.sex) && (
+                  <span>
+                    &bull; {[intake.age ? `${intake.age}y` : null, intake.sex].filter(Boolean).join(" ")}
+                  </span>
+                )}
+                {intake.city && (
+                  <span>&bull; {intake.city}</span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            aria-label="Close modal"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Quick Metadata Ribbon */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-border/60 bg-secondary/30 px-4 py-2.5 text-[11px]">
+          <div>
+            <span className="text-muted-foreground block text-[10px]">Acuity Score</span>
+            <span className="font-bold text-foreground">
+              {triage.urgency_score ? `${triage.urgency_score}/10` : "Assessed"} ({triage.urgency_level || "Standard"})
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground block text-[10px]">Duration</span>
+            <span className="font-medium text-foreground">
+              {intake.duration || triage.duration || "Reported today"}
+            </span>
+          </div>
+          <div className="col-span-2 sm:col-span-2">
+            <span className="text-muted-foreground block text-[10px]">Recommended Referral</span>
+            <span className="font-bold text-foreground truncate block">
+              {refBadge.icon} {refBadge.label} {nearest?.distance_km != null ? `(${nearest.distance_km} km)` : ""}
+            </span>
+          </div>
+        </div>
+
+        {/* Scrollable Conversation Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/50 dark:bg-background">
+          <div className="flex items-center justify-center my-1">
+            <span className="rounded-full bg-border/60 px-3 py-1 text-[10px] font-semibold text-muted-foreground tracking-wide uppercase">
+              Consultation Started &bull; {new Date(caseItem.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
+
+          {hasRecordedChat ? (
+            /* Render recorded live chatHistory */
+            rawHistory.map((m, idx) => {
+              const isAgent = m.sender === "user" || m.role === "user";
+              return (
+                <div
+                  key={m.id || idx}
+                  className={`flex items-start gap-2.5 ${isAgent ? "flex-row-reverse" : "flex-row"}`}
+                >
+                  {/* Avatar */}
+                  <div
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-2xs ${
+                      isAgent
+                        ? "bg-slate-800 text-white dark:bg-slate-700"
+                        : "bg-blue-600 text-white"
+                    }`}
+                  >
+                    {isAgent ? agentCode : <Bot className="h-4 w-4" />}
+                  </div>
+
+                  {/* Message Bubble */}
+                  <div
+                    className={`max-w-[82%] sm:max-w-[75%] rounded-2xl p-3.5 shadow-2xs space-y-1.5 ${
+                      isAgent
+                        ? "bg-primary text-primary-foreground rounded-tr-xs"
+                        : "border border-border bg-white dark:bg-card text-foreground rounded-tl-xs"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[10px] opacity-80 font-semibold">
+                      <span>{isAgent ? `Agent ${agentCode}` : "EKMS AI Assistant"}</span>
+                      {isAgent && (m.isVoice === true || m.source === "voice") && (
+                        <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase">
+                          Voice NLP
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap">
+                      {m.text || m.content}
+                    </p>
+
+                    {/* Probing suggestion chips if any */}
+                    {Array.isArray(m.suggestions) && m.suggestions.length > 0 && (
+                      <div className="pt-2 mt-1 border-t border-border/50 flex flex-wrap gap-1.5">
+                        <span className="text-[10px] font-bold text-muted-foreground block w-full">
+                          AI Suggested Answer Chips:
+                        </span>
+                        {m.suggestions.map((chip, cIdx) => (
+                          <span
+                            key={cIdx}
+                            className="rounded-full bg-secondary/80 border border-border px-2 py-0.5 text-[10px] font-medium text-foreground"
+                          >
+                            {chip}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            /* Reconstruct clean conversational transcript for direct/legacy cases */
+            <div className="space-y-4">
+              {/* Turn 1: Agent Intake */}
+              <div className="flex items-start gap-2.5 flex-row-reverse">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white text-xs font-bold shadow-2xs">
+                  {agentCode}
+                </div>
+                <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3.5 shadow-2xs bg-primary text-primary-foreground space-y-1">
+                  <div className="flex items-center justify-between text-[10px] opacity-80 font-semibold">
+                    <span>Agent {agentCode} (Caller Intake)</span>
+                  </div>
+                  <p className="text-xs sm:text-[13px] leading-relaxed">
+                    {intake.symptom_notes || triage.summary_en || "Caller arrived with acute health inquiry."}
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1 text-[10px] opacity-90 font-medium">
+                    {intake.duration && <span>Duration: {intake.duration}</span>}
+                    {intake.severity_reported && <span>Reported Severity: {intake.severity_reported}/10</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Turn 2: AI Probing & Clinical Screening */}
+              <div className="flex items-start gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-2xs">
+                  <Bot className="h-4 w-4" />
+                </div>
+                <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-3.5 shadow-2xs border border-border bg-white dark:bg-card text-foreground space-y-2">
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
+                    <span className="flex items-center gap-1 text-blue-600 font-bold">
+                      <Sparkles className="h-3 w-3" /> EKMS AI Clinical Probing
+                    </span>
+                  </div>
+                  
+                  {Array.isArray(triage.followup_questions) && triage.followup_questions.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-foreground/90 font-medium">
+                        Screened against clinical red-flag protocols. Probing questions asked:
+                      </p>
+                      <ul className="list-disc pl-4 text-xs space-y-1 text-foreground/80">
+                        {triage.followup_questions.map((q, qIdx) => (
+                          <li key={qIdx}>{q}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-xs sm:text-[13px] leading-relaxed">
+                      Conducted real-time symptom analysis and cross-referenced emergency danger signs.
+                    </p>
+                  )}
+
+                  {Array.isArray(triage.red_flags) && triage.red_flags.length > 0 && (
+                    <div className="rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 p-2 space-y-1">
+                      <span className="text-[10px] font-bold text-rose-800 dark:text-rose-300 uppercase tracking-wide flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3 text-rose-600" /> Danger Signs Evaluated:
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {triage.red_flags.map((rf, rIdx) => (
+                          <span
+                            key={rIdx}
+                            className="rounded-full bg-rose-100 dark:bg-rose-900/80 text-rose-900 dark:text-rose-200 border border-rose-300 text-[10px] px-2 py-0.5 font-medium"
+                          >
+                            {rf}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Turn 3: Agent Verification */}
+              <div className="flex items-start gap-2.5 flex-row-reverse">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white text-xs font-bold shadow-2xs">
+                  {agentCode}
+                </div>
+                <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3 shadow-2xs bg-primary/90 text-primary-foreground space-y-1">
+                  <div className="text-[10px] opacity-80 font-semibold">
+                    <span>Agent {agentCode} (Probing Completed)</span>
+                  </div>
+                  <p className="text-xs leading-relaxed">
+                    Verified caller location ({intake.district || intake.city || "District"}, PIN: {intake.pincode || "Mapped"}) and confirmed symptom severity. Requesting final dispatch referral.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Final Outcome Card inside Transcript */}
+          <div className="mt-4 rounded-xl border border-emerald-300/80 bg-linear-to-b from-emerald-50/70 to-white dark:from-emerald-950/30 dark:to-card p-4 shadow-sm space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200/60 dark:border-emerald-900/40 pb-2">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                  Triage Decision & Facility Referral
+                </span>
+              </div>
+              <UrgencyBadge level={triage.urgency_level} size="sm" />
+            </div>
+
+            <div className="text-xs space-y-1 text-slate-800 dark:text-slate-200">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                {triage.summary_en || triage.recommended_action}
+              </p>
+              {triage.reasoning && (
+                <p className="text-[11.5px] leading-relaxed text-muted-foreground pt-1">
+                  <span className="font-bold text-foreground">Clinical Rationale:</span> {triage.reasoning}
+                </p>
+              )}
+            </div>
+
+            {nearest && (
+              <div className="rounded-lg bg-white dark:bg-card border border-border/80 p-2.5 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-foreground flex items-center gap-1">
+                    <Building2 className="h-3.5 w-3.5 text-primary" /> {nearest.name}
+                  </span>
+                  <span className="rounded bg-emerald-100 text-emerald-900 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold">
+                    {nearest.distance_km != null ? `${nearest.distance_km} km` : "Nearest"}
+                  </span>
+                </div>
+                {nearest.address && (
+                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="truncate">{nearest.address}</span>
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-border bg-background px-4 py-3 text-xs">
+          <div className="flex items-center gap-2 text-muted-foreground text-[11px]">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>
+              Logged {new Date(caseItem.created_at).toLocaleString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-secondary px-3.5 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors shadow-2xs cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}

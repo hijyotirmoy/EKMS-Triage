@@ -1,6 +1,9 @@
 // Clinical Triage Evaluation Engine
-// Supports Anthropic Claude, Google Gemini, or intelligent rule-based clinical triage
 import { groqChatCompletion } from "./groqPool.js";
+import {
+  buildLearnedPromptSnippet,
+  applyAlgorithmicFeedbackOverrides,
+} from "./feedbackLearningEngine.js";
 
 /**
  * Evaluates whether ESIS Dispensaries are currently open in Assam (IST UTC+5:30).
@@ -286,7 +289,63 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   return points.slice(0, 4);
 }
 
-export async function evaluateTriage(intake) {
+/**
+ * Sanitizes clinical symptom description to ensure non-physician helpline guidelines:
+ * - We are helpline operators, not diagnosing doctors.
+ * - Never mention medical disease names, syndromes, or pathologies (e.g. Kidney Stone, Renal Colic, Appendicitis, Gastric Ulcer, Pathology)
+ *   unless the caller explicitly named that disease in their own words.
+ * - Never mention or prescribe pharmaceutical medicines.
+ */
+export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText = "") {
+  if (!rawCondition || typeof rawCondition !== "string") return "Reported Symptoms";
+
+  const callerText = (callerSpokenText || "").toLowerCase();
+
+  const hasKidneyStone = /\b(kidney stone|pathri|renal calculus|renal stone|gall stone)\b/i.test(callerText);
+  const hasAppendicitis = /\b(appendicitis|appendix)\b/i.test(callerText);
+  const hasUlcer = /\b(ulcer|peptic ulcer)\b/i.test(callerText);
+  const hasCardiacDisease = /\b(heart attack|cardiac arrest|dil ka daura)\b/i.test(callerText);
+
+  let clean = rawCondition;
+
+  // Replace fabricated medical diagnoses with non-physician symptom descriptions
+  if (!hasKidneyStone) {
+    clean = clean.replace(/renal colic \((?:kidney stone)\) or lower abdominal pathology/gi, "Abdominal Discomfort");
+    clean = clean.replace(/renal colic \((?:kidney stone)\)/gi, "Abdominal Discomfort");
+    clean = clean.replace(/renal colic/gi, "Abdominal / Flank Discomfort");
+    clean = clean.replace(/\(?kidney stone\)?/gi, "Abdominal Discomfort");
+    clean = clean.replace(/renal calculi/gi, "Flank Pain");
+    clean = clean.replace(/urological \/ uti/gi, "Urinary Discomfort");
+  }
+
+  if (!hasAppendicitis) {
+    clean = clean.replace(/acute appendicitis/gi, "Acute Lower Abdominal Pain");
+    clean = clean.replace(/appendicitis/gi, "Abdominal Discomfort");
+  }
+
+  if (!hasCardiacDisease) {
+    clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Chest Discomfort / Pressure");
+  }
+
+  // Strip generic doctor diagnostic jargon
+  clean = clean.replace(/\bpathology\b/gi, "discomfort");
+  clean = clean.replace(/\betiology\b/gi, "symptoms");
+  clean = clean.replace(/\bsyndrome\b/gi, "symptoms");
+
+  // Clean trailing phrases
+  clean = clean.replace(/\s*or lower abdominal discomfort/gi, " and Abdominal Discomfort");
+  clean = clean.replace(/\s*or lower abdominal pathology/gi, "");
+  clean = clean.replace(/\s*under investigation/gi, "");
+
+  // Strip accidental medicine names
+  clean = clean.replace(/\b(paracetamol|ibuprofen|antibiotic|injection|antispasmodic|tramadol|diclofenac|tablet)\b/gi, "");
+
+  clean = clean.replace(/^[\s,;-]+|[\s,;-]+$/g, "").trim();
+
+  return clean || "Reported Symptoms";
+}
+
+async function evaluateRawTriage(intake) {
   const ekmsCtx = intake.ekms_ai_context || {};
   const tState = ekmsCtx.triageState || ekmsCtx;
   const notes = (intake.symptom_notes || "").toLowerCase();
@@ -303,6 +362,11 @@ export async function evaluateTriage(intake) {
         .join(" ")
     : "";
   const callerSpokenText = `${notes} ${callerUtterances}`.trim().toLowerCase();
+
+  const combinedClinicalText = [notes, callerUtterances, tState?.condition, tState?.suspectedCondition]
+    .filter(Boolean)
+    .join(" ");
+  const learnedSnippet = await buildLearnedPromptSnippet(combinedClinicalText, "triage");
 
   const isCallerSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|i'?m safe|fine|theek hoon)\b/i.test(callerSpokenText);
   const callerHasSuicideWords = !isCallerSafe && /\b(suicid\w*|wanna die|want to die|kill myself|mar ja\w*|jaan de dunga|apni zindagi khatam|end my life)\b/i.test(callerSpokenText);
@@ -503,14 +567,19 @@ export async function evaluateTriage(intake) {
       summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via Tele-MANAS (14416).";
       summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; टेली-मानस (14416) द्वारा परामर्श आवश्यक है।";
     } else if (primaryReferral === "104 Medical Team" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
-      const cond = tState?.condition || tState?.suspectedCondition || "mild symptoms";
-      summaryEn = `Caller inquires regarding ${cond}; condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.`;
-      summaryHi = `कॉलर को ${cond} संबंधी चिकित्सकीय सलाह की आवश्यकता है; स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श उपयुक्त है।`;
+      const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "mild symptoms";
+      const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
+      summaryEn = `Caller inquires regarding ${cleanCond}; condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.`;
+      summaryHi = `कॉलर को ${cleanCond} संबंधी चिकित्सकीय सलाह की आवश्यकता है; स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श उपयुक्त है।`;
     } else {
-      const cond = tState?.condition || tState?.suspectedCondition || "symptoms";
-      summaryEn = `Caller reports ${cond} with reported severity ${severity}/10 (${duration}), requiring prompt medical evaluation.`;
-      summaryHi = `कॉलर को ${cond} की शिकायत है (तीव्रता: ${severity}/10, अवधि: ${duration}), जिसके लिए उचित चिकित्सकीय परामर्श आवश्यक है।`;
+      const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "symptoms";
+      const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
+      summaryEn = `Caller reports ${cleanCond} with reported severity ${severity}/10 (${duration}), requiring prompt medical evaluation.`;
+      summaryHi = `कॉलर को ${cleanCond} की शिकायत है (तीव्रता: ${severity}/10, अवधि: ${duration}), जिसके लिए उचित चिकित्सकीय परामर्श आवश्यक है।`;
     }
+
+    const rawComp = tState?.suspectedCondition || tState?.condition || tState?.symptom || notes || "Primary Clinical Assessment";
+    const cleanPrimaryComplaint = sanitizeSymptomOrCondition(rawComp, callerSpokenText);
 
     const primaryComplaint = isPsych && hasSelfHarmAction
       ? "Acute Self-Harm Crisis & Bleeding"
@@ -520,7 +589,7 @@ export async function evaluateTriage(intake) {
           ? (tState?.suspectedCondition || tState?.condition || "Emotional Distress & Mental Health Support")
           : (isNacoHIV
             ? "HIV / AIDS / STI Health Consultation"
-            : (tState?.suspectedCondition || tState?.condition || tState?.symptom || "Primary Clinical Assessment"))));
+            : cleanPrimaryComplaint)));
 
     const triageUrgencyLevel = isPsych
       ? (hasSelfHarmAction || callerHasSuicideWords ? "Emergency" : "Urgent")
@@ -611,9 +680,8 @@ export async function evaluateTriage(intake) {
   "recommended_action": "clear action step for patient",
   "call_108": true | false,
   "detected_language": "English" | "Hindi" | "Hinglish",
-  "followup_questions": ["question 1", "question 2"]
 }
-
+${learnedSnippet ? `\n${learnedSnippet}\n` : ""}
 Intake data:
 ${JSON.stringify(intake, null, 2)}`,
                     },
@@ -652,7 +720,7 @@ ${JSON.stringify(intake, null, 2)}`,
         body: JSON.stringify({
           model: "claude-3-5-sonnet-20241022",
           max_tokens: 1000,
-          system: `You are an expert ESIC / ESIS medical triage assistant for call center operators in Assam, India. Evaluate symptoms and output strict JSON with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence ('high'|'medium'|'low'), summary_en, summary_hi, reasoning, red_flags (array of strings), recommended_facility_type, recommended_action, call_108 (boolean), detected_language ('English'|'Hindi'|'Hinglish'), followup_questions (array of 2-3 questions).`,
+          system: `You are an expert ESIC / ESIS medical triage assistant for call center operators in Assam, India. Evaluate symptoms and output strict JSON with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence ('high'|'medium'|'low'), summary_en, summary_hi, reasoning, red_flags (array of strings), recommended_facility_type, recommended_action, call_108 (boolean), detected_language ('English'|'Hindi'|'Hinglish'), followup_questions (array of 2-3 questions).${learnedSnippet ? `\n\n${learnedSnippet}` : ""}`,
           messages: [
             {
               role: "user",
@@ -710,8 +778,7 @@ ${JSON.stringify(intake, null, 2)}`,
       messages: [
         {
           role: "system",
-          content:
-            "You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.",
+          content: `You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}`,
         },
         {
           role: "user",
@@ -917,6 +984,22 @@ function normalizeTriageDecision(triage, intake) {
   const tState = ekmsCtx.triageState || ekmsCtx;
   const referral = (tState?.referralDestination || "").toLowerCase();
   const notes = `${intake.symptom_notes || ""} ${tState?.symptom || ""} ${tState?.condition || ""} ${triage.summary_en || ""} ${triage.reasoning || ""}`.toLowerCase();
+
+  const chatMsgs = ekmsCtx.chatHistory || [];
+  const callerUtterances = Array.isArray(chatMsgs)
+    ? chatMsgs
+        .filter((m) => m.sender === "user" || m.role === "user")
+        .map((m) => m.text || "")
+        .join(" ")
+    : "";
+  const callerSpokenText = `${intake.symptom_notes || ""} ${callerUtterances}`.trim().toLowerCase();
+
+  if (triage.primary_complaint) {
+    triage.primary_complaint = sanitizeSymptomOrCondition(triage.primary_complaint, callerSpokenText);
+  }
+  if (triage.summary_en) {
+    triage.summary_en = sanitizeSymptomOrCondition(triage.summary_en, callerSpokenText);
+  }
 
   const isPsych = Boolean(
     tState?.isPsychiatric ||
@@ -1144,3 +1227,32 @@ function normalizeTriageDecision(triage, intake) {
   triage.recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";
   return triage;
 }
+
+/**
+ * Evaluates clinical triage and automatically applies human agent learned overrides.
+ * Any decision (algorithmic or LLM-generated) is checked against active agent feedback rules.
+ */
+export async function evaluateTriage(intake) {
+  const decision = await evaluateRawTriage(intake);
+  if (!decision) return decision;
+
+  try {
+    const override = await applyAlgorithmicFeedbackOverrides(intake, decision);
+    if (override) {
+      return {
+        ...decision,
+        urgency_level: override.urgency_level || decision.urgency_level,
+        referral_destination: override.referral_destination || decision.referral_destination,
+        referral_reason: override.reason || decision.referral_reason,
+        reasoning: `${decision.reasoning || ""} [Agent-Learned Override: ${override.reason}]`.trim(),
+        learned_override_applied: true,
+        learned_from_rule_id: override.learned_from_rule_id,
+      };
+    }
+  } catch (err) {
+    console.warn("[TriageEngine] Algorithmic feedback override check failed:", err.message);
+  }
+
+  return decision;
+}
+

@@ -12,6 +12,7 @@ import {
   Menu,
   PhoneCall,
   X,
+  BrainCircuit,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { api } from "@/lib/api";
@@ -19,11 +20,13 @@ import { AgentLogin } from "@/components/AgentLogin";
 import { CallManager } from "@/components/CallManager";
 import { getFirestoreDb } from "@/lib/firebase";
 import { doc, onSnapshot, deleteDoc, updateDoc } from "firebase/firestore";
+import { resolveClientIpAndGeo } from "@/lib/geoIpResolver";
 
 const NAV_ITEMS = [
   { id: "home", href: "/", label: "Live Intake & Triage", icon: PhoneCall },
   { id: "cases", href: "/cases", label: "Triage Case", icon: FileText },
   { id: "facilities", href: "/facilities", label: "Triage Facility", icon: Building2 },
+  { id: "feedback", href: "/feedback", label: "AI Learning & Feedback", icon: BrainCircuit },
 ];
 
 export function AppShell({ activePage = "home", children }) {
@@ -53,12 +56,46 @@ export function AppShell({ activePage = "home", children }) {
     setAuthInitialized(true);
   }, []);
 
-  // Real-time single active session watcher via Firestore
+  // Real-time single active session watcher via Firestore & Telemetry Sentinel
   useEffect(() => {
     if (!currentAgent?.agentId || !currentAgent?.sessionId) return;
 
     let unsubscribe = null;
     let heartbeatTimer = null;
+
+    // Send initial session registration with resolved client IP & Geo
+    try {
+      resolveClientIpAndGeo()
+        .then((geo) => {
+          fetch("/api/admin/usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "record_agent_session",
+              agentId: currentAgent.agentId,
+              sessionId: currentAgent.sessionId,
+              ipAddress: geo.ipAddress,
+              ipType: geo.ipType,
+              location: geo.location,
+              city: geo.city,
+              region: geo.region,
+              country: geo.country,
+              countryCode: geo.countryCode,
+              postal: geo.postal,
+              latitude: geo.latitude,
+              longitude: geo.longitude,
+              isp: geo.isp,
+              org: geo.org,
+              asn: geo.asn,
+              connectionType: geo.connectionType,
+              os: geo.os,
+              browser: geo.browser,
+              userAgent: geo.userAgent,
+            }),
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    } catch {}
 
     try {
       const db = getFirestoreDb();
@@ -85,12 +122,18 @@ export function AppShell({ activePage = "home", children }) {
         }
       );
 
-      // Keep heartbeat alive every 45 seconds
+      // Keep heartbeat alive every 35 seconds exclusively via in-memory Admin Telemetry (0 Firestore reads!)
       heartbeatTimer = setInterval(() => {
-        updateDoc(sessionDocRef, {
-          lastHeartbeat: Date.now(),
+        fetch("/api/admin/usage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "agent_heartbeat",
+            agentId: currentAgent.agentId,
+            sessionId: currentAgent.sessionId,
+          }),
         }).catch(() => {});
-      }, 45000);
+      }, 35000);
     } catch (e) {
       console.warn("Session monitoring warning:", e.message);
     }
@@ -107,6 +150,17 @@ export function AppShell({ activePage = "home", children }) {
         const db = getFirestoreDb();
         await deleteDoc(doc(db, "sessions", currentAgent.agentId));
       } catch (e) {}
+
+      try {
+        fetch("/api/admin/usage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "agent_logout",
+            agentId: currentAgent.agentId,
+          }),
+        }).catch(() => {});
+      } catch {}
     }
     localStorage.removeItem("ekms_active_agent");
     setCurrentAgent(null);

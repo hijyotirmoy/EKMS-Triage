@@ -116,11 +116,15 @@ async function getFirestoreContext() {
 // Master In-Memory Caches & Timestamps to drastically eliminate repetitive Firestore reads
 let facilitiesCache = null;
 let facilitiesCacheTimestamp = 0;
-const FACILITIES_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour TTL for static facility directory
+const FACILITIES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL for static facility directory
 
 let casesCache = null;
 let casesCacheTimestamp = 0;
-const CASES_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL for cases
+const CASES_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL for cases
+
+let cachedStats = null;
+let cachedStatsTimestamp = 0;
+const STATS_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL for pre-calculated stats
 
 // Facilities operations with smart in-memory caching
 export async function getFacilities(filters = {}) {
@@ -347,7 +351,24 @@ export async function saveCase(caseData) {
   memoryCases.unshift(caseData);
   casesCache = memoryCases;
   casesCacheTimestamp = Date.now();
+  recomputeCachedStats(memoryCases);
   return caseData;
+}
+
+function recomputeCachedStats(casesList) {
+  const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
+  for (const c of casesList) {
+    const level = c.triage?.urgency_level;
+    if (level && by_urgency[level] !== undefined) {
+      by_urgency[level]++;
+    }
+  }
+  cachedStats = {
+    total: casesList.length,
+    by_urgency,
+  };
+  cachedStatsTimestamp = Date.now();
+  return cachedStats;
 }
 
 export async function deleteCase(caseRef) {
@@ -390,6 +411,7 @@ export async function deleteCase(caseRef) {
   memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef && c.id !== caseRef);
   casesCache = memoryCases;
   casesCacheTimestamp = Date.now();
+  recomputeCachedStats(memoryCases);
   return true;
 }
 
@@ -402,16 +424,10 @@ export async function deleteCases(caseRefs = []) {
 }
 
 export async function getCaseStats() {
-  const all = await getCases();
-  const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
-  for (const c of all) {
-    const level = c.triage?.urgency_level;
-    if (level && by_urgency[level] !== undefined) {
-      by_urgency[level]++;
-    }
+  const now = Date.now();
+  if (cachedStats && now - cachedStatsTimestamp < STATS_CACHE_TTL_MS) {
+    return cachedStats;
   }
-  return {
-    total: all.length,
-    by_urgency,
-  };
+  const all = await getCases();
+  return recomputeCachedStats(all);
 }

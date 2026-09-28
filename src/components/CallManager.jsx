@@ -717,7 +717,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       console.warn("Could not set up Firestore listener in CallManager:", e.message);
     }
 
-    // 2. Periodic check fallback for remote calls
+    // 2. Periodic backup check for remote calls (runs at a gentle 18s cadence since real-time onSnapshot listener is already active)
     pollIntervalRef.current = setInterval(async () => {
       if (session.state === "idle") {
         try {
@@ -736,7 +736,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
           }
         } catch (e) {}
       }
-    }, 2000);
+    }, 18000);
 
     return () => {
       if (unsubscribeIncoming) {

@@ -10,8 +10,9 @@ import {
   DOMAIN_LABELS,
   getDiseaseProbingProtocol,
 } from "./clinicalAdaptiveEngine.js";
-import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus } from "./triageEngine.js";
+import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
+import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
@@ -30,12 +31,17 @@ CORE CLINICAL RULES:
    - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
    - Dual Emergency: If acute self-harm/physical trauma + psychiatric crisis, prioritize physical emergency dispatch (108 Ambulance) with concurrent psychiatric counselling support.
 8. REFERRAL TIMING: On Turns 1-2, return referralDestination: null unless acute 108 emergency or direct caller preference. On Turn 3+, synthesize findings for referral recommendation.
+9. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
+   - We are triage helpline call operators, NOT diagnosing doctors.
+   - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes (e.g. NEVER hypothesize 'Renal Colic', 'Kidney Stone', 'Appendicitis', 'Pathology', 'Ulcer', 'Myocardial Infarction', etc.) unless the caller explicitly named that disease in their own words.
+   - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'High Fever', 'Throbbing Headache', 'Limb Injury').
+   - NEVER suggest or name specific medicines, drugs, tablets, or injections.
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
   "probingQuestion": "Ask the IP: '...' (Hinglish: ...)",
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
-  "suspectedCondition": "Primary suspected condition",
+  "suspectedCondition": "Reported symptom area only (e.g. 'Abdominal Pain / Cramps'); NEVER diagnose a disease",
   "isPsychiatric": true | false,
   "severity": "High" | "Moderate" | "Mild",
   "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "ESIC Hospital" | "ESIS Dispensary" | "104 Medical Team" | "e-Sanjeevani" | "Nearest Pharmacy" | "Forward to Doctor" | null,
@@ -43,7 +49,7 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
   "duration": "detected duration or accident time",
   "isReadyForSummary": true | false,
-  "clinicalSummary": "Concise structured triage summary in English"
+  "clinicalSummary": "Concise symptom-based triage summary in English without diagnosing diseases"
 }`;
 
 /**
@@ -320,6 +326,12 @@ export async function processDoctorConsultationTurn({
 
   const userTurnsCount = history.filter((m) => m.sender === "user" || m.role === "user").length + 1;
 
+  // Retrieve any learned feedback rules from human agents relevant to current caller presentation
+  const learnedSnippet = await buildLearnedPromptSnippet(
+    `${cleanInput} ${currentClinicalState.suspectedCondition || ""}`,
+    "probing"
+  );
+
   // =========================================================================
   // MULTI-PROVIDER AI CASCADE ARCHITECTURE
   // Priority: 1. Groq Multi-Key Pool (qwen/qwen3.8-27b, 30+ Keys failover, instant ~400ms)
@@ -341,7 +353,7 @@ export async function processDoctorConsultationTurn({
         role: "user",
         content: `Caller: "${cleanInput}".
 Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
-Already asked: ${JSON.stringify(askedQuestionsList)}.
+Already asked: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format:
 { "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
@@ -389,7 +401,7 @@ ${conversationText}
 CURRENT CALLER INPUT: "${cleanInput}"
 CLINICAL CONTEXT: Suspected: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}
 ALREADY ASKED QUESTIONS: ${JSON.stringify(askedQuestionsList)}
-
+${learnedSnippet ? `\n${learnedSnippet}\n` : ""}
 Strictly return a JSON object with:
 {
   "probingQuestion": "Ask the IP: ... (Hinglish: ...)",
@@ -457,7 +469,7 @@ Strictly return a JSON object with:
             role: "user",
             content: `Caller: "${cleanInput}".
 Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
-Already asked: ${JSON.stringify(askedQuestionsList)}.
+Already asked: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format:
 { "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
@@ -1464,16 +1476,25 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   const isDual = Boolean(raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
   const secondaryRef = raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
 
+  const userUtterances = [
+    cleanInput,
+    ...history
+      .filter((m) => m.sender === "user" || m.role === "user")
+      .map((m) => (typeof m.content === "string" ? m.content : m.text || "")),
+  ]
+    .join(" ")
+    .toLowerCase();
+
   let finalCondition = raw.suspectedCondition;
   if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
     finalCondition = "Traumatic Fall / Impact Injury Assessment";
   } else if (/Caller reports/i.test(finalCondition)) {
     if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(allContext)) {
-      finalCondition = "Snake Bite (Type undetermined) / Local Tissue Reaction";
+      finalCondition = "Snake Bite / Envenomation Assessment";
     } else if (/\b(chest pain|chhati|heart)\b/i.test(allContext)) {
-      finalCondition = "Suspected Acute Coronary Syndrome";
+      finalCondition = "Acute Chest Pain / Discomfort";
     } else if (/\b(fever|bukhar)\b/i.test(allContext)) {
-      finalCondition = "Febrile Illness / Pyrexia under Investigation";
+      finalCondition = "Febrile Symptoms / Fever";
     } else {
       const cleaned = finalCondition.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
       finalCondition = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
@@ -1483,17 +1504,11 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   } else if (is104PhoneDoctor) {
     finalCondition = "104 Tele-Doctor Consultation";
   } else if (!finalCondition) {
-    finalCondition = "Under Clinical Assessment";
+    finalCondition = "Clinical Assessment";
   }
 
-  const userUtterances = [
-    cleanInput,
-    ...history
-      .filter((m) => m.sender === "user" || m.role === "user")
-      .map((m) => (typeof m.content === "string" ? m.content : m.text || "")),
-  ]
-    .join(" ")
-    .toLowerCase();
+  // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
+  finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
 
   const callerDeniesFever =
     /\b(no fever|nehi|nahi|not having fever|without fever|fever nahi|bukhar nahi|no chills|mild discomfort|just not feeling good)\b/i.test(
@@ -1546,9 +1561,11 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     redFlagsDetected: filteredRedFlags,
     duration,
     isReadyForSummary: Boolean(raw.isReadyForSummary || (history.length >= 6) || is104PhoneDoctor),
-    clinicalSummary:
+    clinicalSummary: sanitizeSymptomOrCondition(
       raw.clinicalSummary ||
-      `Caller presents with ${raw.suspectedCondition || "complaint"}. Evaluated Severity: ${severity}. Duration: ${duration}. Recommended Action: ${referralDestination}.`,
+        `Caller presents with ${finalCondition || "symptoms"}. Evaluated Severity: ${severity}. Duration: ${duration}. Recommended Action: ${referralDestination || "Medical Evaluation"}.`,
+      userUtterances
+    ),
   };
 }
 

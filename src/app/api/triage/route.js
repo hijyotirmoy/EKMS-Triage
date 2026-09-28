@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getFacilities, saveCase } from "@/lib/db";
-import { resolveCallerLocation, rankNearestFacilities, isTieUp } from "@/lib/geo";
+import { resolveCallerLocation, rankNearestFacilities, isTieUp, isHospital, isDispensary } from "@/lib/geo";
 import { evaluateTriage, summarizeRedFlags } from "@/lib/triageEngine";
 
 export const dynamic = "force-dynamic";
@@ -167,49 +167,58 @@ export async function POST(request) {
     const hour = istDate.getHours();
     const isAfter7PM = hour >= 19 || hour < 5;
 
-    // Check if direct ESIS or ESIC facility is available in caller vicinity (within 35 km)
-    const hasNearbyEsicOrEsis = nearest_facilities.some(
-      (f) => !isTieUp(f) && f.distance_km != null && f.distance_km <= 35
+    // RULE: Forward to Tie-Up hospital ONLY when ESIC Hospital and ESIS Dispensary are NOT available within 15 km radius!
+    const esicOrEsisWithin15Km = nearest_facilities.filter(
+      (f) => !isTieUp(f) && f.distance_km != null && f.distance_km <= 15
     );
-    const nearbyTieUp = nearest_facilities.find((f) => isTieUp(f));
+    const hasEsicOrEsisWithin15Km = esicOrEsisWithin15Km.length > 0;
 
-    // If neither ESIS nor ESIC facility is available nearby, route to nearest Empanelled Tie-Up Facility
-    if (!hasNearbyEsicOrEsis && nearbyTieUp && !hasSpecialReferral) {
-      triage.recommended_facility_type = `${nearbyTieUp.name} (Empanelled Tie-Up Facility)`;
-      triage.recommended_action = `Refer caller to nearest empanelled tie-up facility: ${nearbyTieUp.name} (${nearbyTieUp.pincode ? `PIN: ${nearbyTieUp.pincode}, ` : ""}${nearbyTieUp.distance_km != null ? `${nearbyTieUp.distance_km} km` : "nearest"}) with Pehchan card for cashless medical treatment as no direct ESIC/ESIS facility is within immediate reach.`;
-      triage.referral_destination = nearbyTieUp.name || "Tie-Up Facility";
-      triage.call_referral_primary = nearbyTieUp.name || "Tie-Up Facility";
-      triage.call_referral_primary_reason = `Direct to nearest empanelled tie-up hospital (${nearbyTieUp.name}) for cashless medical care with Pehchan card.`;
-      if (isAfter7PM) {
+    const directGovHospital = nearest_facilities.find((f) => !isTieUp(f) && isHospital(f));
+    const directGovDispensary = nearest_facilities.find((f) => !isTieUp(f) && isDispensary(f));
+    const nearestTieUp = nearest_facilities.find((f) => isTieUp(f));
+
+    if (hasEsicOrEsisWithin15Km && !hasSpecialReferral) {
+      // Direct government ESIC Hospital or ESIS Dispensary IS within 15 km!
+      // NEVER route to Tie-Up Hospital here.
+      if (isSevere) {
+        const destHospital = (directGovHospital && directGovHospital.distance_km <= 15) ? directGovHospital : esicOrEsisWithin15Km[0];
+        triage.recommended_facility_type = `${destHospital.name} (Emergency Hospital)`;
+        triage.recommended_action = `Advise patient to proceed immediately to ${destHospital.name} (${destHospital.pincode ? `PIN: ${destHospital.pincode}, ` : ""}${destHospital.distance_km != null ? `${destHospital.distance_km} km` : "nearest"}) casualty or emergency OPD.`;
+        triage.referral_destination = destHospital.name || "ESIC Hospital";
+        triage.call_referral_primary = destHospital.name || "ESIC Hospital";
+        triage.call_referral_primary_reason = `Direct patient to ${destHospital.name} for urgent medical examination and acute clinical care.`;
+      } else {
+        const destDispensary = (directGovDispensary && directGovDispensary.distance_km <= 15) ? directGovDispensary : esicOrEsisWithin15Km[0];
+        triage.recommended_facility_type = `${destDispensary.name} (Primary Care Dispensary)`;
+        triage.recommended_action = `Advise patient to visit ${destDispensary.name} (${destDispensary.pincode ? `PIN: ${destDispensary.pincode}, ` : ""}${destDispensary.distance_km != null ? `${destDispensary.distance_km} km` : "nearest"}) during regular OPD hours for doctor examination and prescription.`;
+        triage.referral_destination = destDispensary.name || "ESIS Dispensary";
+        triage.call_referral_primary = destDispensary.name || "ESIS Dispensary";
+        triage.call_referral_primary_reason = `Direct patient to ${destDispensary.name} during OPD hours for physical checkup and routine medicines.`;
+      }
+
+      if (isAfter7PM && !triage.call_referral_secondary) {
         triage.call_referral_secondary = "104 Medical Team";
         triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for immediate tele-consultation over the phone.";
       }
-    } else if (topFacility && !hasSpecialReferral) {
-      const isTopTieUp = isTieUp(topFacility);
-      if (isTopTieUp) {
-        triage.recommended_facility_type = `${topFacility.name} (Empanelled Tie-Up Facility)`;
-        triage.recommended_action = `Advise patient to visit nearest empanelled tie-up facility: ${topFacility.name} (${topFacility.pincode ? `PIN: ${topFacility.pincode}, ` : ""}${topFacility.distance_km != null ? `${topFacility.distance_km} km` : "nearest"}) with Pehchan card for cashless medical treatment.`;
-        triage.referral_destination = topFacility.name || "Tie-Up Facility";
-        triage.call_referral_primary = topFacility.name || "Tie-Up Facility";
-        triage.call_referral_primary_reason = `Direct to nearest empanelled tie-up hospital (${topFacility.name}) for cashless medical care with Pehchan card.`;
-        if (isAfter7PM) {
-          triage.call_referral_secondary = "104 Medical Team";
-          triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for tele-consultation over the phone.";
-        }
-      } else if (isSevere) {
-        triage.recommended_facility_type = `${topFacility.name} (Emergency Hospital)`;
-        triage.recommended_action = `Advise patient to proceed immediately to ${topFacility.name} (${topFacility.pincode ? `PIN: ${topFacility.pincode}, ` : ""}${topFacility.distance_km != null ? `${topFacility.distance_km} km` : "nearest"}) casualty or emergency OPD.`;
-        if (isAfter7PM && !triage.call_referral_secondary) {
-          triage.call_referral_secondary = "104 Medical Team";
-          triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for immediate tele-consultation.";
-        }
-      } else {
-        triage.recommended_facility_type = `${topFacility.name} (Primary Care Dispensary)`;
-        triage.recommended_action = `Advise patient to visit ${topFacility.name} (${topFacility.pincode ? `PIN: ${topFacility.pincode}, ` : ""}${topFacility.distance_km != null ? `${topFacility.distance_km} km` : "nearest"}) during regular OPD hours for doctor examination and prescription.`;
-        if (isAfter7PM && !triage.call_referral_secondary) {
-          triage.call_referral_secondary = "104 Medical Team";
-          triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for tele-consultation over the phone.";
-        }
+    } else if (!hasSpecialReferral) {
+      // Neither ESIC Hospital nor ESIS Dispensary is available within 15 km radius!
+      // Here, and ONLY here, we route to the nearest Empanelled Tie-Up Facility:
+      if (nearestTieUp) {
+        triage.recommended_facility_type = `${nearestTieUp.name} (Empanelled Tie-Up Facility)`;
+        triage.recommended_action = `No ESIC Hospital or Dispensary is available within 15 km. Refer patient to nearest empanelled tie-up facility: ${nearestTieUp.name} (${nearestTieUp.pincode ? `PIN: ${nearestTieUp.pincode}, ` : ""}${nearestTieUp.distance_km != null ? `${nearestTieUp.distance_km} km` : "nearest"}) with Pehchan card for cashless medical treatment.`;
+        triage.referral_destination = nearestTieUp.name || "Tie-Up Facility";
+        triage.call_referral_primary = nearestTieUp.name || "Tie-Up Facility";
+        triage.call_referral_primary_reason = `Direct to nearest empanelled tie-up hospital (${nearestTieUp.name}) for cashless care as direct ESIC/ESIS facilities are beyond 15 km.`;
+      } else if (topFacility) {
+        triage.recommended_facility_type = `${topFacility.name}`;
+        triage.recommended_action = `Advise patient to proceed to ${topFacility.name} for medical evaluation.`;
+        triage.referral_destination = topFacility.name;
+        triage.call_referral_primary = topFacility.name;
+      }
+
+      if (isAfter7PM && !triage.call_referral_secondary) {
+        triage.call_referral_secondary = "104 Medical Team";
+        triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for tele-consultation over the phone.";
       }
     }
 

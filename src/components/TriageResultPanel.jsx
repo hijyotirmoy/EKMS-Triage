@@ -25,6 +25,7 @@ import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
+import { AiFeedbackLearningCard } from "./AiFeedbackLearningCard";
 import { isHospital, isDispensary, isTieUp } from "../lib/geo";
 
 export const ACTION_DIRECTIVES = {
@@ -850,6 +851,12 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
               result={result}
               activeDirective={activeDirective}
               allRedFlags={allRedFlags}
+              callerIntake={callerIntake}
+            />
+
+            {/* AI & Algorithmic Continuous Learning Feedback Card */}
+            <AiFeedbackLearningCard
+              result={result}
               callerIntake={callerIntake}
             />
           </div>
