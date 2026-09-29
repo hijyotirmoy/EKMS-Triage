@@ -12,6 +12,7 @@ import {
 } from "./clinicalAdaptiveEngine.js";
 import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
+import { executeCentralizedLlmProxy } from "./llmProxy.js";
 import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
@@ -352,7 +353,7 @@ export async function processDoctorConsultationTurn({
   //           5. Local Deterministic Clinical Engine
   // =========================================================================
 
-  // --- Priority 1: Groq Cloud AI API with Multi-Key Pool (Ultra-fast, high clinical accuracy) ---
+  // --- Priority 1: Master Centralized LLM Proxy (Groq 21-Key Pool -> Gemini -> Claude -> Other) ---
   try {
     const conversationMessages = [
       { role: "system", content: SYSTEM_PROMPT },
@@ -371,23 +372,22 @@ Respond strictly in valid JSON format:
       },
     ];
 
-    const groqResult = await groqChatCompletion({
+    const proxyResult = await executeCentralizedLlmProxy({
       messages: conversationMessages,
-      candidateModels: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b"],
-      response_format: { type: "json_object" },
+      system: SYSTEM_PROMPT,
       temperature: 0.3,
       max_tokens: 384,
-      timeoutMs: 6500,
+      response_format: { type: "json_object" },
     });
 
-    if (groqResult?.content) {
-      const parsed = JSON.parse(groqResult.content);
+    if (proxyResult?.content) {
+      const parsed = JSON.parse(proxyResult.content);
       if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
         return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
       }
     }
-  } catch (groqErr) {
-    console.warn("[AI Cascade] Groq multi-key pool fallback:", groqErr.message);
+  } catch (proxyErr) {
+    console.warn("[DoctorChat] Centralized LLM Proxy cascade fallback:", proxyErr.message);
   }
 
   // --- Priority 2: Google Gemini AI API ---

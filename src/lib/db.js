@@ -126,48 +126,38 @@ let cachedStats = null;
 let cachedStatsTimestamp = 0;
 const STATS_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL for pre-calculated stats
 
-// Facilities operations with smart in-memory caching
+// Facilities operations directly connected with Firestore
 export async function getFacilities(filters = {}) {
   const { q, district, facility_type } = filters;
-  const now = Date.now();
 
-  let list = facilitiesCache;
-
-  // Only read from Firestore if cache is empty or older than 1 hour TTL
-  if (!list || now - facilitiesCacheTimestamp > FACILITIES_CACHE_TTL_MS) {
-    const ctx = await getFirestoreContext();
-    list = memoryFacilities;
-    if (ctx) {
-      try {
-        let firestoreList = [];
-        if (ctx.type === "admin") {
-          const snap = await ctx.db.collection("facilities").get();
-          if (!snap.empty) {
-            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          }
-        } else {
-          const { collection, getDocs } = await import("firebase/firestore");
-          const snap = await getDocs(collection(ctx.db, "facilities"));
-          if (!snap.empty) {
-            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          }
+  let list = [];
+  const ctx = await getFirestoreContext();
+  if (ctx) {
+    try {
+      let firestoreList = [];
+      if (ctx.type === "admin") {
+        const snap = await ctx.db.collection("facilities").get();
+        if (!snap.empty) {
+          firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         }
-        if (firestoreList.length > 0) {
-          const map = new Map();
-          defaultFacilities.forEach((f) => map.set(f.id || f.name, f));
-          firestoreList.forEach((f) => {
-            const existing = map.get(f.id || f.name) || {};
-            map.set(f.id || f.name, { ...existing, ...f });
-          });
-          list = Array.from(map.values());
+      } else {
+        const { collection, getDocs } = await import("firebase/firestore");
+        const snap = await getDocs(collection(ctx.db, "facilities"));
+        if (!snap.empty) {
+          firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         }
-      } catch (e) {
-        // Fallback gracefully to memoryFacilities
       }
+      if (firestoreList.length > 0) {
+        list = firestoreList;
+      }
+    } catch (e) {
+      console.warn("Firestore facilities fetch error:", e.message);
     }
-    facilitiesCache = list;
-    facilitiesCacheTimestamp = now;
-    memoryFacilities = list;
+  }
+
+  // Fallback to default facilities if Firestore was empty
+  if (!list.length) {
+    list = defaultFacilities;
   }
 
   return list.filter((f) => {
@@ -190,7 +180,7 @@ export async function getFacilities(filters = {}) {
       const query = q.toLowerCase();
       const matchName = f.name?.toLowerCase().includes(query);
       const matchAddr = f.address?.toLowerCase().includes(query);
-      const matchPin = f.pincode?.includes(query);
+      const matchPin = f.pincode ? String(f.pincode).toLowerCase().includes(query) : false;
       if (!matchName && !matchAddr && !matchPin) return false;
     }
     return true;
@@ -218,10 +208,7 @@ export async function addFacilities(newItems) {
       console.warn("Could not batch write facilities to Firestore:", e.message);
     }
   }
-  memoryFacilities = [...newItems, ...memoryFacilities];
-  facilitiesCache = memoryFacilities;
-  facilitiesCacheTimestamp = Date.now();
-  return memoryFacilities.length;
+  return newItems.length;
 }
 
 export async function deleteFacilities(ids) {

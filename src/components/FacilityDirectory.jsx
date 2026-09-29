@@ -243,23 +243,23 @@ export const FacilityDirectory = ({ meta, onImported }) => {
             ))}
           </select>
 
-          {/* Download Sample Button with Dropdown */}
+          {/* Template Button with Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button
               type="button"
               data-testid="download-sample-button"
               onClick={() => setShowSampleDropdown((prev) => !prev)}
               className="flex items-center gap-1.5 rounded-md border border-border/80 bg-secondary/60 px-3 py-2 text-xs font-semibold text-foreground transition-all duration-200 hover:bg-secondary hover:border-primary/50"
-              title="Download sample template with 3 example facilities"
+              title="Download sample template"
             >
-              <Download className="h-3.5 w-3.5 text-primary" />
-              <span>Sample Template</span>
+              <FileSpreadsheet className="h-3.5 w-3.5 text-primary" />
+              <span>Template</span>
             </button>
 
             {showSampleDropdown && (
               <div className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-md border border-border/80 bg-card p-1.5 shadow-xl animate-in fade-in zoom-in-95">
                 <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground">
-                  Download 3-Example Template:
+                  Download Sample Template:
                 </p>
                 <a
                   href="/api/facilities/sample?format=xlsx"
@@ -270,7 +270,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
                   <FileSpreadsheet className="h-4 w-4 text-emerald-500" />
                   <div>
                     <p className="font-semibold leading-tight">Excel (.xlsx)</p>
-                    <p className="text-[10px] text-muted-foreground">Standard spreadsheet with 3 samples</p>
+                    <p className="text-[10px] text-muted-foreground">Standard spreadsheet with samples</p>
                   </div>
                 </a>
                 <a
@@ -282,14 +282,14 @@ export const FacilityDirectory = ({ meta, onImported }) => {
                   <FileText className="h-4 w-4 text-sky-500" />
                   <div>
                     <p className="font-semibold leading-tight">CSV (.csv)</p>
-                    <p className="text-[10px] text-muted-foreground">Comma-separated with 3 samples</p>
+                    <p className="text-[10px] text-muted-foreground">Comma-separated with samples</p>
                   </div>
                 </a>
               </div>
             )}
           </div>
 
-          {/* Import CSV / Excel */}
+          {/* Import Button */}
           <input
             ref={fileRef}
             type="file"
@@ -301,11 +301,27 @@ export const FacilityDirectory = ({ meta, onImported }) => {
           <button
             data-testid="facility-import-csv-button"
             onClick={() => fileRef.current?.click()}
-            className="flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-bold text-primary-foreground transition-all duration-200 hover:brightness-110 shadow-sm"
+            className="flex items-center gap-2 rounded-md bg-secondary/80 border border-border/80 px-3 py-2 text-xs font-semibold text-foreground transition-all duration-200 hover:bg-secondary hover:border-primary/50 shadow-sm"
+            title="Import facilities from CSV or Excel file"
           >
-            <Upload className="h-3.5 w-3.5" />
-            <span>Import CSV / Excel</span>
+            <Upload className="h-3.5 w-3.5 text-primary" />
+            <span>Import</span>
           </button>
+
+          {/* Export Button */}
+          <a
+            href="/api/facilities/export?format=xlsx"
+            download="facilities_export.xlsx"
+            data-testid="facility-export-button"
+            className="flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-bold text-primary-foreground transition-all duration-200 hover:brightness-110 shadow-sm"
+            title="Export all facility data to Excel (.xlsx)"
+            onClick={() => {
+              toast.success("Downloading facility export Excel file...");
+            }}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export</span>
+          </a>
         </div>
       </div>
 

@@ -526,9 +526,6 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       setInterimTranscript(null);
       setIsManualRecording(false);
       isManualRecordingRef.current = false;
-      try {
-        localStorage.removeItem("ekms_scribe_sync");
-      } catch (e) {}
 
       try {
         const channel1 = new BroadcastChannel("ekms-call-channel");
@@ -540,21 +537,9 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
         channel2.onmessage = (event) => handleIncomingTranscript(event.data);
       } catch (e) {}
 
-      // Cross-tab window storage event listener (guaranteed delivery across tabs/browsers on same origin)
-      const onStorage = (event) => {
-        if (event.key === "ekms_scribe_sync" && event.newValue) {
-          try {
-            const parsed = JSON.parse(event.newValue);
-            handleIncomingTranscript(parsed);
-          } catch (e) {}
-        }
-      };
-      window.addEventListener("storage", onStorage);
-
       return () => {
         bChannelRef.current?.close();
         scribeChannelRef.current?.close();
-        window.removeEventListener("storage", onStorage);
       };
     }
   }, []);

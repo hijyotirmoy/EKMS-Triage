@@ -111,9 +111,6 @@ export default function IpCallerPage() {
         });
         bChannelRef.current?.postMessage(msg);
         scribeChannelRef.current?.postMessage(msg);
-        try {
-          localStorage.setItem("ekms_scribe_sync", JSON.stringify({ ...msg, _ts: Date.now() }));
-        } catch (e) {}
         if (activeCallId) {
           try {
             const db = getFirestoreDb();

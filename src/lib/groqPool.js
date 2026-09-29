@@ -136,16 +136,6 @@ export async function executeGroqWithFailover(fn, { label = "Groq", maxAttempts 
       if (result) {
         if (result.status === 429) {
           markKeyRateLimited(activeKey, 60000);
-          try {
-            const { recordRateLimitIncident } = await import("./apiUsageTracker.js");
-            recordRateLimitIncident({
-              provider: "Groq",
-              model: label || "llama-3.3-70b-versatile",
-              key: activeKey,
-              reason: `TPM/RPM Rate Limit (Key #${activeIdx + 1} throttled)`,
-              cooldownSec: 60,
-            });
-          } catch {}
           console.warn(
             `[GroqPool:${label}] Key #${activeIdx + 1} (${maskKey(activeKey)}) rate limited (429). Switching instantly to next key...`
           );
@@ -224,17 +214,6 @@ export async function groqChatCompletion({
 
           if (res.ok) {
             const data = await res.json();
-            try {
-              const { recordApiUsage } = await import("./apiUsageTracker.js");
-              recordApiUsage({
-                provider: "groq",
-                model: m,
-                key: activeKey,
-                promptTokens: data.usage?.prompt_tokens,
-                completionTokens: data.usage?.completion_tokens,
-                totalTokens: data.usage?.total_tokens,
-              });
-            } catch {}
             return {
               ok: true,
               data,

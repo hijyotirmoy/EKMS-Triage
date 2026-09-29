@@ -42,10 +42,10 @@ export function AppShell({ activePage = "home", children }) {
   const [currentAgent, setCurrentAgent] = useState(null);
   const [authInitialized, setAuthInitialized] = useState(false);
 
-  // Load active agent from localStorage on mount
+  // Load active agent on mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("ekms_active_agent");
+      const stored = sessionStorage.getItem("ekms_active_agent");
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.agentId && parsed?.sessionId) {
@@ -56,46 +56,11 @@ export function AppShell({ activePage = "home", children }) {
     setAuthInitialized(true);
   }, []);
 
-  // Real-time single active session watcher via Firestore & Telemetry Sentinel
+  // Real-time single active session watcher via Firestore
   useEffect(() => {
     if (!currentAgent?.agentId || !currentAgent?.sessionId) return;
 
     let unsubscribe = null;
-    let heartbeatTimer = null;
-
-    // Send initial session registration with resolved client IP & Geo
-    try {
-      resolveClientIpAndGeo()
-        .then((geo) => {
-          fetch("/api/admin/usage", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "record_agent_session",
-              agentId: currentAgent.agentId,
-              sessionId: currentAgent.sessionId,
-              ipAddress: geo.ipAddress,
-              ipType: geo.ipType,
-              location: geo.location,
-              city: geo.city,
-              region: geo.region,
-              country: geo.country,
-              countryCode: geo.countryCode,
-              postal: geo.postal,
-              latitude: geo.latitude,
-              longitude: geo.longitude,
-              isp: geo.isp,
-              org: geo.org,
-              asn: geo.asn,
-              connectionType: geo.connectionType,
-              os: geo.os,
-              browser: geo.browser,
-              userAgent: geo.userAgent,
-            }),
-          }).catch(() => {});
-        })
-        .catch(() => {});
-    } catch {}
 
     try {
       const db = getFirestoreDb();
@@ -112,7 +77,7 @@ export function AppShell({ activePage = "home", children }) {
               toast.error(
                 `Your session was terminated because ${currentAgent.agentId} logged in from another device/tab.`
               );
-              localStorage.removeItem("ekms_active_agent");
+              sessionStorage.removeItem("ekms_active_agent");
               setCurrentAgent(null);
             }
           }
@@ -121,26 +86,12 @@ export function AppShell({ activePage = "home", children }) {
           console.warn("Session snapshot notice:", err.message);
         }
       );
-
-      // Keep heartbeat alive every 35 seconds exclusively via in-memory Admin Telemetry (0 Firestore reads!)
-      heartbeatTimer = setInterval(() => {
-        fetch("/api/admin/usage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "agent_heartbeat",
-            agentId: currentAgent.agentId,
-            sessionId: currentAgent.sessionId,
-          }),
-        }).catch(() => {});
-      }, 35000);
     } catch (e) {
       console.warn("Session monitoring warning:", e.message);
     }
 
     return () => {
       if (unsubscribe) unsubscribe();
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
     };
   }, [currentAgent]);
 
@@ -150,19 +101,8 @@ export function AppShell({ activePage = "home", children }) {
         const db = getFirestoreDb();
         await deleteDoc(doc(db, "sessions", currentAgent.agentId));
       } catch (e) {}
-
-      try {
-        fetch("/api/admin/usage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "agent_logout",
-            agentId: currentAgent.agentId,
-          }),
-        }).catch(() => {});
-      } catch {}
     }
-    localStorage.removeItem("ekms_active_agent");
+    sessionStorage.removeItem("ekms_active_agent");
     setCurrentAgent(null);
     toast.info("Logged out successfully");
   };
@@ -207,7 +147,7 @@ export function AppShell({ activePage = "home", children }) {
     }
   }, [activePage, router]);
 
-  // Loading indicator before reading localStorage
+  // Loading indicator before reading session
   if (!authInitialized) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">

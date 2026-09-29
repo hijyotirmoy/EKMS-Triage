@@ -1,5 +1,6 @@
 // Clinical Triage Evaluation Engine
 import { groqChatCompletion } from "./groqPool.js";
+import { executeCentralizedLlmProxy } from "./llmProxy.js";
 import {
   buildLearnedPromptSnippet,
   applyAlgorithmicFeedbackOverrides,
@@ -701,153 +702,32 @@ async function evaluateRawTriage(intake) {
     return decision;
   }
 
-  // 1. Direct Google Gemini Flash (3.6 / 3.5 / latest) - Primary for Triage Evaluation
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    const candidateGeminiModels = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"];
-    for (const geminiModel of candidateGeminiModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000);
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    {
-                      text: `You are an expert ESIC / ESIS medical triage clinical evaluator for Indian call centers in Assam. Evaluate the caller's intake details and output strict valid JSON only (no markdown, no backticks):
-{
-  "urgency_level": "Emergency" | "Urgent" | "Routine" | "Self-care",
-  "urgency_score": 1-10,
-  "confidence": "high" | "medium" | "low",
-  "summary_en": "concise 1-2 sentence clinical summary in English",
-  "summary_hi": "concise 1-2 sentence clinical summary in Hindi",
-  "reasoning": "clinical justification for triage score",
-  "red_flags": ["list of red flags if any"],
-  "recommended_facility_type": "Nearest ESIC Hospital / Emergency Casualty" | "ESIC Dispensary / OPD",
-  "recommended_action": "clear action step for patient",
-  "call_108": true | false,
-  "detected_language": "English" | "Hindi" | "Hinglish",
-}
-${learnedSnippet ? `\n${learnedSnippet}\n` : ""}
-Intake data:
-${JSON.stringify(intake, null, 2)}`,
-                    },
-                  ],
-                },
-              ],
-            }),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-            return normalizeTriageDecision(JSON.parse(cleaned), intake);
-          }
-        }
-      } catch (e) {
-        console.warn(`[Triage Cascade] Gemini (${geminiModel}) evaluation error:`, e.message);
-      }
-    }
-  }
-
-  // 2. Claude API (Direct Anthropic or Dhwani Claude ESIC Proxy) - Primary for Triage Evaluation
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-3-5-sonnet-20241022",
-          max_tokens: 1000,
-          system: `You are an expert ESIC / ESIS medical triage assistant for call center operators in Assam, India. Evaluate symptoms and output strict JSON with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence ('high'|'medium'|'low'), summary_en, summary_hi, reasoning, red_flags (array of strings), recommended_facility_type, recommended_action, call_108 (boolean), detected_language ('English'|'Hindi'|'Hinglish'), followup_questions (array of 2-3 questions).${learnedSnippet ? `\n\n${learnedSnippet}` : ""}`,
-          messages: [
-            {
-              role: "user",
-              content: JSON.stringify(intake),
-            },
-          ],
-        }),
-      });
-      const data = await res.json();
-      const content = data.content?.[0]?.text;
-      if (content) {
-        const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
-        return normalizeTriageDecision(JSON.parse(cleaned), intake);
-      }
-    } catch (err) {
-      console.warn("[Triage Cascade] Direct Anthropic API call failed:", err.message);
-    }
-  }
-
-  // Dhwani Claude ESIC Proxy
-  const dhwaniKey = process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY;
-  if (dhwaniKey) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch("https://esicdemotriage.dhwaniris.in/api/triage", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": dhwaniKey,
-        },
-        body: JSON.stringify({
-          symptom_notes: intake.symptom_notes,
-          age: intake.age ? Number(intake.age) : null,
-          sex: intake.sex || null,
-          severity_reported: intake.severity_reported ? Number(intake.severity_reported) : 5,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.triage) {
-          return normalizeTriageDecision(data.triage, intake);
-        }
-      }
-    } catch (err) {
-      console.warn("[Triage Cascade] Dhwani Claude Proxy failed:", err.message);
-    }
-  }
-
-  // 3. Groq Cloud Multi-Key AI triage evaluation (Secondary/Fallback across 21 keys)
+  // 1. Primary AI Evaluation via Centralized LLM Proxy (Groq 21-Keys -> Gemini -> Claude -> Other)
   try {
-    const groqResult = await groqChatCompletion({
+    const triageSystemPrompt = `You are an expert ESIC / ESIS medical triage clinical evaluator in Assam, India. Evaluate symptoms and output strict JSON with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence ('high'|'medium'|'low'), summary_en, summary_hi, reasoning, red_flags (array of strings), recommended_facility_type, recommended_action, call_108 (boolean), detected_language ('English'|'Hindi'|'Hinglish'), followup_questions (array of 2-3 questions).${learnedSnippet ? `\n\n${learnedSnippet}` : ""}`;
+    const proxyResult = await executeCentralizedLlmProxy({
       messages: [
         {
           role: "system",
-          content: `You are an expert ESIC / ESIS medical triage clinical evaluator in India. Output strict valid JSON only with keys: urgency_level ('Emergency'|'Urgent'|'Routine'|'Self-care'), urgency_score (1-10), confidence, summary_en, summary_hi, reasoning, red_flags, recommended_facility_type, recommended_action, call_108, detected_language, followup_questions.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}`,
+          content: triageSystemPrompt,
         },
         {
           role: "user",
-          content: JSON.stringify(intake),
+          content: `Intake data:\n${JSON.stringify(intake, null, 2)}`,
         },
       ],
-      candidateModels: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b"],
+      system: triageSystemPrompt,
       response_format: { type: "json_object" },
       max_tokens: 800,
-      timeoutMs: 7000,
+      temperature: 0.2,
     });
 
-    if (groqResult?.content) {
-      return normalizeTriageDecision(JSON.parse(groqResult.content), intake);
+    if (proxyResult?.content) {
+      const cleaned = proxyResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
+      return normalizeTriageDecision(JSON.parse(cleaned), intake);
     }
-  } catch (groqErr) {
-    console.warn("[Triage Cascade] Groq multi-key pool fallback:", groqErr.message);
+  } catch (proxyErr) {
+    console.warn("[Triage Cascade] Centralized LLM Proxy evaluation error:", proxyErr.message);
   }
 
   // 3. Deterministic Clinical Evaluation Engine (Fallback or offline)

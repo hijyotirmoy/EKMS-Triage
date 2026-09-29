@@ -73,9 +73,6 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       hasClearedOnMountRef.current = true;
       callSession.clearTranscripts();
       callSession.stopManualRecording?.();
-      try {
-        localStorage.removeItem("ekms_scribe_sync");
-      } catch (e) {}
     }
   }, [callSession?.clearTranscripts]);
 
@@ -303,7 +300,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
     let rawAgent = currentAgent?.agentId;
     if (!rawAgent) {
       try {
-        const stored = localStorage.getItem("ekms_active_agent");
+        const stored = sessionStorage.getItem("ekms_active_agent");
         if (stored) {
           const parsed = JSON.parse(stored);
           rawAgent = parsed?.agentId;
@@ -482,9 +479,6 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
               chatRef.current?.resetChat();
               callSession?.clearTranscripts?.();
               callSession?.stopManualRecording?.();
-              try {
-                localStorage.removeItem("ekms_scribe_sync");
-              } catch (e) {}
               toast.info("Intake form, AI chat, and transcripts reset");
             }}
             className="shrink-0 rounded-md border border-border/70 p-2 text-muted-foreground transition-colors duration-200 hover:border-primary/60 hover:text-foreground"

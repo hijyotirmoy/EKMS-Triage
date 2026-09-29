@@ -107,42 +107,10 @@ export function AgentLogin({ onLoginSuccess }) {
 
     const sessionObj = { agentId, sessionId: newSessionId };
     if (typeof window !== "undefined") {
-      localStorage.setItem("ekms_active_agent", JSON.stringify(sessionObj));
+      try {
+        sessionStorage.setItem("ekms_active_agent", JSON.stringify(sessionObj));
+      } catch (_) {}
     }
-
-    // Resolve advanced real-time client IP, ISP, and precise geolocation
-    try {
-      resolveClientIpAndGeo()
-        .then((geo) => {
-          fetch("/api/admin/usage", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "record_agent_session",
-              agentId,
-              sessionId: newSessionId,
-              ipAddress: geo.ipAddress,
-              ipType: geo.ipType,
-              location: geo.location,
-              city: geo.city,
-              region: geo.region,
-              country: geo.country,
-              countryCode: geo.countryCode,
-              postal: geo.postal,
-              latitude: geo.latitude,
-              longitude: geo.longitude,
-              isp: geo.isp,
-              org: geo.org,
-              asn: geo.asn,
-              connectionType: geo.connectionType,
-              os: geo.os,
-              browser: geo.browser,
-              userAgent: geo.userAgent,
-            }),
-          }).catch(() => {});
-        })
-        .catch(() => {});
-    } catch {}
 
     toast.success(`Logged in as ${agentId}`);
     setConflictModalOpen(false);
