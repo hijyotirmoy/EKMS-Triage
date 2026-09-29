@@ -7,6 +7,9 @@ function normalizePhone(p) {
   return digits.length >= 10 ? digits.slice(-10) : digits;
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const rawPhone = searchParams.get("phone") || "";
@@ -69,6 +72,6 @@ export async function GET(request) {
     });
   } catch (err) {
     console.error("Caller lookup error:", err);
-    return NextResponse.json({ found: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ found: false, history: [] }, { status: 200 });
   }
 }
