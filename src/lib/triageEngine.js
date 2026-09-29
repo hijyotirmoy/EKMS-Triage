@@ -350,10 +350,10 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
 async function evaluateRawTriage(intake) {
   const ekmsCtx = intake.ekms_ai_context || {};
   const tState = ekmsCtx.triageState || ekmsCtx;
-  const notes = (intake.symptom_notes || "").toLowerCase();
+  const notes = String(intake.symptom_notes || "").toLowerCase();
   const severity = Number(intake.severity_reported) || (tState?.severityScore || (tState?.severity === "High" ? 9 : 5));
   const age = intake.age != null && intake.age !== "" ? Number(intake.age) : null;
-  const duration = intake.duration || tState?.duration || "Reported today";
+  const duration = String(intake.duration || tState?.duration || "Reported today");
 
   // Extract caller's actual spoken text (excluding bot assistant prompts)
   const chatMsgs = ekmsCtx.chatHistory || [];
