@@ -26,6 +26,7 @@ import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { AiFeedbackLearningCard } from "./AiFeedbackLearningCard";
+import defaultFacilities from "../data/facilities.json";
 import {
   isHospital,
   isDispensary,
@@ -33,6 +34,7 @@ import {
   isEsicHospital,
   isGovtDistrictHospital,
   getFacilityCategoryLabel,
+  rankNearestFacilities,
 } from "../lib/geo";
 
 export const ACTION_DIRECTIVES = {
@@ -385,7 +387,12 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
 
   // Dynamically organize facilities with clear categorization badges and all 4 facility types
   const dynamicFacilities = useMemo(() => {
-    if (!Array.isArray(facs) || facs.length === 0) return [];
+    const effectiveFacs =
+      Array.isArray(facs) && facs.length > 0
+        ? facs
+        : rankNearestFacilities(loc || { pincode: "781022" }, defaultFacilities, 6);
+
+    if (!effectiveFacs || effectiveFacs.length === 0) return [];
 
     const getTag = (f) => {
       if (f.facility_tag) return f.facility_tag;
@@ -411,7 +418,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
     // Tie-Up hospital positioning rule:
     // If agent selects to refer to Tie-Up (activeDirective.id === "TIE_UP_FACILITY"), Tie-Up comes to the TOP (Position 1).
     // Otherwise, User hierarchy:
-    // 1. ESIC Hospital
+    // 1. ESIC Hospital (if available within 100km, else Nearest Hospital)
     // 2. Govt District Hospital
     // 3. ESIS Dispensary (shown above tie-up even if closed)
     // 4 & 5. Next nearest open facilities within 100km
@@ -422,14 +429,14 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
 
     if (isTieUpSelected) {
       // 1. Tie-Up selected -> Put nearest Tie-Up facility at the very top (Position 1)
-      const tieUps = facs.filter(isTieUp);
-      const nonTieUps = facs.filter((f) => !isTieUp(f));
+      const tieUps = effectiveFacs.filter(isTieUp);
+      const nonTieUps = effectiveFacs.filter((f) => !isTieUp(f));
       orderedFacs = [...tieUps, ...nonTieUps].slice(0, 6);
     } else {
-      const esicHosp = facs.find(isEsicHospital);
-      const govtHosp = facs.find(isGovtDistrictHospital);
-      const disp = facs.find(isDispensary);
-      const tieUp = facs.find(isTieUp);
+      const esicHosp = effectiveFacs.find(isEsicHospital);
+      const govtHosp = effectiveFacs.find(isGovtDistrictHospital);
+      const disp = effectiveFacs.find(isDispensary);
+      const tieUp = effectiveFacs.find(isTieUp);
 
       const chosen = [];
       const chosenKeys = new Set();
@@ -450,7 +457,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
       add(disp);
 
       // 4 & 5. Other non-tie-up facilities <= 100km
-      const nonTieUpsWithin100 = facs.filter(
+      const nonTieUpsWithin100 = effectiveFacs.filter(
         (f) => !isTieUp(f) && (f.distance_km == null || f.distance_km <= 100)
       );
       for (const f of nonTieUpsWithin100) {
@@ -459,7 +466,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
       }
 
       // If still fewer than 5, add other non-tie-ups
-      const allNonTieUps = facs.filter((f) => !isTieUp(f));
+      const allNonTieUps = effectiveFacs.filter((f) => !isTieUp(f));
       for (const f of allNonTieUps) {
         if (chosen.length >= 5) break;
         add(f);
@@ -471,12 +478,12 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
       }
 
       // If still fewer than 6, fill with any remaining
-      for (const f of facs) {
+      for (const f of effectiveFacs) {
         if (chosen.length >= 6) break;
         add(f);
       }
 
-      orderedFacs = chosen.slice(0, 6);
+      orderedFacs = chosen.length > 0 ? chosen.slice(0, 6) : effectiveFacs.slice(0, 6);
     }
 
     return orderedFacs.map((f) => ({
@@ -484,7 +491,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
       facility_tag: getTag(f),
       category_style: getCategoryStyle(f),
     }));
-  }, [facs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
+  }, [facs, loc, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(

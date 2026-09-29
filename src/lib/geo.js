@@ -466,8 +466,9 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     return (a.name || "").localeCompare(b.name || "");
   };
 
-  // Strictly filter out any facility located more than 100 km away from caller location
-  const pool = scored.filter((f) => f.distance_km == null || f.distance_km <= 100);
+  // 1. Prioritize facilities within <= 100km, fallback to all scored if none under 100km
+  const within100 = scored.filter((f) => f.distance_km == null || f.distance_km <= 100);
+  const pool = within100.length > 0 ? within100 : scored;
 
   // Group and sort each of the 4 facility groups by proximity within 100km
   const esicHospitals = pool
@@ -523,25 +524,31 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     }
   }
 
-  // 3. Dispensary (whether open or closed, it sits above tie-up if <= 100km)
+  // 3. Dispensary (whether open or closed, it sits above tie-up if available)
   if (dispensaries[0]) {
     addFacility(dispensaries[0]);
   }
 
-  // 4 & 5. Next nearest open non-tie-up facilities (strictly <= 100km)
+  // 4 & 5. Next nearest open non-tie-up facilities
   const nonTieUpPool = pool.filter((f) => !f.is_tie_up).sort(byProximity);
   for (const fac of nonTieUpPool) {
     if (selected.length >= limit - 1) break;
     addFacility(fac);
   }
 
-  // 6. Strictly nearest ESIC Tie-Up Hospital within <= 100km at the LAST position (below dispensary)
+  // 6. Strictly nearest ESIC Tie-Up Hospital at the LAST position (below dispensary)
   if (tieUpHospitals[0]) {
     addFacility(tieUpHospitals[0]);
   }
 
-  // If still fewer than limit, fill with remaining facilities in pool (strictly <= 100km only)
+  // If still fewer than limit, fill with remaining facilities in pool
   for (const fac of pool.slice().sort(byProximity)) {
+    if (selected.length >= limit) break;
+    addFacility(fac);
+  }
+
+  // Guarantee that up to `limit` facilities are always returned
+  for (const fac of scored.slice().sort(byProximity)) {
     if (selected.length >= limit) break;
     addFacility(fac);
   }

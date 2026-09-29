@@ -379,6 +379,10 @@ export async function POST(request) {
     console.error("Triage error fallback:", err);
     // Graceful fallback triage response to guarantee 0 HTTP 500 failures in operator workflow
     const fallbackCaseRef = `C1${Date.now().toString().slice(-6)}R`;
+    const fallbackFacilities = (await getFacilities().catch(() => [])) || [];
+    const fallbackLoc = resolveCallerLocation(intake, fallbackFacilities);
+    const fallbackNearest = rankNearestFacilities(fallbackLoc, fallbackFacilities, 6, false);
+
     return NextResponse.json({
       case_ref: fallbackCaseRef,
       case_id: fallbackCaseRef,
@@ -401,15 +405,8 @@ export async function POST(request) {
         referral_destination: "104 Health Helpline",
         referral_reason: "Connect with 104 Health Helpline for 24x7 doctor consultation over the phone."
       },
-      resolved_location: {
-        latitude: 26.1217525702644,
-        longitude: 91.8085511242569,
-        pincode: "781022",
-        district: "Kamrup Metropolitan",
-        method: "default",
-        matched: "ESIC Hospital Beltola (781022)"
-      },
-      nearest_facilities: [],
+      resolved_location: fallbackLoc,
+      nearest_facilities: fallbackNearest,
       ekms_ai_context: null,
       disclaimer: "This system performs urgency triage and facility routing only. It does not provide a medical diagnosis or treatment advice.",
       model_used: "fallback-resilient",
