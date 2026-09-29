@@ -238,7 +238,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
             <option value="all">All types</option>
             {(meta?.facility_types || []).map((t) => (
               <option key={t} value={t}>
-                {t === "Tie-Up Hospital" ? "Tie-Up Facility" : t}
+                {t === "Hospital" ? "ESIC Hospital" : t === "Tie-Up Hospital" ? "Tie-Up Facility" : t}
               </option>
             ))}
           </select>
@@ -432,7 +432,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] pl-6">
                   <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                    {f.facility_type === "Tie-Up Hospital" ? "Tie-Up Facility" : f.facility_type}
+                    {f.facility_type === "Hospital" ? "ESIC Hospital" : f.facility_type === "Tie-Up Hospital" ? "Tie-Up Facility" : f.facility_type}
                   </span>
                   <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
                     {f.district}

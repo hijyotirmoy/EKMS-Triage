@@ -33,8 +33,8 @@ export const FORWARDING_TEAMS = [
   },
   {
     id: "104_MEDICAL",
-    name: "104 Tele-Doctor Medical Team",
-    shortName: "104 Medical Team",
+    name: "104 Health Helpline (Tele-Doctor)",
+    shortName: "104 Health Helpline",
     badgeColor: "bg-blue-700 text-white",
     icon: "📞",
     isEmergency: false,
@@ -72,34 +72,18 @@ export const FORWARDING_TEAMS = [
     isEmergency: false,
   },
   {
-    id: "FORWARD_DOCTOR",
-    name: "On-Duty Medical Officer Escalation Desk",
-    shortName: "Medical Officer",
-    badgeColor: "bg-indigo-700 text-white",
-    icon: "👨‍⚕️",
-    isEmergency: false,
-  },
-  {
-    id: "E_SANJEEVANI",
-    name: "e-Sanjeevani Online Doctor Portal",
-    shortName: "e-Sanjeevani",
-    badgeColor: "bg-sky-700 text-white",
-    icon: "💻",
-    isEmergency: false,
-  },
-  {
-    id: "NEAREST_PHARMACY",
-    name: "Empanelled Pharmacy / Dispensary Chemist",
-    shortName: "Pharmacy / Chemist",
-    badgeColor: "bg-teal-700 text-white",
-    icon: "💊",
-    isEmergency: false,
-  },
-  {
     id: "TIE_UP_FACILITY",
     name: "Empanelled Tie-Up Facility Desk",
     shortName: "Tie-Up Facility",
     badgeColor: "bg-cyan-700 text-white",
+    icon: "🏥",
+    isEmergency: false,
+  },
+  {
+    id: "DIST_HOSPITAL",
+    name: "Govt District Hospital / Public Health Desk",
+    shortName: "District Hospital",
+    badgeColor: "bg-blue-800 text-white",
     icon: "🏥",
     isEmergency: false,
   },
@@ -119,14 +103,10 @@ export function mapDirectiveToTeamId(directiveId, t = {}) {
       return "ESIC_HOSPITAL";
     case "ESIS_DISPENSARY":
       return "ESIS_DISPENSARY";
-    case "FORWARD_DOCTOR":
-      return "FORWARD_DOCTOR";
-    case "E_SANJEEVANI":
-      return "E_SANJEEVANI";
-    case "NEAREST_PHARMACY":
-      return "NEAREST_PHARMACY";
     case "TIE_UP_FACILITY":
       return "TIE_UP_FACILITY";
+    case "DIST_HOSPITAL":
+      return "DIST_HOSPITAL";
     default:
       if (t?.call_108) return "108_AMBULANCE";
       if (t?.is_psychiatric) return "TELE_MANAS";
@@ -146,18 +126,14 @@ export function getTeamButtonClass(teamId) {
       return "bg-blue-700 hover:bg-blue-800 ring-2 ring-blue-500/25";
     case "TIE_UP_FACILITY":
       return "bg-cyan-700 hover:bg-cyan-800 ring-2 ring-cyan-500/25";
+    case "DIST_HOSPITAL":
+      return "bg-blue-800 hover:bg-blue-900 ring-2 ring-blue-500/25";
     case "TELE_MANAS":
       return "bg-purple-700 hover:bg-purple-800 ring-2 ring-purple-500/25";
     case "NACO_1097":
       return "bg-rose-800 hover:bg-rose-900 ring-2 ring-rose-500/25";
     case "ESIS_DISPENSARY":
       return "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-500/25";
-    case "FORWARD_DOCTOR":
-      return "bg-indigo-700 hover:bg-indigo-800 ring-2 ring-indigo-500/25";
-    case "E_SANJEEVANI":
-      return "bg-sky-700 hover:bg-sky-800 ring-2 ring-sky-500/25";
-    case "NEAREST_PHARMACY":
-      return "bg-teal-700 hover:bg-teal-800 ring-2 ring-teal-500/25";
     default:
       return "bg-primary hover:bg-primary/90 ring-2 ring-primary/25";
   }

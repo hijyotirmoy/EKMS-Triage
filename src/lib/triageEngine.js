@@ -7,7 +7,7 @@ import {
 
 /**
  * Evaluates whether ESIS Dispensaries are currently open in Assam (IST UTC+5:30).
- * Operating hours: Monday to Friday, 10:00 AM to 3:00 PM.
+ * Operating hours: Monday to Friday, 10:00 AM to 4:00 PM.
  * Closed: Saturday & Sunday.
  */
 export function getDispensaryOperatingStatus(date = new Date()) {
@@ -19,7 +19,7 @@ export function getDispensaryOperatingStatus(date = new Date()) {
   const currentMinutes = hour * 60 + minute;
 
   const isWeekend = day === 0 || day === 6;
-  const isOpenHours = currentMinutes >= 600 && currentMinutes < 900; // 10:00 AM (600) to 3:00 PM (900)
+  const isOpenHours = currentMinutes >= 600 && currentMinutes < 960; // 10:00 AM (600) to 4:00 PM (960)
   const isNight = hour >= 20 || hour < 6; // 8:00 PM to 6:00 AM
 
   const isOpen = !isWeekend && isOpenHours;
@@ -28,9 +28,9 @@ export function getDispensaryOperatingStatus(date = new Date()) {
   if (isWeekend) {
     reason = `ESIS Dispensaries are closed on weekends (${day === 0 ? "Sunday" : "Saturday"})`;
   } else if (currentMinutes < 600) {
-    reason = "ESIS Dispensaries open at 10:00 AM (Mon–Fri, 10:00 AM – 3:00 PM)";
-  } else if (currentMinutes >= 900) {
-    reason = "ESIS Dispensaries closed for the day at 3:00 PM (Hours: 10:00 AM – 3:00 PM)";
+    reason = "ESIS Dispensaries open at 10:00 AM (Mon–Fri, 10:00 AM – 4:00 PM)";
+  } else if (currentMinutes >= 960) {
+    reason = "ESIS Dispensaries closed for the day at 4:00 PM (Hours: 10:00 AM – 4:00 PM)";
   }
 
   return {
@@ -38,7 +38,7 @@ export function getDispensaryOperatingStatus(date = new Date()) {
     isWeekend,
     isNight,
     reason,
-    operatingHoursText: "Mon–Fri: 10:00 AM – 3:00 PM (Closed Sat & Sun)",
+    operatingHoursText: "Mon–Fri: 10:00 AM – 4:00 PM (Closed Sat & Sun)",
   };
 }
 
@@ -49,21 +49,23 @@ export function getHospitalOpdOperatingStatus(date = new Date()) {
   const minute = istDate.getMinutes();
   const currentMinutes = hour * 60 + minute;
 
-  // ESIS / ESIC Hospitals are open from 5:00 AM (300 min) to 11:00 PM (1380 min) daily
-  const isOpdOpen = currentMinutes >= 300 && currentMinutes < 1380;
+  // Hospital OPD: 10:00 AM (600 min) to 4:00 PM (960 min). IPD and Emergency are open 24x7.
+  const isOpdOpen = currentMinutes >= 600 && currentMinutes < 960;
 
   let reason = "";
-  if (currentMinutes < 300) {
-    reason = "ESIC / ESIS Hospitals open at 5:00 AM (Operating Hours: 5:00 AM – 11:00 PM daily)";
-  } else if (currentMinutes >= 1380) {
-    reason = "ESIC / ESIS Hospitals closed for the night at 11:00 PM (Hours: 5:00 AM – 11:00 PM; 24x7 Casualty open for acute emergencies)";
+  if (currentMinutes < 600) {
+    reason = "Hospital OPD opens at 10:00 AM (OPD: 10:00 AM – 4:00 PM · IPD & Emergency: 24x7)";
+  } else if (currentMinutes >= 960) {
+    reason = "Hospital OPD closed at 4:00 PM (OPD: 10:00 AM – 4:00 PM · IPD & Emergency: 24x7)";
   }
 
   return {
     isOpen: isOpdOpen,
+    isOpdOpen,
+    isIpdAndEmergencyOpen: true,
     hour,
     reason,
-    operatingHoursText: "Daily: 5:00 AM – 11:00 PM (Casualty 24x7)",
+    operatingHoursText: "OPD: 10:00 AM – 4:00 PM · IPD & Emergency: 24x7",
   };
 }
 
@@ -424,8 +426,23 @@ async function evaluateRawTriage(intake) {
     }
   }
 
-  // FAST DIRECT SYNTHESIS (Instant, <5ms): If evaluated by chat engine OR psychiatric/suicidal crisis detected OR NACO HIV inquiry OR high effective severity (emergency)
-  if (isPsych || isNacoHIV || effectiveSeverity >= 8 || (tState && (tState.condition || tState.symptom || tState.suspectedCondition || tState.severity || tState.redFlagsDetected?.length))) {
+  // Check if current time is off-hours (between 4:00 PM and 10:00 AM)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+  const hour = istDate.getHours();
+  const currentMinutes = hour * 60 + istDate.getMinutes();
+  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM (960) to 10:00 AM (600)
+
+  // Conditions for Category 7: ESI Tie-Up Hospital (Strict: IPD admission, ESIC referral, or explicit tie-up request)
+  const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(allText);
+  const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(allText);
+  const isTieUpEligible = isIpdEmergency || hasEsicReferral || /\b(tie.?up|empanelled)\b/i.test(allText);
+
+  // Conditions for Category 8: District Hospital (Public Healthcare outside ESIC)
+  const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(allText);
+
+  // FAST DIRECT SYNTHESIS (Instant, <5ms): If evaluated by chat engine OR psychiatric crisis OR NACO HIV OR Dist Hosp OR Tie-Up OR high effective severity (emergency)
+  if (isPsych || isNacoHIV || isDistHospRequest || isTieUpEligible || effectiveSeverity >= 8 || (tState && (tState.condition || tState.symptom || tState.suspectedCondition || tState.severity || tState.redFlagsDetected?.length))) {
     const rawFlags = [
       ...(tState?.redFlagsDetected || []),
       ...(tState?.associated || []),
@@ -440,115 +457,150 @@ async function evaluateRawTriage(intake) {
 
     const summarizedFlags = summarizeRedFlags(rawFlags, callerSpokenText, isCallerSafe);
 
-    // Resolve TWO best-fitting referrals (Guaranteed Primary 01 and Secondary 02)
+    // Check if beneficiary has physical health / medical symptoms alongside any psychiatric complaints
+    const hasPhysicalHealthSymptoms =
+      callerHasActiveTraumaCut ||
+      effectiveSeverity >= 6 ||
+      /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(allText);
+
+    const isEmergency108 =
+      effectiveSeverity >= 8 ||
+      callerHasActiveTraumaCut ||
+      /\b(108|ambulance|heart attack|crushing chest|cardiac arrest|stroke|unconscious|behosh|massive bleed|bleeding profusely|road accident|accident casualty|machine accident|worker trapped|crushed limb|amputation|choking|gasping)\b/i.test(allText);
+
+    // Resolve TWO best-fitting referrals based on the 8-tier hierarchy:
     let primaryReferral = "ESIS Dispensary";
     let primaryReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
-    let secondaryReferral = "104 Medical Team";
+    let secondaryReferral = "104 Health Helpline";
     let secondaryReason = "Tele-doctor telephone consultation via 104 Health Helpline.";
     let isDualProtocol = false;
     let call108 = false;
 
-    if (isNacoHIV) {
-      // 1. HIV / AIDS / Sexual Diseases (NACO 1097 Helpline)
-      primaryReferral = "NACO 1097 Helpline";
-      primaryReason = "National AIDS Control Organisation (NACO) Helpline (Toll-Free 1097); 24x7 confidential counselling, STI guidance, and ART/ICTC testing center locator.";
-      secondaryReferral = "ESIC Hospital";
-      secondaryReason = "Nearest ESIC Hospital Integrated Counselling & Testing Centre (ICTC) and Specialist OPD.";
-      isDualProtocol = false;
-      call108 = false;
-    } else if (isPsych && hasSelfHarmAction) {
-      // 2. COMBINED PSYCHOLOGICAL + MEDICAL TRAUMA:
-      primaryReferral = "108 Ambulance";
-      primaryReason = "Active physical self-harm trauma with bleeding; immediate 108 emergency ambulance dispatch required.";
-      secondaryReferral = "Psychological Counselling Department";
-      secondaryReason = "Concurrent acute psychiatric crisis; transfer to Tele-MANAS (14416) for emotional stabilization once ambulance is en route.";
-      isDualProtocol = true;
-      call108 = true;
-    } else if (isPsych) {
-      // 3. PURE PSYCHIATRIC / CRISIS:
-      primaryReferral = "Psychological Counselling Department";
-      primaryReason = "Caller exhibits emotional distress; transfer immediately to Tele-MANAS (14416) for confidential crisis counselling.";
-      secondaryReferral = "104 Medical Team";
-      secondaryReason = "104 Health Helpline Psychiatric Tele-Consultation with on-duty government medical officers.";
-      isDualProtocol = true;
-      call108 = false;
-    } else if (
-      effectiveSeverity >= 8 ||
-      /\b(heart attack|crushing chest|stroke|unconscious|behosh|massive bleed|bleeding profusely|road accident|accident casualty|machine accident|worker trapped|crushed limb|amputation)\b/i.test(allText)
-    ) {
-      // 4. MEDICAL EMERGENCY / ACCIDENT / LIFE-AND-DEATH SITUATION:
+    // Tier 1: 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency)
+    if (isEmergency108) {
       primaryReferral = "108 Ambulance";
       primaryReason = "Severe life-threatening emergency or acute trauma casualty; dispatch 108 Ambulance immediately.";
-      secondaryReferral = "ESIC Hospital";
-      secondaryReason = "24x7 Casualty & Emergency Department at nearest ESIC Hospital for trauma resuscitation and admission.";
       call108 = true;
-      isDualProtocol = false;
-    } else if (!dispensaryStatus.isOpen) {
-      // 5. DISPENSARY CLOSED (After 3 PM, Before 10 AM, Sat/Sun, or Night) -> NEVER REFER TO DISPENSARY!
-      const hospitalOpdStatus = getHospitalOpdOperatingStatus();
-
-      // If Hospital regular OPD is ALSO closed (night, after 4 PM, Sunday) and NOT an emergency:
-      // Can be handled by doctor on call (104). Never show closed hospital OPD or closed dispensary as primary!
-      if (!hospitalOpdStatus.isOpen) {
-        primaryReferral = "104 Medical Team";
-        primaryReason = `ESIS Dispensaries and Hospital regular OPD are closed for the night (${hospitalOpdStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation, or visit nearest Empanelled Tie-Up Facility.`;
-        secondaryReferral = (effectiveSeverity >= 6 || tState?.severity === "Moderate") ? "Nearest Tie-Up Facility" : "e-Sanjeevani";
-        secondaryReason = (effectiveSeverity >= 6 || tState?.severity === "Moderate")
-          ? "Proceed to nearest empanelled tie-up facility or 24x7 ESIC casualty if immediate medical attention is required."
-          : "Government online e-Sanjeevani portal for tele-consultation from home.";
+      if (isPsych) {
+        secondaryReferral = "Tele-MANAS (14416)";
+        secondaryReason = "Concurrent acute psychiatric crisis; transfer to Tele-MANAS (14416) for emotional stabilization once ambulance is en route.";
+        isDualProtocol = true;
+      } else {
+        secondaryReferral = "ESIC Hospital";
+        secondaryReason = "24x7 Casualty & Emergency Department at nearest ESIC Hospital for trauma resuscitation and admission.";
         isDualProtocol = false;
-        call108 = false;
-      } else {
-        // Hospital OPD is OPEN (5:00 AM - 11:00 PM):
-        const istOffset = 5.5 * 60 * 60 * 1000;
-        const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-        const hour = istDate.getHours();
-        const isAfter7PM = hour >= 19 || hour < 5; // 7:00 PM onwards
-
-        if (effectiveSeverity >= 6 || tState?.severity === "Moderate") {
-          primaryReferral = "ESIC Hospital";
-          primaryReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). ESIC Hospital is open until 11:00 PM for doctor examination today.`;
-          // After 7:00 PM, guarantee at least 1 call referral option (104 Doctor on Call)
-          secondaryReferral = isAfter7PM ? "104 Medical Team" : "Nearest Tie-Up Facility";
-          secondaryReason = isAfter7PM
-            ? "After 7:00 PM: Connect with 104 Health Helpline (Doctor on Call) for immediate tele-consultation over the phone, or visit nearest empanelled tie-up facility."
-            : "Nearest empanelled tie-up facility or 104 Health Helpline for consultation.";
-          isDualProtocol = false;
-          call108 = false;
-        } else {
-          primaryReferral = "104 Medical Team";
-          primaryReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone, or visit nearest tie-up facility.`;
-          secondaryReferral = "Nearest Tie-Up Facility";
-          secondaryReason = "Empanelled tie-up facility or government online e-Sanjeevani portal.";
-          isDualProtocol = false;
-          call108 = false;
-        }
       }
-    } else if (effectiveSeverity >= 6 || tState?.severity === "Moderate") {
-      // 6. MODERATE DURING OPEN HOURS (10 AM - 3 PM):
+    }
+    // Tier 2: Tele-MANAS Services (Priority: Mental Health)
+    // Rule: In case of psychiatric cases always give Tele-MANAS as a forward system.
+    // If psychiatric AND medical/health, refer to health first, then psychiatric secondary!
+    else if (isPsych && !hasPhysicalHealthSymptoms) {
+      primaryReferral = "Tele-MANAS (14416)";
+      primaryReason = "Beneficiary requires psychological counseling or emotional support; transfer immediately to Tele-MANAS (14416) for confidential crisis counseling.";
+      secondaryReferral = "104 Health Helpline";
+      secondaryReason = "104 Health Helpline tele-doctor consultation for physical health evaluation and medical support.";
+      isDualProtocol = true;
+      call108 = false;
+    }
+    // Tier 3: NACO/HIV (Priority: HIV/AIDS & STI)
+    else if (isNacoHIV) {
+      primaryReferral = "NACO 1097 Helpline";
+      primaryReason = "National AIDS Control Organisation (NACO) Helpline (Toll-Free 1097); 24x7 confidential counselling, STI guidance, and ART/ICTC testing center locator.";
+      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for supportive counseling."
+        : "Nearest ESIC Hospital Integrated Counselling & Testing Centre (ICTC) and Specialist OPD.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
+    // Tier 8: Dist Hosp (Priority: Public Healthcare outside ESIC)
+    else if (isDistHospRequest) {
+      primaryReferral = "Govt District Hospital";
+      primaryReason = "Beneficiary needs public healthcare services outside the ESIC network (public admissions, specialist care, or child immunization); guide to nearest Govt District Hospital.";
+      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "104 Health Helpline for 24x7 tele-doctor assistance.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
+    // Tier 7: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
+    else if (isTieUpEligible) {
+      primaryReferral = "Nearest Tie-Up Facility";
+      primaryReason = isIpdEmergency
+        ? "Inpatient (IPD) emergency; refer to nearest Empanelled Tie-Up Facility for cashless emergency admission under ESI guidelines."
+        : hasEsicReferral
+        ? "Patient possesses direct referral from ESIC Hospital; refer to nearest Empanelled Tie-Up Facility for specialist treatment."
+        : "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI empanelment guidelines.";
+      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "ESIC Hospital casualty / triage desk.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
+    // USER MANDATE: If off-hours (after 4 PM to 10 AM) and NO emergency:
+    // Refer to 104 Health Helpline FIRST, then any hospital or dispensary!
+    else if (isOffHours || !dispensaryStatus.isOpen) {
+      primaryReferral = "104 Health Helpline";
+      primaryReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 tele-doctor consultation and advice.";
+      secondaryReferral = isPsych
+        ? "Tele-MANAS (14416)"
+        : "ESIC Hospital";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "Nearest ESIC Hospital (24x7 Casualty & Emergency) or dispensary during OPD hours (10:00 AM – 4:00 PM) for physical evaluation.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
+    // Tier 4: 104 Health Helpline (General Daytime Tele-Consultation)
+    else if (
+      /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(allText)
+    ) {
+      primaryReferral = "104 Health Helpline";
+      primaryReason = "Beneficiary needs health guidance without visiting a physical facility; transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
+      secondaryReferral = isPsych
+        ? "Tele-MANAS (14416)"
+        : "ESIS Dispensary";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "Nearest health facility for physical evaluation if symptoms persist.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
+    // Tier 5: ESIS Dispensary (Priority: Primary / Routine Care, Daytime 10:00 AM – 4:00 PM)
+    else if (dispensaryStatus.isOpen && effectiveSeverity <= 6) {
       primaryReferral = "ESIS Dispensary";
-      primaryReason = "Primary clinic care suitable for regular doctor OPD consultation and prescription (Open Mon–Fri, 10:00 AM – 3:00 PM).";
-      secondaryReferral = "104 Medical Team";
-      secondaryReason = "104 Health Helpline tele-doctor consultation for medical advice over the phone.";
-      isDualProtocol = false;
+      primaryReason = "Beneficiary needs basic outpatient (OPD) primary care during standard working hours (10:00 AM – 4:00 PM); visit nearest ESIS Dispensary for doctor consultation and medicines.";
+      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "104 Health Helpline tele-doctor consultation for medical advice over the phone.";
+      isDualProtocol = isPsych;
       call108 = false;
-    } else {
-      // 7. ROUTINE / MILD DURING OPEN HOURS:
-      const needsDoctorAdvice = /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(allText);
+    }
+    // Tier 6: ESIC Hospital (Priority: Secondary / Specialist Care, Daytime)
+    else {
+      primaryReferral = "ESIC Hospital";
+      primaryReason = "Beneficiary needs advanced specialized care or secondary evaluation within ESIC network (OPD 10:00 AM – 4:00 PM, IPD & Emergency 24x7).";
+      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIS Dispensary";
+      secondaryReason = isPsych
+        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
+        : "ESIS Dispensary during OPD hours (10:00 AM – 4:00 PM) or 104 Health Helpline.";
+      isDualProtocol = isPsych;
+      call108 = false;
+    }
 
-      if (needsDoctorAdvice || effectiveSeverity <= 4 || tState?.severity === "Mild") {
-        primaryReferral = "104 Medical Team";
-        primaryReason = "Condition is not serious / mild; caller requires medical advice or tele-consultation. Transfer call to 104 Medical Team for 24x7 doctor consultation over the phone.";
-        secondaryReferral = "ESIS Dispensary";
-        secondaryReason = "Visit nearest registered ESIS Dispensary for physical doctor checkup and free medicine dispensing during OPD hours.";
-      } else {
-        primaryReferral = "ESIS Dispensary";
-        primaryReason = "Routine outpatient evaluation and free medicine dispensing (Open Mon–Fri, 10:00 AM – 3:00 PM).";
-        secondaryReferral = "104 Medical Team";
-        secondaryReason = "104 Health Helpline tele-doctor consultation for medical advice over the phone.";
-      }
-      isDualProtocol = false;
-      call108 = false;
+    // MANDATORY PSYCHIATRIC RULE:
+    // If psychiatric, give Tele-MANAS. If health was primary, Tele-MANAS is secondary.
+    // If Tele-MANAS is primary, secondary MUST be different (104 Health Helpline).
+    if (primaryReferral === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
+      secondaryReferral = "104 Health Helpline";
+      secondaryReason = "104 Health Helpline tele-doctor consultation for medical support.";
+    } else if (isPsych && primaryReferral !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
+      secondaryReferral = "Tele-MANAS (14416)";
+      secondaryReason = "Concurrent psychological distress / mental health support; transfer to Tele-MANAS (14416) alongside physical medical care.";
+      isDualProtocol = true;
     }
 
     let summaryEn = "";
@@ -566,7 +618,7 @@ async function evaluateRawTriage(intake) {
     } else if (isPsych) {
       summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via Tele-MANAS (14416).";
       summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; टेली-मानस (14416) द्वारा परामर्श आवश्यक है।";
-    } else if (primaryReferral === "104 Medical Team" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
+    } else if (primaryReferral === "104 Health Helpline" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
       const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "mild symptoms";
       const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
       summaryEn = `Caller inquires regarding ${cleanCond}; condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.`;
@@ -634,8 +686,8 @@ async function evaluateRawTriage(intake) {
       red_flags: summarizedFlags,
       recommended_facility_type: primaryReferral === "108 Ambulance"
         ? "108 Emergency Ambulance / ESIC Hospital Casualty"
-        : (primaryReferral === "Psychological Counselling Department"
-          ? "Psychological Counselling Department / Tele-MANAS (14416)"
+        : (primaryReferral === "Tele-MANAS (14416)" || primaryReferral === "Psychological Counselling Department"
+          ? "Tele-MANAS (14416)"
           : primaryReferral),
       recommended_action: primaryReason,
       detected_language: "Hinglish",
@@ -1045,20 +1097,20 @@ function normalizeTriageDecision(triage, intake) {
     return triage;
   }
 
-  // 1b. Non-serious case seeking doctor advice or general health advice -> 104 Medical Team
+  // 1b. Non-serious case seeking doctor advice or general health advice -> 104 Health Helpline
   const isAdviceSeeking = /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(notes);
   const isMild = (triage.urgency_level === "Routine" || triage.urgency_level === "Self-care" || (Number(triage.urgency_score) <= 4));
 
   if ((isAdviceSeeking || isMild) && !isPsych && !isNacoHIV && !triage.call_108 && triage.urgency_level !== "Emergency") {
     triage.is_psychiatric = false;
     triage.call_108 = false;
-    triage.referral_destination = "104 Medical Team";
-    triage.referral_reason = "Condition is non-serious; caller requires medical advice or tele-consultation. Transfer call to 104 Medical Team for 24x7 doctor consultation over the phone.";
+    triage.referral_destination = "104 Health Helpline";
+    triage.referral_reason = "Condition is non-serious; caller requires medical advice or tele-consultation. Transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
     triage.secondary_referral_destination = "ESIS Dispensary";
     triage.secondary_referral_reason = "Visit nearest registered ESIS Dispensary for physical doctor checkup and free medicine dispensing during OPD hours.";
     triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
     triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation and medical guidance.";
-    triage.call_referral_primary = "104 Medical Team";
+    triage.call_referral_primary = "104 Health Helpline";
     triage.call_referral_secondary = "ESIS Dispensary";
     if (!triage.summary_en || triage.summary_en.includes("distress") || triage.summary_en.includes("emergency")) {
       triage.summary_en = "Condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.";
@@ -1075,7 +1127,7 @@ function normalizeTriageDecision(triage, intake) {
     triage.referral_destination = "108 Ambulance";
     triage.referral_reason =
       "Active physical trauma or severe self-harm injury; immediate 108 emergency ambulance dispatch required.";
-    triage.secondary_referral_destination = "Psychological Counselling Department";
+    triage.secondary_referral_destination = "Tele-MANAS (14416)";
     triage.secondary_referral_reason =
       "Concurrent acute psychiatric crisis; transfer to Tele-MANAS (14416) for emotional stabilization once ambulance is en route.";
     triage.recommended_facility_type = "108 Emergency Ambulance / ESIC Hospital Casualty";
@@ -1089,15 +1141,15 @@ function normalizeTriageDecision(triage, intake) {
     triage.is_psychiatric = true;
     triage.call_108 = false;
     triage.is_dual_protocol = true;
-    triage.referral_destination = "Psychological Counselling Department";
+    triage.referral_destination = "Tele-MANAS (14416)";
     triage.referral_reason =
-      "Transfer call immediately to Psychological Counselling Department or Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
-    triage.secondary_referral_destination = "104 Medical Team";
+      "Transfer call immediately to Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
+    triage.secondary_referral_destination = "104 Health Helpline";
     triage.secondary_referral_reason =
-      "104 Health Helpline Psychiatric Tele-Consultation with on-duty government medical officers.";
-    triage.recommended_facility_type = "Psychological Counselling Department / Tele-MANAS (14416)";
+      "104 Health Helpline tele-doctor consultation for physical medical evaluation and support.";
+    triage.recommended_facility_type = "Tele-MANAS (14416)";
     triage.recommended_action =
-      "Transfer call immediately to Psychological Counselling Department or Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
+      "Transfer call immediately to Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
     if (!triage.summary_en || triage.summary_en.toLowerCase().includes("physical") || triage.summary_en.toLowerCase().includes("hospital")) {
       triage.summary_en = "Caller presents with severe emotional distress / suicidal ideation requiring urgent psychiatric counselling.";
       triage.summary_hi = "कॉलर गंभीर मानसिक तनाव/अवसाद में है, तुरंत टेली-मानस (14416) परामर्श सहायता की आवश्यकता है।";
@@ -1123,85 +1175,40 @@ function normalizeTriageDecision(triage, intake) {
     return triage;
   }
 
-  // 5. If Dispensary is Closed (Outside Mon-Fri 10am-3pm or Sat/Sun/Night) -> NEVER REFER TO DISPENSARY!
+  // 5. If Dispensary is Closed (After 4 PM to 10 AM or Weekends) -> USER MANDATE:
+  // If there are no emergency after 4 PM to 10 AM, refer to 104 Health Helpline FIRST, then hospital or dispensary!
   if (!dispensaryStatus.isOpen) {
-    if (referral.includes("dispensary") || (!referral && (triage.urgency_level === "Routine" || triage.urgency_level === "Self-care"))) {
+    if (!triage.call_108 && triage.urgency_level !== "Emergency" && Number(triage.urgency_score || 0) < 8) {
       triage.call_108 = false;
       triage.is_dual_protocol = true;
-      if (triage.urgency_level === "Urgent" || (triage.urgency_score && triage.urgency_score >= 6)) {
-        triage.referral_destination = "ESIC Hospital";
-        triage.referral_reason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Guide caller to nearest ESIC Hospital casualty or urgent OPD today.`;
-        triage.secondary_referral_destination = "104 Medical Team";
-        triage.secondary_referral_reason = "104 Health Helpline (24x7) for immediate telephonic doctor advice.";
-        triage.recommended_facility_type = "Nearest ESIC Hospital / Emergency Casualty";
-        triage.recommended_action = "Advise patient to proceed to the nearest ESIC Hospital casualty or urgent OPD today.";
-      } else {
-        triage.referral_destination = "104 Medical Team";
-        triage.referral_reason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-        triage.secondary_referral_destination = "e-Sanjeevani";
-        triage.secondary_referral_reason = "Government online telemedicine portal (e-Sanjeevani) for consultation from home.";
-        triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
-        triage.recommended_action = "Connect with 104 Health Helpline for 24x7 tele-doctor consultation.";
-      }
+      triage.referral_destination = "104 Health Helpline";
+      triage.call_referral_primary = "104 Health Helpline";
+      triage.referral_reason = `Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+      triage.secondary_referral_destination = "ESIC Hospital";
+      triage.call_referral_secondary = "ESIC Hospital";
+      triage.secondary_referral_reason = "Nearest ESIC Hospital (24x7 Casualty & Emergency) or dispensary during OPD hours (10:00 AM – 4:00 PM) for physical evaluation.";
+      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
+      triage.recommended_action = "Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
       return triage;
     }
   }
 
-  // 6. 104 Medical Team / Health Helpline
+  // 6. 104 Health Helpline
   if (referral.includes("104")) {
     triage.call_108 = false;
     triage.is_dual_protocol = true;
-    triage.referral_destination = "104 Medical Team";
-    triage.referral_reason = "Caller requested tele-doctor phone consultation; transfer call queue to 104 Medical Team.";
-    triage.secondary_referral_destination = dispensaryStatus.isOpen ? "ESIS Dispensary" : "e-Sanjeevani";
+    triage.referral_destination = "104 Health Helpline";
+    triage.referral_reason = "Caller requested tele-doctor phone consultation; transfer call queue to 104 Health Helpline.";
+    triage.secondary_referral_destination = dispensaryStatus.isOpen ? "ESIS Dispensary" : "Nearest Tie-Up Facility";
     triage.secondary_referral_reason = dispensaryStatus.isOpen
       ? "ESIS Dispensary for physical doctor checkup and free prescription dispensing."
-      : "e-Sanjeevani online doctor tele-consultation portal.";
+      : "Empanelled Tie-Up Facility for physical examination.";
     triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
     triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation.";
     return triage;
   }
 
-  // 7. e-Sanjeevani Telemedicine
-  if (referral.includes("sanjeevani")) {
-    triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    triage.referral_destination = "e-Sanjeevani";
-    triage.referral_reason = "Advise caller to use government e-Sanjeevani online doctor tele-consultation portal.";
-    triage.secondary_referral_destination = "104 Medical Team";
-    triage.secondary_referral_reason = "104 Health Helpline for immediate telephone-based doctor advice.";
-    triage.recommended_facility_type = "e-Sanjeevani National Telemedicine Portal";
-    triage.recommended_action = "Advise caller to use government e-Sanjeevani portal/app for online doctor consultation.";
-    return triage;
-  }
 
-  // 8. Nearest Pharmacy / Dispensary Store
-  if (referral.includes("pharmacy")) {
-    triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    triage.referral_destination = "Nearest Pharmacy";
-    triage.referral_reason = "Guide caller to nearest empanelled chemist or dispensary pharmacy for prescribed medicines.";
-    triage.secondary_referral_destination = dispensaryStatus.isOpen ? "ESIS Dispensary" : "104 Medical Team";
-    triage.secondary_referral_reason = dispensaryStatus.isOpen
-      ? "ESIS Dispensary doctor consultation for new prescription if needed."
-      : "104 Health Helpline for tele-doctor prescription review.";
-    triage.recommended_facility_type = "Empanelled Pharmacy / ESIS Dispensary Store";
-    triage.recommended_action = "Guide caller to nearest empanelled chemist for prescribed medications and refills.";
-    return triage;
-  }
-
-  // 9. Forward to On-duty Medical Officer
-  if (referral.includes("doctor")) {
-    triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    triage.referral_destination = "Forward to Doctor";
-    triage.referral_reason = "Forward call directly to on-duty ESIC Medical Officer workstation.";
-    triage.secondary_referral_destination = "ESIC Hospital";
-    triage.secondary_referral_reason = "ESIC Hospital specialist emergency department.";
-    triage.recommended_facility_type = "On-Duty Medical Officer Escalation";
-    triage.recommended_action = "Forward call directly to on-duty ESIC Medical Officer workstation.";
-    return triage;
-  }
 
   // 10. ESIC Hospital
   if (referral.includes("hospital") || triage.urgency_level === "Urgent" || triage.urgency_level === "Emergency") {
@@ -1209,7 +1216,7 @@ function normalizeTriageDecision(triage, intake) {
     triage.is_dual_protocol = true;
     triage.referral_destination = "ESIC Hospital";
     triage.referral_reason = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
-    triage.secondary_referral_destination = "104 Medical Team";
+    triage.secondary_referral_destination = "104 Health Helpline";
     triage.secondary_referral_reason = "104 Health Helpline tele-doctor for interim symptom guidance and first aid.";
     triage.recommended_facility_type = "Nearest ESIC Hospital / Emergency Casualty";
     triage.recommended_action = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
@@ -1221,7 +1228,7 @@ function normalizeTriageDecision(triage, intake) {
   triage.is_dual_protocol = true;
   triage.referral_destination = "ESIS Dispensary";
   triage.referral_reason = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";
-  triage.secondary_referral_destination = "104 Medical Team";
+  triage.secondary_referral_destination = "104 Health Helpline";
   triage.secondary_referral_reason = "104 Health Helpline for telephonic doctor advice.";
   triage.recommended_facility_type = "ESIS Dispensary Primary Care";
   triage.recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";

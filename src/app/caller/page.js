@@ -312,7 +312,7 @@ export default function IpCallerPage() {
                 title="Caller Spoken Language"
               >
                 <option value="en-IN" className="bg-slate-900 text-white">English (India)</option>
-                <option value="hi-IN" className="bg-slate-900 text-white">Hinglish / हिंदी</option>
+                <option value="hi-IN" className="bg-slate-900 text-white">Hinglish</option>
                 <option value="as-IN" className="bg-slate-900 text-white">Assamese / অসমীয়া</option>
               </select>
             </div>

@@ -23,7 +23,7 @@ export async function GET(request) {
       (searchParams.get("urgency") || "").toLowerCase()
     );
 
-  const nearest = rankNearestFacilities(callerLoc, facilities, 5, isSevere);
+  const nearest = rankNearestFacilities(callerLoc, facilities, 6, isSevere);
 
   return NextResponse.json({
     resolved_location: callerLoc,

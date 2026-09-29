@@ -139,17 +139,27 @@ export async function getFacilities(filters = {}) {
     list = memoryFacilities;
     if (ctx) {
       try {
+        let firestoreList = [];
         if (ctx.type === "admin") {
           const snap = await ctx.db.collection("facilities").get();
           if (!snap.empty) {
-            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           }
         } else {
           const { collection, getDocs } = await import("firebase/firestore");
           const snap = await getDocs(collection(ctx.db, "facilities"));
           if (!snap.empty) {
-            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           }
+        }
+        if (firestoreList.length > 0) {
+          const map = new Map();
+          defaultFacilities.forEach((f) => map.set(f.id || f.name, f));
+          firestoreList.forEach((f) => {
+            const existing = map.get(f.id || f.name) || {};
+            map.set(f.id || f.name, { ...existing, ...f });
+          });
+          list = Array.from(map.values());
         }
       } catch (e) {
         // Fallback gracefully to memoryFacilities
@@ -165,8 +175,13 @@ export async function getFacilities(filters = {}) {
     if (facility_type && facility_type !== "all") {
       const isTieUpFilter = facility_type === "Tie-Up Facility" || facility_type === "Tie-Up Hospital";
       const isFacTieUp = f.facility_type === "Tie-Up Facility" || f.facility_type === "Tie-Up Hospital";
+      const isHospitalFilter = facility_type === "ESIC Hospital" || facility_type === "Hospital";
+      const isFacHospital = f.facility_type === "ESIC Hospital" || f.facility_type === "Hospital";
+
       if (isTieUpFilter) {
         if (!isFacTieUp) return false;
+      } else if (isHospitalFilter) {
+        if (!isFacHospital) return false;
       } else if (f.facility_type !== facility_type) {
         return false;
       }

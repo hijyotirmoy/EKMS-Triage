@@ -11,7 +11,11 @@ export async function GET() {
   const facility_types = [
     ...new Set(
       facilities
-        .map((f) => (f.facility_type === "Tie-Up Hospital" ? "Tie-Up Facility" : f.facility_type))
+        .map((f) => {
+          if (f.facility_type === "Tie-Up Hospital") return "Tie-Up Facility";
+          if (f.facility_type === "Hospital") return "ESIC Hospital";
+          return f.facility_type;
+        })
         .filter(Boolean)
     ),
   ].sort();

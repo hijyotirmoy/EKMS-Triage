@@ -23,7 +23,6 @@ import { isWhisperHallucination } from "@/lib/speechRecognition";
 import { detectDirectCallerReferralIntent } from "@/lib/doctorChatEngine";
 
 const INITIAL_SYMPTOM_SHORTCUTS = [
-  { icon: "🧠", label: "Depression / Counselling", text: "Caller feels deeply depressed, hopeless, and crying" },
   { icon: "❤️", label: "Chest Pain / Pressure", text: "Severe chest pain and heavy pressure" },
   { icon: "⚡", label: "Weakness & Dizziness", text: "Patient has extreme weakness and dizziness" },
   { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
@@ -31,16 +30,15 @@ const INITIAL_SYMPTOM_SHORTCUTS = [
   { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
   { icon: "🥘", label: "Abdominal / Stomach Pain", text: "Severe stomach cramps and gastric pain" },
   { icon: "🩸", label: "Workplace Injury / Cut", text: "Deep cut and bleeding from injury at work" },
-  { icon: "🎗️", label: "HIV / AIDS", text: "Caller inquiry regarding HIV / AIDS symptoms, testing, PEP, or sexual health counseling" },
 ];
 
 const MOBILE_SYMPTOM_SHORTCUTS = [
   { icon: "❤️", label: "Chest Pain / Pressure", text: "Severe chest pain and heavy pressure" },
   { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
-  { icon: "🎗️", label: "HIV / AIDS", text: "Caller inquiry regarding HIV / AIDS symptoms, testing, PEP, or sexual health counseling" },
   { icon: "⚡", label: "Weakness & Dizziness", text: "Patient has extreme weakness and dizziness" },
+  { icon: "🤢", label: "Vomiting & Nausea", text: "Continuous vomiting and unable to keep fluids" },
   { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
-  { icon: "🧠", label: "Depression / Counsel", text: "Caller feels deeply depressed, hopeless, and crying" },
+  { icon: "🥘", label: "Abdominal Pain", text: "Severe stomach cramps and gastric pain" },
 ];
 
 function formatReferralDestination(dest) {
@@ -649,7 +647,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                 handleUserSubmit();
               }
             }}
-            placeholder="Type what the caller said / answers (English / हिंदी / Hinglish)..."
+            placeholder="Type what the caller said / answers (English / Hinglish)..."
             className="flex-1 min-w-0 rounded-md border border-border/80 bg-background px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-emerald-500"
           />
           <button

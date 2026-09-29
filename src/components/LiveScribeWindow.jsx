@@ -172,7 +172,7 @@ export const LiveScribeWindow = ({
                 title="Scribe Speech Language"
               >
                 <option value="en-IN">English (India)</option>
-                <option value="hi-IN">Hinglish / हिंदी</option>
+                <option value="hi-IN">Hinglish</option>
                 <option value="as-IN">Assamese / অসমীয়া</option>
                 <option value="en-US">English (US)</option>
               </select>

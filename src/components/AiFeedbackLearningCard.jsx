@@ -25,7 +25,7 @@ const URGENCY_OPTIONS = [
 
 const REFERRAL_OPTIONS = [
   "108 Ambulance",
-  "104 Medical Team",
+  "104 Health Helpline",
   "ESIC Hospital",
   "ESIS Dispensary",
   "Nearest Tie-Up Facility",
@@ -176,9 +176,9 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
           <div>
             <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 flex-wrap">
               <span>Agent Feedback & AI Self-Learning</span>
-              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300">
-                <Sparkles className="h-2.5 w-2.5 text-blue-600" />
-                Adaptive
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300">
+                <Sparkles className="h-2.5 w-2.5 text-amber-600" />
+                Under Development
               </span>
             </h4>
           </div>
@@ -187,7 +187,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
         {stats && (
           <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
             <span className="rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/60 px-1.5 py-0.5 text-[10px] font-bold">
-              {(stats?.correctionsCount ?? stats?.stats?.correctionsCount ?? (Array.isArray(stats?.recentCorrections) ? stats.recentCorrections.length : 0))} Learned Rules Active
+              {(stats?.correctionsCount ?? stats?.stats?.correctionsCount ?? (Array.isArray(stats?.recentCorrections) ? stats.recentCorrections.length : 0))} Learned
             </span>
           </div>
         )}

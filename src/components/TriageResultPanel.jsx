@@ -26,7 +26,14 @@ import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { AiFeedbackLearningCard } from "./AiFeedbackLearningCard";
-import { isHospital, isDispensary, isTieUp } from "../lib/geo";
+import {
+  isHospital,
+  isDispensary,
+  isTieUp,
+  isEsicHospital,
+  isGovtDistrictHospital,
+  getFacilityCategoryLabel,
+} from "../lib/geo";
 
 export const ACTION_DIRECTIVES = {
   NACO_1097: {
@@ -51,7 +58,7 @@ export const ACTION_DIRECTIVES = {
     id: "CALL_108",
     title: "CALL 108 AMBULANCE IMMEDIATELY",
     category: "Emergency Dispatch",
-    badge: "108 Ambulance Dispatch",
+    badge: "108 Ambulance",
     badgeColor: "bg-rose-700 text-white font-bold",
     cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
     panelLightTint: "border-rose-300/80 bg-rose-50/50 dark:bg-rose-950/25",
@@ -66,19 +73,19 @@ export const ACTION_DIRECTIVES = {
   },
   TELE_MANAS: {
     id: "TELE_MANAS",
-    title: "FORWARD TO PSYCHIATRIC TEAM / TELE-MANAS (14416)",
+    title: "TRANSFER TO TELE-MANAS (14416)",
     category: "Mental Health Crisis Protocol",
-    badge: "Psychiatric Team / Tele-MANAS",
+    badge: "Tele-MANAS (14416)",
     badgeColor: "bg-purple-700 text-white font-bold",
     cardBorder: "border-purple-400 bg-purple-50 text-purple-950 shadow-xs",
     panelLightTint: "border-purple-300/80 bg-purple-50/50 dark:bg-purple-950/25",
     topBar: "bg-purple-700",
     icon: "🧠",
     summary:
-      "Caller is in emotional crisis, experiencing depression, severe anxiety, or thoughts of self-harm. The agent must speak with warm empathy and transfer to mental health professionals.",
+      "Caller is in emotional crisis, experiencing depression, severe anxiety, or thoughts of self-harm. Transfer call to Tele-MANAS (14416) for 24x7 confidential crisis counseling.",
     checklist: [
       "1. Speak calmly with reassurance: 'You are safe, and we are connecting you to professional help.'",
-      "2. Transfer call to Psychological Counselling Department or Toll-Free 14416 (National Tele-MANAS).",
+      "2. Transfer call to Toll-Free 14416 (National Tele-MANAS) for 24x7 confidential counseling.",
       "3. Stay on line until safely handed over if self-harm risk is active.",
     ],
   },
@@ -86,7 +93,7 @@ export const ACTION_DIRECTIVES = {
     id: "ESIC_HOSPITAL",
     title: "REFER / FORWARD TO NEAREST ESIC HOSPITAL",
     category: "Secondary Care & Casualty Evaluation",
-    badge: "ESIC Hospital (Casualty / OPD Today)",
+    badge: "ESIC Hospital",
     badgeColor: "bg-amber-700 text-white font-bold",
     cardBorder: "border-amber-400 bg-amber-50 text-amber-950 shadow-xs",
     panelLightTint: "border-amber-300/80 bg-amber-50/50 dark:bg-amber-950/25",
@@ -119,7 +126,7 @@ export const ACTION_DIRECTIVES = {
   },
   TELE_104: {
     id: "TELE_104",
-    title: "FORWARD TO 104 MEDICAL TEAM",
+    title: "FORWARD TO 104 HEALTH HELPLINE",
     category: "Tele-Doctor Consultation",
     badge: "104 Health Helpline",
     badgeColor: "bg-blue-700 text-white font-bold",
@@ -128,67 +135,14 @@ export const ACTION_DIRECTIVES = {
     topBar: "bg-blue-700",
     icon: "📞",
     summary:
-      "Caller requests direct medical advice or consultation with a government doctor over the phone. Transfer call to the 104 Medical Team.",
+      "Caller requests direct medical advice or consultation with a government doctor over the phone. Transfer call to 104 Health Helpline.",
     checklist: [
-      "1. Inform caller: 'Connecting you to the 104 government medical officer now.'",
+      "1. Inform caller: 'Connecting you to 104 Health Helpline doctor now.'",
       "2. Transfer call line to 104 Health Helpline triage queue.",
       "3. Share case reference number for medical documentation.",
     ],
   },
-  E_SANJEEVANI: {
-    id: "E_SANJEEVANI",
-    title: "ADVISE e-SANJEEVANI TELE-CONSULTATION",
-    category: "National Telemedicine Portal",
-    badge: "e-Sanjeevani Online Doctor",
-    badgeColor: "bg-sky-700 text-white font-bold",
-    cardBorder: "border-sky-400 bg-sky-50 text-sky-950 shadow-xs",
-    panelLightTint: "border-sky-300/80 bg-sky-50/50 dark:bg-sky-950/25",
-    topBar: "bg-sky-700",
-    icon: "💻",
-    summary:
-      "Advise the patient to consult government specialist doctors online from home without visiting a crowded hospital facility.",
-    checklist: [
-      "1. Guide caller to visit esanjeevani.in or install the free 'eSanjeevani' mobile app.",
-      "2. Explain that audio/video consultation with government doctors is completely free.",
-      "3. Advise visiting physical dispensary or hospital if symptoms worsen.",
-    ],
-  },
-  NEAREST_PHARMACY: {
-    id: "NEAREST_PHARMACY",
-    title: "ADVISE NEAREST PHARMACY / DISPENSARY STORE",
-    category: "Prescription Refill & OTC Supply",
-    badge: "Empanelled Pharmacy / Chemist",
-    badgeColor: "bg-teal-700 text-white font-bold",
-    cardBorder: "border-teal-400 bg-teal-50 text-teal-950 shadow-xs",
-    panelLightTint: "border-teal-300/80 bg-teal-50/50 dark:bg-teal-950/25",
-    topBar: "bg-teal-700",
-    icon: "💊",
-    summary:
-      "Guide caller to the nearest registered dispensary store or empanelled chemist for free prescription medicines, ORS, or first-aid supplies.",
-    checklist: [
-      "1. Confirm patient has a valid doctor prescription or Pehchan card.",
-      "2. Provide address of nearest empanelled chemist or dispensary pharmacy.",
-      "3. Advise patient on prescribed dosage adherence.",
-    ],
-  },
-  FORWARD_DOCTOR: {
-    id: "FORWARD_DOCTOR",
-    title: "FORWARD CALL TO ON-DUTY MEDICAL OFFICER",
-    category: "Direct Physician Escalation",
-    badge: "Medical Officer Escalation",
-    badgeColor: "bg-indigo-700 text-white font-bold",
-    cardBorder: "border-indigo-400 bg-indigo-50 text-indigo-950 shadow-xs",
-    panelLightTint: "border-indigo-300/80 bg-indigo-50/50 dark:bg-indigo-950/25",
-    topBar: "bg-indigo-700",
-    icon: "👨‍⚕️",
-    summary:
-      "Complex clinical scenario requiring direct clinical evaluation. Escalate caller to the on-duty Medical Officer workstation.",
-    checklist: [
-      "1. Inform caller: 'Connecting you to our on-duty Medical Officer for clinical review.'",
-      "2. Transfer line to on-duty medical doctor desk.",
-      "3. Summarize primary symptoms, severity score, and reported duration.",
-    ],
-  },
+
   TIE_UP_FACILITY: {
     id: "TIE_UP_FACILITY",
     title: "REFER TO EMPANELLED TIE-UP FACILITY",
@@ -206,6 +160,24 @@ export const ACTION_DIRECTIVES = {
       "3. Remind IP to carry their ESIC Pehchan / Insurance card for cashless treatment under ESIC tie-up guidelines.",
     ],
   },
+  DIST_HOSPITAL: {
+    id: "DIST_HOSPITAL",
+    title: "REFER TO DISTRICT HOSPITAL / PUBLIC HEALTHCARE",
+    category: "Public Healthcare Outside ESIC",
+    badge: "Govt District Hospital",
+    badgeColor: "bg-blue-800 text-white font-bold",
+    cardBorder: "border-blue-500 bg-blue-50 text-blue-950 shadow-xs",
+    panelLightTint: "border-blue-300/80 bg-blue-50/50 dark:bg-blue-950/25",
+    topBar: "bg-blue-800",
+    icon: "🏥",
+    summary:
+      "Beneficiary requires public healthcare services outside ESIC network, general public specialist care, non-ESIC admissions, or child immunization.",
+    checklist: [
+      "1. Check the nearest Govt District Hospital listed under Facilities below.",
+      "2. Click 'SMS to Caller' to dispatch address and Google Maps directions.",
+      "3. Remind caller to carry government photo ID / Aadhaar and medical records for OPD/admissions.",
+    ],
+  },
 };
 
 export function mapDestinationToDirectiveId(dest) {
@@ -215,42 +187,59 @@ export function mapDestinationToDirectiveId(dest) {
   if (d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("pep")) return "NACO_1097";
   if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team") || d.includes("health helpline") || d.includes("advice")) return "TELE_104";
   if (d.includes("manas") || d.includes("psych") || (d.includes("counsel") && !d.includes("naco") && !d.includes("hiv"))) return "TELE_MANAS";
-  if (d.includes("tie") || d.includes("empanelled")) return "TIE_UP_FACILITY";
+  if (d.includes("tie") || d.includes("empanelled") || d.includes("swasti") || d.includes("ayursundra") || d.includes("dispur hospital") || d.includes("narayana") || d.includes("hayat") || d.includes("excelcare") || d.includes("down town")) return "TIE_UP_FACILITY";
+  if (d.includes("district") || d.includes("dist hosp") || d.includes("public health") || d.includes("civil hospital") || d.includes("immunization")) return "DIST_HOSPITAL";
   if (d.includes("hospital") || d.includes("casualty")) return "ESIC_HOSPITAL";
-  if (d.includes("sanjeevani") || d.includes("telemedicine")) return "E_SANJEEVANI";
-  if (d.includes("pharmacy") || d.includes("chemist")) return "NEAREST_PHARMACY";
-  if (d.includes("forward to doctor") || d.includes("medical officer")) return "FORWARD_DOCTOR";
   if (d.includes("dispensary") || d.includes("clinic")) return "ESIS_DISPENSARY";
   return "ESIS_DISPENSARY";
 }
 
 export function resolveDirectiveIds(t, result) {
   // Check if caller inquiry is explicitly NACO 1097 / HIV
-  const intakeText = `${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
+  const intakeText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
   const isNacoHIV = /\b(hiv|aids|naco|1097|post.?exposure|pep\b|anti.?retroviral|art\s*center)\b/i.test(intakeText);
 
+  // Check off-hours (between 4:00 PM and 10:00 AM)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+  const currentMinutes = istDate.getHours() * 60 + istDate.getMinutes();
+  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM
+
+  const isEmergency =
+    t?.call_108 ||
+    (t?.urgency_score != null && Number(t.urgency_score) >= 8) ||
+    /\b(108|ambulance|severe trauma|cardiac arrest|massive bleed)\b/i.test(intakeText);
+
   let primaryDest =
-    t?.call_referral_primary ||
     t?.referral_destination ||
+    t?.call_referral_primary ||
     result?.ekms_ai_context?.triageState?.referralDestination ||
     result?.ekms_ai_context?.referralDestination;
+
+  // RULE: If off-hours (after 4 PM to 10 AM) and NO emergency:
+  // Refer to 104 Health Helpline FIRST!
+  if (isOffHours && !isEmergency && !isNacoHIV && !t?.is_psychiatric && !/tie.?up|empanelled/i.test(primaryDest || "")) {
+    primaryDest = "104 Health Helpline";
+  }
 
   if (!primaryDest) {
     if (isNacoHIV) {
       primaryDest = "NACO 1097 Helpline";
-    } else if (t?.call_108) {
-      primaryDest = "108 Ambulance Dispatch";
+    } else if (isEmergency) {
+      primaryDest = "108 Ambulance";
     } else if (t?.is_psychiatric) {
       primaryDest = "Psychiatric Team / Tele-MANAS";
+    } else if (isOffHours) {
+      primaryDest = "104 Health Helpline";
     } else {
       primaryDest = "ESIS Dispensary";
     }
   }
 
-  const secondaryDest =
+  let secondaryDest =
     t?.call_referral_secondary ||
     t?.secondary_referral_destination ||
-    "104 Medical Team";
+    (isOffHours ? "ESIC Hospital" : "104 Health Helpline");
 
   const primaryId = mapDestinationToDirectiveId(primaryDest);
   let secondaryId = mapDestinationToDirectiveId(secondaryDest);
@@ -262,7 +251,7 @@ export function resolveDirectiveIds(t, result) {
   return {
     primaryId,
     secondaryId,
-    isDual: false, // Dual protocol notification banner box removed completely per user request
+    isDual: false,
     primaryBadge: ACTION_DIRECTIVES[primaryId]?.badge || primaryDest,
     secondaryBadge: ACTION_DIRECTIVES[secondaryId]?.badge || secondaryDest,
   };
@@ -390,64 +379,112 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
     "ESIC_HOSPITAL",
     "ESIS_DISPENSARY",
     "TIE_UP_FACILITY",
+    "DIST_HOSPITAL",
     "CALL_108",
-    "NEAREST_PHARMACY",
   ].includes(activeDirective.id);
 
-  // Filter and dynamically organize facilities based on weekend operating status and referral selection
+  // Dynamically organize facilities with clear categorization badges and all 4 facility types
   const dynamicFacilities = useMemo(() => {
     if (!Array.isArray(facs) || facs.length === 0) return [];
 
-    // Filter out closed facilities on weekends (Dispensaries closed on Saturday & Sunday)
-    const openFacs = facs.filter((f) => {
-      if (isWeekend && (f.is_dispensary || isDispensary(f))) {
-        return false;
-      }
-      return true;
-    });
-
     const getTag = (f) => {
-      if (isHospital(f)) return "Hospital · 24x7 Casualty";
-      if (isTieUp(f)) return "Empanelled Tie-Up Hospital";
-      if (isDispensary(f)) return "ESIS Dispensary";
-      return f.facility_type || "Medical Facility";
+      if (f.facility_tag) return f.facility_tag;
+      return getFacilityCategoryLabel(f);
     };
 
-    // If a physical facility visit is NOT strictly required (e.g. 104 tele-doctor, Tele-MANAS, NACO 1097, e-Sanjeevani):
-    // Show the nearest open facilities to the caller strictly sorted by distance
-    if (!isFacilityRequired) {
-      return openFacs.slice(0, 6).map((f) => ({
-        ...f,
-        facility_tag: getTag(f),
-      }));
+    const getCategoryStyle = (f) => {
+      if (isEsicHospital(f)) {
+        return "bg-amber-500/15 border-amber-500/40 text-amber-900 dark:text-amber-300 font-bold";
+      }
+      if (isGovtDistrictHospital(f)) {
+        return "bg-blue-500/15 border-blue-500/40 text-blue-900 dark:text-blue-300 font-bold";
+      }
+      if (isDispensary(f)) {
+        return "bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-300 font-bold";
+      }
+      if (isTieUp(f)) {
+        return "bg-cyan-500/15 border-cyan-500/40 text-cyan-900 dark:text-cyan-300 font-bold";
+      }
+      return "bg-secondary/80 border-border/70 text-foreground/90 font-bold";
+    };
+
+    // Tie-Up hospital positioning rule:
+    // If agent selects to refer to Tie-Up (activeDirective.id === "TIE_UP_FACILITY"), Tie-Up comes to the TOP (Position 1).
+    // Otherwise, User hierarchy:
+    // 1. ESIC Hospital
+    // 2. Govt District Hospital
+    // 3. ESIS Dispensary (shown above tie-up even if closed)
+    // 4 & 5. Next nearest open facilities within 100km
+    // 6. ESIC Tie-Up Hospital (at the last position / below dispensary)
+    const isTieUpSelected = activeDirective.id === "TIE_UP_FACILITY";
+
+    let orderedFacs = [];
+
+    if (isTieUpSelected) {
+      // 1. Tie-Up selected -> Put nearest Tie-Up facility at the very top (Position 1)
+      const tieUps = facs.filter(isTieUp);
+      const nonTieUps = facs.filter((f) => !isTieUp(f));
+      orderedFacs = [...tieUps, ...nonTieUps].slice(0, 6);
+    } else {
+      const esicHosp = facs.find(isEsicHospital);
+      const govtHosp = facs.find(isGovtDistrictHospital);
+      const disp = facs.find(isDispensary);
+      const tieUp = facs.find(isTieUp);
+
+      const chosen = [];
+      const chosenKeys = new Set();
+      const add = (f) => {
+        if (!f) return;
+        const key = f.id || f.name;
+        if (!chosenKeys.has(key)) {
+          chosen.push(f);
+          chosenKeys.add(key);
+        }
+      };
+
+      // 1. ESIC Hospital
+      add(esicHosp);
+      // 2. Govt District Hospital
+      add(govtHosp);
+      // 3. Dispensary (shown above tie-up even if closed!)
+      add(disp);
+
+      // 4 & 5. Other non-tie-up facilities <= 100km
+      const nonTieUpsWithin100 = facs.filter(
+        (f) => !isTieUp(f) && (f.distance_km == null || f.distance_km <= 100)
+      );
+      for (const f of nonTieUpsWithin100) {
+        if (chosen.length >= 5) break;
+        add(f);
+      }
+
+      // If still fewer than 5, add other non-tie-ups
+      const allNonTieUps = facs.filter((f) => !isTieUp(f));
+      for (const f of allNonTieUps) {
+        if (chosen.length >= 5) break;
+        add(f);
+      }
+
+      // 6. Tie-Up Hospital at the last position (below dispensary)
+      if (tieUp) {
+        add(tieUp);
+      }
+
+      // If still fewer than 6, fill with any remaining
+      for (const f of facs) {
+        if (chosen.length >= 6) break;
+        add(f);
+      }
+
+      orderedFacs = chosen.slice(0, 6);
     }
 
-    // If a physical facility IS required (Hospital, Tie-Up, Dispensary, 108, Pharmacy):
-    // Prioritize nearest facilities matching the active directive, followed by remaining nearest
-    const matchesDirective = (f) => {
-      if (activeDirective.id === "TIE_UP_FACILITY") return f.is_tie_up || isTieUp(f);
-      if (activeDirective.id === "ESIC_HOSPITAL") return f.is_hospital || isHospital(f);
-      if (activeDirective.id === "ESIS_DISPENSARY") return f.is_dispensary || isDispensary(f);
-      if (activeDirective.id === "NEAREST_PHARMACY") {
-        return (
-          f.facility_type?.toLowerCase().includes("pharmacy") ||
-          f.name?.toLowerCase().includes("pharmacy") ||
-          f.name?.toLowerCase().includes("chemist")
-        );
-      }
-      if (activeDirective.id === "CALL_108") return f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f);
-      return true;
-    };
-
-    const matchingFacs = openFacs.filter(matchesDirective);
-    const matchingKeys = new Set(matchingFacs.map((f) => f.id || f.name));
-    const otherFacs = openFacs.filter((f) => !matchingKeys.has(f.id || f.name));
-
-    return [...matchingFacs, ...otherFacs].slice(0, 6).map((f) => ({
+    return orderedFacs.map((f) => ({
       ...f,
       facility_tag: getTag(f),
+      category_style: getCategoryStyle(f),
     }));
-  }, [facs, isWeekend, isFacilityRequired, activeDirective.id]);
+  }, [facs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -497,12 +534,9 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
     ? `${assessedSeverity} · ${durationText}`
     : `${assessedSeverity} (${t.urgency_score || 5}/10) · ${durationText}`;
 
-  const primaryReferralDest =
-    t.call_referral_primary ||
-    t.referral_destination ||
-    ACTION_DIRECTIVES[directiveIds.primaryId]?.badge ||
-    t.recommended_facility_type ||
-    "ESIS Dispensary";
+  // USER MANDATE: Near Urgent and Primary Referral 01 MUST show the exact same referral!
+  const primaryReferralDest = activeDirective.badge;
+
   const cleanReason = (reason) => {
     if (!reason || typeof reason !== "string") return "";
     if (reason.includes("Symptoms require secondary hospital casualty")) return "";
@@ -510,22 +544,23 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
   };
 
   const primaryReferralReason = cleanReason(
+    t.call_referral_primary_reason ||
     t.referral_reason ||
-    ACTION_DIRECTIVES[directiveIds.primaryId]?.summary ||
+    activeDirective.summary ||
     t.recommended_action ||
     ""
   );
 
-  const secondaryReferralDest =
-    t.call_referral_secondary ||
-    t.secondary_referral_destination ||
-    secondaryDirective?.badge ||
-    (directiveIds.primaryId === "CALL_108"
-      ? "ESIC Hospital"
-      : "104 Medical Team");
+  const effectiveSecondaryDirective =
+    (secondaryDirective.id === activeDirective.id
+      ? (activeDirective.id === "ESIC_HOSPITAL" ? ACTION_DIRECTIVES.TELE_104 : ACTION_DIRECTIVES.ESIC_HOSPITAL)
+      : secondaryDirective) || (activeDirective.id === "TELE_104" ? ACTION_DIRECTIVES.ESIC_HOSPITAL : ACTION_DIRECTIVES.TELE_104);
+
+  const secondaryReferralDest = effectiveSecondaryDirective.badge;
   const secondaryReferralReason = cleanReason(
+    t.call_referral_secondary_reason ||
     t.secondary_referral_reason ||
-    secondaryDirective?.summary ||
+    effectiveSecondaryDirective?.summary ||
     ""
   );
 
@@ -559,7 +594,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
                     data-testid="triage-call-108"
                     className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
                   >
-                    <AlertOctagon className="h-3.5 w-3.5" /> CALL 108 NOW
+                    🚨 108 AMBULANCE
                   </span>
                 ) : activeDirective.id === "TELE_104" ? (
                   <span
@@ -588,6 +623,13 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
                     className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300 bg-cyan-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
                   >
                     <Building2 className="h-3.5 w-3.5" /> TIE-UP FACILITY
+                  </span>
+                ) : activeDirective.id === "DIST_HOSPITAL" ? (
+                  <span
+                    data-testid="triage-dist-hospital"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-blue-800 px-3 py-1 text-xs font-bold text-white shadow-2xs"
+                  >
+                    <Building2 className="h-3.5 w-3.5" /> GOVT DISTRICT HOSPITAL
                   </span>
                 ) : (
                   <span
@@ -898,7 +940,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
           )}
         </div>
 
-        {/* Weekend Operating Notice (Dispensaries closed on Saturday & Sunday) */}
+        {/* Weekend Operating Notice */}
         {isWeekend && (
           <div className="mt-3.5 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-50/80 dark:bg-amber-950/30 p-3 text-xs text-amber-950 dark:text-amber-200 shadow-2xs">
             <AlertOctagon className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
@@ -907,7 +949,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
                 Weekend Schedule Active ({dispensaryStatus.reason || "Saturday / Sunday"}):
               </p>
               <p className="text-[11.5px] text-amber-900 dark:text-amber-300 mt-0.5 leading-snug">
-                ESIS Dispensaries are closed on weekends (Hours: Mon–Fri 10:00 AM – 3:00 PM). Closed dispensaries are hidden from the directory. Only open 24x7 Casualty &amp; Empanelled Tie-Up Hospitals are displayed.
+                ESIS Dispensaries operate Monday–Friday 10:00 AM – 3:00 PM (Closed Sat &amp; Sun). All 4 facility types are displayed below for immediate caller referral. For acute symptoms, direct patient to 24x7 Casualty at the nearest Hospital.
               </p>
             </div>
           </div>
@@ -924,12 +966,31 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                      <span className="rounded-md bg-secondary/80 border border-border/70 px-2 py-0.5 text-[10.5px] font-bold text-foreground/90">
+                      <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
                         {f.facility_tag}
                       </span>
-                      {f.is_exact_pincode && (
+                      {f.is_exact_pincode ? (
                         <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
                           🎯 Pincode Match ({f.pincode})
+                        </span>
+                      ) : f.is_nearby_pincode ? (
+                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                          📍 Nearby Area ({f.pincode})
+                        </span>
+                      ) : null}
+                      {(f.is_dispensary || isDispensary(f)) && isWeekend && (
+                        <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
+                          Closed on Weekends (OPD Mon–Fri 10AM–3PM)
+                        </span>
+                      )}
+                      {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
+                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                          OPD: Mon–Fri 10:00 AM – 3:00 PM
+                        </span>
+                      )}
+                      {(f.is_hospital || isHospital(f)) && (
+                        <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
+                          OPD: 10:00 AM – 4:00 PM · IPD &amp; Emergency: 24x7
                         </span>
                       )}
                     </div>

@@ -622,7 +622,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
               className={inputCls}
               value={form.pincode}
               onChange={set("pincode")}
-              placeholder="781005"
+              placeholder="e.g. 781022"
               maxLength={6}
             />
           </Field>

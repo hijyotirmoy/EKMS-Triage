@@ -51,7 +51,7 @@ export function getReferralBadge(c) {
   }
   if (t.call_108 || dest.includes("108") || dest.includes("ambulance")) {
     return {
-      label: "108 Ambulance Dispatch",
+      label: "108 Ambulance",
       icon: "🚨",
       color: "bg-rose-700 text-white border-rose-800",
     };
@@ -77,7 +77,7 @@ export function getReferralBadge(c) {
   }
   if (dest.includes("hospital") || dest.includes("casualty")) {
     return {
-      label: "ESIC Hospital (Casualty / OPD Today)",
+      label: "ESIC Hospital",
       icon: "🏥",
       color: "bg-amber-700 text-white border-amber-800",
     };

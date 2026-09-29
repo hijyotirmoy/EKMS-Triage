@@ -1,7 +1,7 @@
 // EKMS AI Call Triage & Forwarding Assistant
 // Advanced Clinical Probing Engine with Doctor-like Empathy, Context Analysis & Anti-Repetition
 // Detects physical and psychiatric conditions, screens for suicidal ideation/depression,
-// and recommends call routing (108 Ambulance / ESIC Hospital / ESIS Dispensary / 104 Medical Team / Counselling Department)
+// and recommends call routing (108 Ambulance / ESIC Hospital / ESIS Dispensary / 104 Health Helpline / Counselling Department)
 // Strictly NO medical prescription or doctor treatment advice.
 
 import {
@@ -24,16 +24,26 @@ CORE CLINICAL RULES:
    - Formulate the probing question in English, followed by a concise Romanized Hinglish translation in parentheses:
      Format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
    - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
-4. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
-5. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
-6. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
-7. EMPATHY & EMOTIONAL REASSURANCE:
+4. MANDATORY DURATION INQUIRY: If the caller has NOT yet told you when the symptoms started (onset/duration), you MUST ask from when the symptoms have been happening (e.g. "Since when have you been having these symptoms?"). Once duration is stated or established, NEVER ask date/time again.
+5. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
+6. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
+7. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
+8. EMPATHY & EMOTIONAL REASSURANCE:
    - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
-   - Dual Emergency: If acute self-harm/physical trauma + psychiatric crisis, prioritize physical emergency dispatch (108 Ambulance) with concurrent psychiatric counselling support.
-8. REFERRAL TIMING: On Turns 1-2, return referralDestination: null unless acute 108 emergency or direct caller preference. On Turn 3+, synthesize findings for referral recommendation.
-9. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
+9. 8-TIER LOGICAL ROUTING HIERARCHY (Route user to the first category where conditions are met):
+   Tier 1. 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency): Accidents, severe bleeding, life-threatening cases, or any emergency ambulance requests.
+   Tier 2. Tele-MANAS Services (Priority: Mental Health): Beneficiary requires psychological counseling or emotional support (distress, anxiety, depression, suicidal thoughts).
+          * PSYCHIATRIC RULE: In case of psychiatric cases, ALWAYS provide Tele-MANAS as a forward system.
+          * If beneficiary has BOTH psychiatric AND physical medical/health symptoms, REFER TO HEALTH FIRST as Primary, then PSYCHIATRIC SECONDARY based on condition!
+   Tier 3. NACO/HIV (Priority: HIV/AIDS & STI): Queries specifically related to the NACO ecosystem, HIV testing, prevention, counseling, ART support, PPTCT, or linked STI services.
+   Tier 4. 104 Health Helpline (Priority: Tele-Consultation / General Info): Beneficiary needs health guidance without visiting a physical facility (basic symptom guidance, general medical advice, helpline referrals).
+   Tier 5. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours. Strict Constraint: Only route here if request falls between 10:00 AM and 4:00 PM.
+   Tier 6. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, or inpatient care within ESIC network (specialist consultations, inpatient admissions, surgeries, advanced diagnostics, institutional maternity).
+   Tier 7. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment. Strict Constraint: Route here ONLY if: (a) Inpatient IPD emergency, (b) Off-hours emergency (between 4:00 PM and 8:00 AM), OR (c) Patient possesses direct referral from an ESIC Hospital.
+   Tier 8. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network (non-ESIC public admissions, general public specialist care, child immunization).
+10. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
    - We are triage helpline call operators, NOT diagnosing doctors.
-   - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes (e.g. NEVER hypothesize 'Renal Colic', 'Kidney Stone', 'Appendicitis', 'Pathology', 'Ulcer', 'Myocardial Infarction', etc.) unless the caller explicitly named that disease in their own words.
+   - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes unless caller explicitly named that disease in their own words.
    - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'High Fever', 'Throbbing Headache', 'Limb Injury').
    - NEVER suggest or name specific medicines, drugs, tablets, or injections.
 
@@ -44,13 +54,36 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "suspectedCondition": "Reported symptom area only (e.g. 'Abdominal Pain / Cramps'); NEVER diagnose a disease",
   "isPsychiatric": true | false,
   "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "ESIC Hospital" | "ESIS Dispensary" | "104 Medical Team" | "e-Sanjeevani" | "Nearest Pharmacy" | "Forward to Doctor" | null,
+  "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Nearest Tie-Up Facility" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
   "duration": "detected duration or accident time",
   "isReadyForSummary": true | false,
   "clinicalSummary": "Concise symptom-based triage summary in English without diagnosing diseases"
 }`;
+
+/**
+ * Strips raw clock times (e.g. 10:30 AM, 14:00) and calendar dates (e.g. 29/09/2026, 2026-09-29)
+ * from input text so they are NOT mistakenly extracted as clinical duration or symptom onset.
+ */
+export function stripClockAndCalendarTimestamps(text) {
+  if (!text || typeof text !== "string") return "";
+  return text
+    // Strip ISO dates: 2026-09-29, 2026/09/29
+    .replace(/\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/g, " ")
+    // Strip DD/MM/YYYY or MM/DD/YYYY: 29/09/2026, 29-09-2026, 29.09.2026
+    .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, " ")
+    // Strip 12h/24h timestamps: 10:30 AM, 14:25, 09:15:30 pm
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, " ")
+    // Strip standalone am/pm times: at 10 am, 4 pm
+    .replace(/\b(?:at\s+)?\d{1,2}\s*(?:am|pm)\b/gi, " ")
+    // Strip explicit labels: "time: 10:30", "date: 29-09-2026", "timestamp: ..."
+    .replace(/\b(?:date|time|timestamp)[:\s]+\S+/gi, " ")
+    // Strip month names with day and year: 29th September 2026, Sep 29 2026
+    .replace(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+\d{1,2}(?:st|nd|rd|th)?)?(?:,?\s*\d{2,4})?\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * Detects if user input is an off-topic non-medical inquiry
@@ -156,12 +189,12 @@ export function detectDirectCallerReferralIntent(text) {
     )
   ) {
     return {
-      destination: "104 Medical Team",
+      destination: "104 Health Helpline",
       reason:
-        "Caller requested tele-doctor phone consultation; transfer call queue to 104 Medical Team.",
+        "Caller requested tele-doctor phone consultation; transfer call queue to 104 Health Helpline.",
       suspectedConditionSuffix: "104 Tele-Doctor Consultation",
       suggestedQuestion:
-        'Ask the IP: "Could you briefly state your main symptom so 104 medical team is ready when connected?" (Hinglish: "Kripya apna main symptom batayein taaki 104 medical team connect hote hi madad kar sake?")',
+        'Ask the IP: "Could you briefly state your main symptom so 104 Health Helpline doctor is ready when connected?" (Hinglish: "Kripya apna main symptom batayein taaki 104 helpline doctor connect hote hi madad kar sake?")',
       suggestedAnswers: [
         "Fever / cold / mild body ache",
         "Stomach upset / nausea / weakness",
@@ -171,46 +204,46 @@ export function detectDirectCallerReferralIntent(text) {
     };
   }
 
-  // 5. Direct e-Sanjeevani Intent
+  // 5. Direct Tie-Up Hospital Intent
   if (
-    /\b(e sanjeevani|esanjeevani|online doctor|video consultation|video doctor|telemedicine)\b/i.test(
+    /\b(tie up|tie-up|empanelled hospital|empanelled facility|private hospital under esic|cashless tie up|tie up hospital)\b/i.test(
       clean
     )
   ) {
     return {
-      destination: "e-Sanjeevani",
+      destination: "Nearest Tie-Up Facility",
       reason:
-        "Caller requested government online telemedicine consultation; advise e-Sanjeevani portal/app.",
-      suspectedConditionSuffix: "e-Sanjeevani Telemedicine Guidance",
+        "Caller requested empanelled tie-up facility; guide caller to nearest Empanelled Tie-Up Hospital under ESI guidelines.",
+      suspectedConditionSuffix: "Empanelled Tie-Up Care",
       suggestedQuestion:
-        'Ask the IP: "Do you have an Android/iOS smartphone with internet to consult the doctor via e-Sanjeevani?" (Hinglish: "Kya aapke paas e-Sanjeevani par online doctor se baat karne ke liye smartphone aur internet hai?")',
+        'Ask the IP: "Do you have an ESIC Hospital referral or need cashless emergency admission at an empanelled hospital?" (Hinglish: "Kya aapke paas ESIC Hospital ka referral letter hai ya empanelled hospital me emergency admission chahte hain?")',
       suggestedAnswers: [
-        "Yes, have smartphone with internet connection",
-        "Need help registering on esanjeevani.in",
-        "Want free OPD specialist video call",
-        "Prefer physical clinic if connection fails",
+        "Have ESIC Hospital referral letter",
+        "Need emergency inpatient (IPD) admission",
+        "Seeking nearest empanelled hospital address",
+        "Pehchan card holder seeking tie-up care",
       ],
     };
   }
 
-  // 6. Direct Pharmacy / Medicine Refill Intent
+  // 6. Direct District Hospital / Public Healthcare Intent
   if (
-    /\b(pharmacy|chemist|dawai store|medicine refill|prescribe refill|dawai leni hai|dispensary store|dawai chahiye|medicine chahiye)\b/i.test(
+    /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|child immunization|vaccination|tika karan)\b/i.test(
       clean
     )
   ) {
     return {
-      destination: "Nearest Pharmacy",
+      destination: "Govt District Hospital",
       reason:
-        "Caller requested medicine dispensing / refill; guide to nearest empanelled chemist or dispensary pharmacy.",
-      suspectedConditionSuffix: "Pharmacy Prescription Refill",
+        "Caller requested public healthcare outside ESIC network (public hospital, civil hospital, or child immunization); guide to nearest Govt District Hospital.",
+      suspectedConditionSuffix: "Public Healthcare / District Hospital",
       suggestedQuestion:
-        'Ask the IP: "Do you have an ESIC doctor prescription or Pehchan card for getting medicines?" (Hinglish: "Kya aapke paas dawai lene ke liye doctor ka parcha ya Pehchan card hai?")',
+        'Ask the IP: "Which district or town are you located in so we can provide directions to the nearest Govt District Hospital?" (Hinglish: "Aap kis district ya location me hain taaki hum nearest Govt District Hospital ka pata de sakein?")',
       suggestedAnswers: [
-        "Yes, have valid doctor prescription",
-        "Need regular BP / Diabetes monthly medicines",
-        "Need OTC cold / fever medicines",
-        "Dispensary pharmacy timing inquiry",
+        "Need directions to Govt District Hospital",
+        "Seeking child immunization / vaccination",
+        "Need public hospital admission assistance",
+        "Non-ESIC public healthcare inquiry",
       ],
     };
   }
@@ -233,28 +266,6 @@ export function detectDirectCallerReferralIntent(text) {
         "Experiencing extreme stress and anxiety",
         "Feeling deeply depressed and hopeless",
         "Need confidential counselling",
-      ],
-    };
-  }
-
-  // 8. Direct Medical Officer Escalation
-  if (
-    /\b(forward to doctor|talk to doctor|medical officer|on-duty doctor|senior doctor|physician talk)\b/i.test(
-      clean
-    )
-  ) {
-    return {
-      destination: "Forward to Doctor",
-      reason:
-        "Forward call directly to on-duty ESIC Medical Officer workstation.",
-      suspectedConditionSuffix: "Medical Officer Escalation",
-      suggestedQuestion:
-        'Ask the IP: "Connecting your call to our on-duty Medical Officer. Please stay on the line." (Hinglish: "Aapka call on-duty Medical Officer ko transfer kiya ja raha hai, kripya line par bane rahein.")',
-      suggestedAnswers: [
-        "Urgent doctor review needed",
-        "Need physician opinion on lab reports",
-        "Unresponsive to primary treatment",
-        "Direct clinical discussion",
       ],
     };
   }
@@ -1220,17 +1231,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     (isAdviceSeeking && (raw.severity === "Mild" || prevState.severity === "Mild" || (!raw.severity && !prevState.severity))) ||
     (prevRef.includes("104") && !/\b(hospital|aspatal|dispensary|clinic|ambulance|108|pharmacy|chemist)\b/i.test(cleanInput));
 
-  const isESanjeevani =
-    /\b(e sanjeevani|esanjeevani|online doctor|video consultation|telemedicine)\b/i.test(cleanInput) ||
-    prevRef.includes("sanjeevani");
-
-  const isPharmacy =
+  const isDispensaryMedicine =
     /\b(pharmacy|chemist|dawai store|medicine refill|prescribe refill|dawai leni hai|dispensary store)\b/i.test(cleanInput) ||
-    prevRef.includes("pharmacy");
-
-  const isForwardDoctor =
-    /\b(forward to doctor|talk to doctor|medical officer|on-duty doctor|physician escalation)\b/i.test(cleanInput) ||
-    prevRef.includes("doctor");
+    prevRef.includes("pharmacy") ||
+    prevRef.includes("dispensary");
 
   const severity =
     raw.severity === "High" || raw.severity === "Moderate" || raw.severity === "Mild"
@@ -1241,89 +1245,123 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   let referralDestination;
   let referralReason;
+  let secondaryReferral = null;
+  let isDualProtocol = false;
 
   const dispensaryStatus = getDispensaryOperatingStatus();
+
+  // Check if current time is off-hours (between 4:00 PM and 10:00 AM)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+  const hour = istDate.getHours();
+  const currentMinutes = hour * 60 + istDate.getMinutes();
+  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM (960) to 10:00 AM (600)
+
+  // Conditions for Category 7: ESI Tie-Up Hospital
+  const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(allContext);
+  const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(allContext);
+  const isTieUpEligible = isIpdEmergency || hasEsicReferral || /\b(tie.?up|empanelled)\b/i.test(allContext);
+
+  // Conditions for Category 8: District Hospital (Public Healthcare outside ESIC)
+  const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(allContext);
+
+  // Check if beneficiary has physical health / medical symptoms alongside any psychiatric complaints
+  const hasPhysicalHealthSymptoms =
+    severity === "High" ||
+    /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(allContext);
 
   if (directIntent) {
     referralDestination = directIntent.destination;
     referralReason = directIntent.reason;
-  } else if (isEmergency108) {
+    if (isPsych && referralDestination !== "Tele-MANAS (14416)") {
+      secondaryReferral = "Tele-MANAS (14416)";
+      isDualProtocol = true;
+    }
+  }
+  // Tier 1: 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency)
+  else if (isEmergency108) {
     referralDestination = "108 Ambulance";
     referralReason = "Life-threatening acute emergency or accident casualty; dispatch 108 Ambulance immediately.";
-  } else if (isPsych) {
-    referralDestination = "Psychological Counselling Department";
-    referralReason = "Caller exhibits emotional distress or psychological crisis; forward to Psychological Counselling / Tele-MANAS (14416).";
-  } else if (isNacoHIV) {
+    if (isPsych) {
+      secondaryReferral = "Tele-MANAS (14416)";
+      isDualProtocol = true;
+    } else {
+      secondaryReferral = "ESIC Hospital";
+    }
+  }
+  // Tier 2: Tele-MANAS Services (Priority: Mental Health)
+  else if (isPsych && !hasPhysicalHealthSymptoms) {
+    referralDestination = "Tele-MANAS (14416)";
+    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer immediately to Tele-MANAS (14416) for confidential crisis counseling.";
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = true;
+  }
+  // Tier 3: NACO/HIV (Priority: HIV/AIDS & STI)
+  else if (isNacoHIV) {
     referralDestination = "NACO 1097 Helpline";
     referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
-  } else if (is104PhoneDoctor) {
-    referralDestination = "104 Medical Team";
-    referralReason = "Caller requested tele-doctor phone consultation; transfer call queue to 104 Medical Team.";
-  } else if (isESanjeevani) {
-    referralDestination = "e-Sanjeevani";
-    referralReason = "Advise caller to use government e-Sanjeevani online doctor tele-consultation portal.";
-  } else if (isPharmacy) {
-    referralDestination = "Nearest Pharmacy";
-    referralReason = "Guide caller to nearest empanelled chemist or dispensary pharmacy for medicines.";
-  } else if (isForwardDoctor) {
-    referralDestination = "Forward to Doctor";
-    referralReason = "Forward call directly to on-duty ESIC Medical Officer workstation.";
-  } else if (
-    raw.referralDestination &&
-    [
-      "108 Ambulance",
-      "Psychological Counselling Department",
-      "NACO 1097 Helpline",
-      "104 Medical Team",
-      "e-Sanjeevani",
-      "Nearest Pharmacy",
-      "Forward to Doctor",
-      "ESIC Hospital",
-      "ESIS Dispensary",
-    ].includes(raw.referralDestination)
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsych;
+  }
+  // Tier 8: Dist Hosp (Priority: Public Healthcare outside ESIC)
+  else if (isDistHospRequest) {
+    referralDestination = "Govt District Hospital";
+    referralReason = "Beneficiary needs public healthcare services outside the ESIC network (public admissions, specialist care, or child immunization); guide to nearest Govt District Hospital.";
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
+    isDualProtocol = isPsych;
+  }
+  // Tier 7: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
+  else if (isTieUpEligible) {
+    referralDestination = "Nearest Tie-Up Facility";
+    referralReason = isIpdEmergency
+      ? "Inpatient (IPD) emergency; refer to nearest Empanelled Tie-Up Facility for cashless emergency admission under ESI guidelines."
+      : hasEsicReferral
+      ? "Patient possesses direct referral from ESIC Hospital; refer to nearest Empanelled Tie-Up Facility for specialist treatment."
+      : "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI empanelment guidelines.";
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsych;
+  }
+  // USER MANDATE: If off-hours (after 4 PM to 10 AM) and NO emergency:
+  // Refer to 104 Health Helpline FIRST, then any hospital or dispensary!
+  else if (isOffHours || !dispensaryStatus.isOpen) {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsych;
+  }
+  // Tier 4: 104 Health Helpline (Priority: Tele-Consultation / General Info during daytime)
+  else if (
+    is104PhoneDoctor ||
+    (isAdviceSeeking && severity !== "High")
   ) {
-    referralDestination = raw.referralDestination;
-    referralReason = raw.referralReason;
-  } else if (severity === "High") {
-    referralDestination = "ESIC Hospital";
-    referralReason = "Severe condition requiring specialist examination and hospital casualty/OPD care today.";
-  } else if (!dispensaryStatus.isOpen) {
-    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
-    if (!hospitalOpdStatus.isOpen) {
-      referralDestination = "104 Medical Team";
-      referralReason = `ESIS Dispensaries and Hospital regular OPD are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    } else if (severity === "Moderate") {
-      referralDestination = "ESIC Hospital";
-      referralReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). ESIC Hospital OPD is open until 4:00 PM for doctor examination today.`;
-    } else {
-      referralDestination = "104 Medical Team";
-      referralReason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    }
-  } else {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Beneficiary needs health guidance without visiting a physical facility; transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
+    secondaryReferral = isPsych
+      ? "Tele-MANAS (14416)"
+      : "ESIS Dispensary";
+    isDualProtocol = isPsych;
+  }
+  // Tier 5: ESIS Dispensary (Priority: Primary / Routine Care)
+  else if (dispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
-    referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
+    referralReason = "Beneficiary needs basic outpatient (OPD) primary care during standard working hours (10:00 AM – 4:00 PM); visit nearest ESIS Dispensary for doctor consultation and medicines.";
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
+    isDualProtocol = isPsych;
+  }
+  // Tier 6: ESIC Hospital (Priority: Secondary / Specialist Care)
+  else {
+    referralDestination = "ESIC Hospital";
+    referralReason = "Beneficiary needs advanced specialized care or secondary evaluation within ESIC network (OPD 10:00 AM – 4:00 PM, IPD & Emergency 24x7).";
+    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIS Dispensary";
+    isDualProtocol = isPsych;
   }
 
-  // Ensure closed dispensary or closed hospital is never assigned when closed
-  if (referralDestination === "ESIS Dispensary" && !dispensaryStatus.isOpen) {
-    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
-    if (!hospitalOpdStatus.isOpen) {
-      referralDestination = "104 Medical Team";
-      referralReason = `ESIS Dispensaries and Hospital regular OPD are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    } else if (severity === "Moderate") {
-      referralDestination = "ESIC Hospital";
-      referralReason = `ESIS Dispensaries are closed (${dispensaryStatus.reason}). Guide caller to nearest ESIC Hospital OPD today.`;
-    } else {
-      referralDestination = "104 Medical Team";
-      referralReason = `ESIS Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    }
-  } else if (referralDestination === "ESIC Hospital" && severity !== "High") {
-    const hospitalOpdStatus = getHospitalOpdOperatingStatus();
-    if (!hospitalOpdStatus.isOpen) {
-      // Non-emergency caller outside hospital OPD hours -> route to 104 Medical Team (doctor on call)
-      referralDestination = "104 Medical Team";
-      referralReason = `Hospital regular OPD is currently closed. Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    }
+  // MANDATORY PSYCHIATRIC RULE:
+  if (referralDestination === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
+    secondaryReferral = "104 Health Helpline";
+  } else if (isPsych && referralDestination !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
+    secondaryReferral = "Tele-MANAS (14416)";
+    isDualProtocol = true;
   }
 
   const userTurnsCount = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
@@ -1351,47 +1389,173 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     }
   }
 
-  const nlp = extractClinicalEntities(cleanInput, "probing", prevState);
+  const cleanInputWithoutTimestamps = stripClockAndCalendarTimestamps(cleanInput);
+  const nlp = extractClinicalEntities(cleanInputWithoutTimestamps || cleanInput, "probing", prevState);
   const detectedDur = nlp?.detectedDuration;
+
+  // Discard raw duration if it's merely a calendar date or clock timestamp
+  const isRawDurationDateOrTime = raw.duration && (
+    /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/.test(raw.duration) ||
+    /\b\d{1,2}:\d{2}/.test(raw.duration) ||
+    /\b(am|pm|today's date|current time)\b/i.test(raw.duration)
+  );
 
   const duration =
     detectedDur ||
-    (raw.duration && raw.duration !== "Not specified" ? raw.duration : null) ||
+    (!isRawDurationDateOrTime && raw.duration && raw.duration !== "Not specified" ? raw.duration : null) ||
     prevState.duration ||
     "Not specified";
 
   let probingQuestion = raw.probingQuestion || 'Ask the IP: "Could you please describe how you are feeling and what symptoms are troubling you most?"';
 
-  // Safeguard: Check if LLM generated a question that was already asked or answered
-  const isAskingLocation = /\b(where did|location|landmark|kis jagah|kahan hui)\b/i.test(probingQuestion);
-  const answeredLocation = askedQuestionsList.some((q) => /\b(where did|location|landmark|kis jagah|kahan hui)\b/i.test(q)) ||
-    /\b(road|highway|factory|floor|street|colony|area|landmark|guwahati|tinsukia|dibrugarh)\b/i.test(cleanInput);
-
-  const isAskingCasualties = /\b(how many casualties|how many people|trapped|kitne log)\b/i.test(probingQuestion);
-  const answeredCasualties = askedQuestionsList.some((q) => /\b(how many casualties|how many people|trapped|kitne log)\b/i.test(q)) ||
-    /\b(worker|person|people|casualties|trapped|unconscious|single victim|1 worker|2 worker)\b/i.test(cleanInput);
-
-  const isAskingDur = /\b(when did|how long|how many days|duration|since when|kab se|kitne din)\b/i.test(probingQuestion);
-  const answeredDur = (askedQuestionsList.some((q) => /\b(when did|how long|how many days|duration|since when|kab se|kitne din)\b/i.test(q)) || Boolean(prevState.duration && prevState.duration !== "Not specified")) &&
-    /\b(days|hours|weeks|months|years|din|ghante|mahine|saal|yesterday|kal se|subah se)\b/i.test(cleanInput);
-
-  const isAskingSelfHarm = /\b(self-harm|nuksaan|harming yourself|jan dene|give up)\b/i.test(probingQuestion);
-  const answeredSelfHarm = askedQuestionsList.some((q) => /\b(self-harm|nuksaan|harming yourself|jan dene|give up)\b/i.test(q)) ||
-    /\b(self-harm|harming myself|not wanting to live|give up|giving up|jaan de|mar ja|suicid|nuksaan)\b/i.test(cleanInput);
-
-  // Extract core question content excluding introductory doctor empathy phrases
-  const extractCoreQuestionText = (text) =>
+  // Helper to extract core alphanumeric question content for deduplication
+  const getCoreQuestionText = (text) =>
     (text || "")
       .toLowerCase()
       .replace(/^ask the ip:\s*["']?/i, "")
+      .replace(/\(hinglish:.*?\)/gi, "")
       .replace(/["']?\s*$/i, "")
-      .replace(/^i (understand|hear|know|am sorry|apologize).*?[.!?]\s*/i, "")
+      .replace(/^i (understand|hear|know|am sorry|apologize|see).*?[.!?]\s*/i, "")
       .replace(/^main samajh sakta.*?[.!?]\s*/i, "")
       .replace(/^kripya shant rahe.*?[.!?]\s*/i, "")
       .replace(/[^a-z0-9]/g, "");
 
-  // Keep the AI's dynamically formulated question intact.
-  // Only provide emergency fallback if the model returned empty text.
+  // 1. Check if duration / time / date is already known from state, text, or previous turns
+  const isDurationAlreadyKnown = Boolean(
+    detectedDur ||
+    /\b(\d+\s*(?:days?|hours?|weeks?|months?|years?|din|ghante|mahine|saal)|yesterday|today|kal se|subah se|aaj se|since\s+\w+)\b/i.test(allContext) ||
+    askedQuestionsList.some((q) => /\b(when did|how long|how many days|duration|since when|kab se|kitne din)\b/i.test(q)) ||
+    (duration && !/^(not|unknown|pending|unspecified)/i.test(duration.trim()) && duration !== "Reported today") ||
+    (prevState.duration && !/^(not|unknown|pending|unspecified)/i.test(String(prevState.duration).trim()) && prevState.duration !== "Reported today")
+  );
+
+  // MANDATORY ONSET/DURATION PROBE:
+  // "The AI MUST ask from when the symptoms are happening if the caller did not tell us. Once stated or known, do NOT re-ask date/time again."
+  const hasReportedComplaint = Boolean(
+    cleanInput.length >= 3 &&
+    !/^(hi|hello|namaste|pranam|good morning|good evening|hey|kripya madad karein)[\s.!]*$/i.test(cleanInput.trim())
+  );
+
+  if (!isDurationAlreadyKnown && hasReportedComplaint && !isEmergency108 && !directIntent && !isPsych) {
+    const rawCond = raw.suspectedCondition || prevState.suspectedCondition || prevState.symptom || "these symptoms";
+    const displayComplaint = sanitizeSymptomOrCondition(rawCond, cleanInput) || "these symptoms";
+    probingQuestion = `Ask the IP: "Since when have you been having ${displayComplaint}, and did it start suddenly or gradually?" (Hinglish: "Aapko yeh takleef kab se ho rahi hai aur kya yeh achanak shuru hui ya dheere-dheere?")`;
+    raw.suggestedAnswers = [
+      "Started suddenly today (a few hours ago)",
+      "For the past 1 to 2 days",
+      "For 3 to 7 days",
+      "More than a week / persistent",
+    ];
+  }
+
+  // 2. Check if the newly proposed question asks for duration, date, or time
+  const isCandidateAskingDuration = /\b(when did|how long|how many days|how many weeks|how many months|duration|since when|what time|what date|start date|on which day|kab se|kitne din|kitna samay|kis din|kis waqt|kitne ghante)\b/i.test(
+    probingQuestion
+  );
+
+  // 3. Strict duplicate detection against any previously asked questions in this session
+  const candidateCore = getCoreQuestionText(probingQuestion);
+  const isDuplicateQuestion = askedQuestionsList.some((prevQ) => {
+    const prevCore = getCoreQuestionText(prevQ);
+    if (!prevCore || !candidateCore) return false;
+    if (prevCore === candidateCore) return true;
+    if (prevCore.length > 15 && candidateCore.length > 15) {
+      if (prevCore.includes(candidateCore) || candidateCore.includes(prevCore)) return true;
+    }
+    return false;
+  });
+
+  // If candidate question is duplicate OR repeats asking for time/date when duration is already known:
+  if ((isCandidateAskingDuration && isDurationAlreadyKnown) || isDuplicateQuestion) {
+    const alternativeQuestions = [
+      {
+        id: "associated_symptoms",
+        match: () => true,
+        question:
+          'Ask the IP: "Are you experiencing any other associated symptoms such as nausea, dizziness, sweating, or weakness?" (Hinglish: "Kya aapko ulti, chakkar, pasina, ya kamzori jaisi koi aur takleef bhi mehsoos ho rahi hai?")',
+        options: [
+          "Nausea and feeling like vomiting",
+          "Dizziness and physical weakness",
+          "Cold sweating and shivering",
+          "No other associated symptoms",
+        ],
+      },
+      {
+        id: "pain_character_radiation",
+        match: () => /\b(pain|dard|ache|cramp|pressure)\b/i.test(allContext),
+        question:
+          'Ask the IP: "Does this pain spread or radiate to any other part of your body, such as your back, arm, or jaw?" (Hinglish: "Kya yeh dard sharir ke kisi aur hisse jaise peeth, baazu ya jabde ki taraf phail raha hai?")',
+        options: [
+          "Radiating towards the left arm / jaw",
+          "Spreading across the back / shoulders",
+          "Localized to one single spot",
+          "Spreading across the abdomen",
+        ],
+      },
+      {
+        id: "functional_daily_impact",
+        match: () => true,
+        question:
+          'Ask the IP: "Has this condition affected your ability to eat, drink fluids, or sleep comfortably?" (Hinglish: "Kya is takleef ki wajah se khana peena ya sona mushkil ho raha hai?")',
+        options: [
+          "Unable to keep food or fluids down",
+          "Disturbed sleep due to persistent pain",
+          "Eating and drinking normally",
+          "Severe weakness preventing daily activities",
+        ],
+      },
+      {
+        id: "symptom_progression",
+        match: () => true,
+        question:
+          'Ask the IP: "Does this discomfort stay continuously at the same level, or does it come and go in waves?" (Hinglish: "Kya yeh takleef lagataar bani rehti hai, ya beech-beech me kam-zyada hoti hai?")',
+        options: [
+          "Constant steady discomfort without relief",
+          "Comes and goes in waves / cramps",
+          "Worsens significantly after moving or walking",
+          "Mostly manageable with periods of relief",
+        ],
+      },
+      {
+        id: "medication_history",
+        match: () => true,
+        question:
+          'Ask the IP: "Have you taken any medicines, painkillers, or home remedies for this, and did they provide relief?" (Hinglish: "Kya aapne iske liye koi dawai ya gharelu upchaar liya hai, aur kya usse aaram mila?")',
+        options: [
+          "Took over-the-counter medicine with no relief",
+          "Partial temporary relief from medicine",
+          "Have not taken any medication yet",
+          "Prescribed regular medications for chronic illness",
+        ],
+      },
+      {
+        id: "pre_existing_conditions",
+        match: () => true,
+        question:
+          'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, or asthma?" (Hinglish: "Kya aapko pehle se diabetes, high BP, ya asthma jaisi koi bimari hai?")',
+        options: [
+          "History of high blood pressure (BP)",
+          "History of diabetes / sugar",
+          "Asthma or breathing allergies",
+          "No pre-existing health conditions",
+        ],
+      },
+    ];
+
+    const pick = alternativeQuestions.find((item) => {
+      if (!item.match()) return false;
+      const core = getCoreQuestionText(item.question);
+      return !askedQuestionsList.some((prevQ) => {
+        const prevC = getCoreQuestionText(prevQ);
+        return prevC === core || (prevC.length > 15 && (prevC.includes(core) || core.includes(prevC)));
+      });
+    }) || alternativeQuestions[0];
+
+    probingQuestion = pick.question;
+    raw.suggestedAnswers = pick.options;
+  }
+
+  // Provide progressive fallback if probing question is still empty
   if (!probingQuestion || probingQuestion.trim().length < 5) {
     const progressiveFallback = buildLocalDoctorConsultationFallback(cleanInput, history, prevState);
     probingQuestion = progressiveFallback.probingQuestion;
@@ -1408,11 +1572,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   probingQuestion = enforceSingleQuestion(probingQuestion);
   probingQuestion = sanitizeClinicalQuestion(probingQuestion, allContext, cleanInput);
   probingQuestion = enforceSingleQuestion(probingQuestion);
-
-  const isAskingDuration =
-    /\b(when did|how long|how many days|how many months|how many years|duration|since when|kab se|kitne din|kitna samay|kitne mahine|kitne saal)\b/i.test(
-      probingQuestion
-    );
 
   let suggestedAnswers;
   const rawOptions = raw.suggestedAnswers || raw.options || raw.answers;
@@ -1473,8 +1632,8 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     /\b(cut.*wrist|wrist.*cut|bleeding.*cut|cut.*hand|overdose|drank poison|poisoning|hanging|sleeping pills|nass kaat|khoon nikal)\b/i.test(allContext) ||
     (/\b(cut|bleeding|wound|khoon)\b/i.test(allContext) && /\b(sad|depress|die|suicid|jaan|mar ja|alone|unwanted)\b/i.test(allContext));
 
-  const isDual = Boolean(raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
-  const secondaryRef = raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
+  const isDual = Boolean(isDualProtocol || raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
+  const secondaryRef = secondaryReferral || raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
 
   const userUtterances = [
     cleanInput,
@@ -1928,9 +2087,17 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   }
 
   // 4. Truly Adaptive Clinical Synthesizer tailored to the caller's specific complaint
-  const nlp = extractClinicalEntities(cleanInput, "probing", prevState);
-  const domain = nlp.domain || detectClinicalDomain(cleanInput, prevState);
+  const cleanInputWithoutTimestamps = stripClockAndCalendarTimestamps(cleanInput);
+  const nlp = extractClinicalEntities(cleanInputWithoutTimestamps || cleanInput, "probing", prevState);
+  const domain = nlp.domain || detectClinicalDomain(cleanInputWithoutTimestamps || cleanInput, prevState);
   let conditionLabel = nlp.conditionLabel || DOMAIN_LABELS[domain] || "Clinical Condition";
+
+  const hasKnownDuration = Boolean(
+    (prevState.duration && prevState.duration !== "Not specified" && prevState.duration !== "Not yet assessed") ||
+    nlp.detectedDuration ||
+    /\b(\d+\s*(?:days?|hours?|weeks?|months?|years?|din|ghante|mahine|saal)|yesterday|today|kal se|subah se|aaj se|since\s+\w+)\b/i.test(effectiveInput) ||
+    hasAsked(["kitne din", "how many days", "duration", "since when", "kab se", "suddenly today", "what time", "what date", "start date"])
+  );
 
   // Build disease-adaptive probing question tailored to the exact complaint
   let currentStep;
@@ -1976,17 +2143,31 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     }
   } else if (/\b(weakness|dizzy|dizziness|faint|chakkar|kamzori|fatigue|giddiness|unsteady)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Weakness & Postural Dizziness";
-    currentStep = {
-      title: "Onset & Orthostatic Instability",
-      question: 'Ask the IP: "Did this dizziness and weakness come on suddenly today?" (Hinglish: "Kya yeh kamzori aur chakkar aaj achanak shuru hue?")',
-      options: [
-        "Sudden severe onset today",
-        "Gradual weakness over past 2 to 3 days",
-        "Comes only when standing up from bed or chair",
-        "Mild fatigue with lightheadedness",
-      ],
-      severity: "Moderate",
-    };
+    if (hasKnownDuration) {
+      currentStep = {
+        title: "Postural Stability & Red Flags",
+        question: 'Ask the IP: "Are you able to stand and walk safely, or are you feeling unsteady and prone to falling?" (Hinglish: "Kya aap bina sahare khade ho kar chal pa rahe hain, ya girne jaisa lag raha hai?")',
+        options: [
+          "Very unsteady, cannot stand without support",
+          "Dizzy only when changing positions",
+          "Mild weakness, can walk slowly",
+          "Feeling faint with cold sweating",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Onset & Orthostatic Instability",
+        question: 'Ask the IP: "Did this dizziness and weakness come on suddenly today?" (Hinglish: "Kya yeh kamzori aur chakkar aaj achanak shuru hue?")',
+        options: [
+          "Sudden severe onset today",
+          "Gradual weakness over past 2 to 3 days",
+          "Comes only when standing up from bed or chair",
+          "Mild fatigue with lightheadedness",
+        ],
+        severity: "Moderate",
+      };
+    }
   } else if (/\b(chest pain|chhati|heart|crushing|pressure in chest|left arm)\b/i.test(cleanInput)) {
     conditionLabel = "Suspected Acute Coronary Syndrome";
     currentStep = {
@@ -2015,17 +2196,31 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(cleanInput)) {
     conditionLabel = "Febrile Illness / Pyrexia under Investigation";
-    currentStep = {
-      title: "Febrile Pattern & Chills",
-      question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
-      options: [
-        "Started today (< 24 hours)",
-        "2 to 3 days (Recent)",
-        "4 to 7 days (Ongoing)",
-        "More than a week (Persistent)",
-      ],
-      severity: "Moderate",
-    };
+    if (hasKnownDuration) {
+      currentStep = {
+        title: "Febrile Associated Symptoms & Warning Signs",
+        question: 'Ask the IP: "Are you having chills, severe body ache, rash, or vomiting along with the fever?" (Hinglish: "Kya bukhar ke saath thand lagna, jism me dard, daane ya ulti jaisi takleef bhi hai?")',
+        options: [
+          "High fever with chills and shivering",
+          "Fever with severe body ache and headache",
+          "Mild fever, able to eat and drink fluids",
+          "Fever with nausea or vomiting",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Febrile Pattern & Chills",
+        question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
+        options: [
+          "Started today (< 24 hours)",
+          "2 to 3 days (Recent)",
+          "4 to 7 days (Ongoing)",
+          "More than a week (Persistent)",
+        ],
+        severity: "Moderate",
+      };
+    }
   } else if (/\b(vomit|ulti|nausea|loose motion|dast|diarrhea|food poison)\b/i.test(cleanInput)) {
     conditionLabel = "Acute Gastroenteritis / Dehydration Risk";
     currentStep = {
@@ -2104,30 +2299,84 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   let referralDestination;
   let referralReason;
+  let secondaryReferral = null;
+  let isDualProtocol = false;
 
   const fallbackDispensaryStatus = getDispensaryOperatingStatus();
-  const isNacoHIV = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease)\b/i.test(cleanInput);
+  const isNacoHIV = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease)\b/i.test(effectiveInput);
+  const isPsychFallback = Boolean(
+    prevState.isPsychiatric ||
+    /\b(suicid\w*|mar ja\w*|depress\w*|anxiety\b|ghabrahat\b|mental health|tele-manas|14416|udaas\b|hopeless)\b/i.test(effectiveInput)
+  );
 
-  if (severity === "High" && /chest pain|heart|stroke|unconscious|poison|snake|bite/i.test(cleanInput)) {
+  // Check off-hours (between 4:00 PM and 10:00 AM)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+  const hour = istDate.getHours();
+  const currentMinutes = hour * 60 + istDate.getMinutes();
+  const isOffHours = currentMinutes >= 960 || currentMinutes < 600;
+
+  const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(effectiveInput);
+  const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(effectiveInput);
+  const isTieUpEligible = isIpdEmergency || hasEsicReferral || /\b(tie.?up|empanelled)\b/i.test(effectiveInput);
+  const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(effectiveInput);
+  const hasPhysicalHealth =
+    isSevere ||
+    /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(effectiveInput);
+
+  if (severity === "High" && /chest pain|heart|stroke|unconscious|poison|snake|bite|massive bleed|accident/i.test(effectiveInput)) {
     referralDestination = "108 Ambulance";
     referralReason = "Acute emergency requiring immediate ambulance dispatch.";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsychFallback;
+  } else if (isPsychFallback && !hasPhysicalHealth) {
+    referralDestination = "Tele-MANAS (14416)";
+    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer to Tele-MANAS (14416).";
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = true;
   } else if (isNacoHIV) {
     referralDestination = "NACO 1097 Helpline";
     referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
-  } else if (severity === "High") {
-    referralDestination = "ESIC Hospital";
-    referralReason = "Severe condition requiring secondary hospital casualty or OPD evaluation today.";
-  } else if (!fallbackDispensaryStatus.isOpen) {
-    if (severity === "Moderate") {
-      referralDestination = "ESIC Hospital";
-      referralReason = `ESIS Dispensaries are currently closed (${fallbackDispensaryStatus.reason}). Guide caller to nearest ESIC Hospital casualty or urgent OPD today.`;
-    } else {
-      referralDestination = "104 Medical Team";
-      referralReason = `ESIS Dispensaries are currently closed (${fallbackDispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    }
-  } else {
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsychFallback;
+  } else if (isDistHospRequest) {
+    referralDestination = "Govt District Hospital";
+    referralReason = "Public healthcare outside ESIC network; guide to nearest Govt District Hospital.";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "104 Health Helpline";
+    isDualProtocol = isPsychFallback;
+  } else if (isTieUpEligible) {
+    referralDestination = "Nearest Tie-Up Facility";
+    referralReason = "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI guidelines.";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsychFallback;
+  } else if (isOffHours || !fallbackDispensaryStatus.isOpen) {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
+    isDualProtocol = isPsychFallback;
+  } else if (severity === "Mild" || /advice|phone doctor|guidance|information/i.test(effectiveInput)) {
+    referralDestination = "104 Health Helpline";
+    referralReason = `Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIS Dispensary";
+    isDualProtocol = isPsychFallback;
+  } else if (fallbackDispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
-    referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
+    referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines (10:00 AM – 4:00 PM).";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "104 Health Helpline";
+    isDualProtocol = isPsychFallback;
+  } else {
+    referralDestination = "ESIC Hospital";
+    referralReason = "Advanced specialized or secondary hospital care within ESIC network.";
+    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIS Dispensary";
+    isDualProtocol = isPsychFallback;
+  }
+
+  // MANDATORY PSYCHIATRIC RULE:
+  if (referralDestination === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
+    secondaryReferral = "104 Health Helpline";
+  } else if (isPsychFallback && referralDestination !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
+    secondaryReferral = "Tele-MANAS (14416)";
+    isDualProtocol = true;
   }
 
   const fallbackUserTurns = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
@@ -2150,11 +2399,13 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     probingQuestion: probingText,
     suggestedAnswers: currentStep.options,
     suspectedCondition: conditionLabel,
-    isPsychiatric: false,
+    isPsychiatric: isPsychFallback,
     severity,
     severityScore: severity === "High" ? 9 : severity === "Moderate" ? 6 : 3,
     referralDestination,
     referralReason,
+    is_dual_protocol: isDualProtocol,
+    call_referral_secondary: secondaryReferral,
     redFlagsDetected: isSevere ? ["Acute presentation / high severity reported"] : [],
     duration,
     isReadyForSummary: history.length >= 6 || isSevere,

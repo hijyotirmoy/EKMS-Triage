@@ -253,9 +253,13 @@ export async function applyAlgorithmicFeedbackOverrides(intake = {}, currentTria
     );
 
     if (!isTieUpRule || !hasEsicNearby) {
+      let corrected = topRule.corrected_referral;
+      if (corrected.includes("Psychological Counselling")) corrected = "Tele-MANAS (14416)";
+      const isTele = /tele.?manas/i.test(corrected);
       return {
         urgency_level: currentTriage.urgency_level,
-        referral_destination: topRule.corrected_referral,
+        referral_destination: corrected,
+        secondary_referral_destination: isTele ? "104 Health Helpline" : currentTriage.secondary_referral_destination,
         reason: `Adapted from Agent ${topRule.agent_id} learned referral: ${topRule.notes || "Referred based on clinical desk correction."}`,
         learned_from_rule_id: topRule.id,
       };
