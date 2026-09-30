@@ -45,11 +45,14 @@ export function AppShell({ activePage = "home", children }) {
   // Load active agent on mount
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem("ekms_active_agent");
+      const stored = sessionStorage.getItem("ekms_active_agent") || localStorage.getItem("ekms_active_agent");
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.agentId && parsed?.sessionId) {
           setCurrentAgent(parsed);
+          try {
+            sessionStorage.setItem("ekms_active_agent", stored);
+          } catch (_) {}
         }
       }
     } catch (e) {}
@@ -78,6 +81,7 @@ export function AppShell({ activePage = "home", children }) {
                 `Your session was terminated because ${currentAgent.agentId} logged in from another device/tab.`
               );
               sessionStorage.removeItem("ekms_active_agent");
+              localStorage.removeItem("ekms_active_agent");
               setCurrentAgent(null);
             }
           }
@@ -103,6 +107,7 @@ export function AppShell({ activePage = "home", children }) {
       } catch (e) {}
     }
     sessionStorage.removeItem("ekms_active_agent");
+    localStorage.removeItem("ekms_active_agent");
     setCurrentAgent(null);
     toast.info("Logged out successfully");
   };

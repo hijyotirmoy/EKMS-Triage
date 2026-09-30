@@ -116,15 +116,15 @@ async function getFirestoreContext() {
 // Master In-Memory Caches & Timestamps to drastically eliminate repetitive Firestore reads
 let facilitiesCache = null;
 let facilitiesCacheTimestamp = 0;
-const FACILITIES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL for static facility directory
+const FACILITIES_CACHE_TTL_MS = 5000; // 5 seconds TTL
 
 let casesCache = null;
 let casesCacheTimestamp = 0;
-const CASES_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL for cases
+const CASES_CACHE_TTL_MS = 2000; // 2 seconds TTL
 
 let cachedStats = null;
 let cachedStatsTimestamp = 0;
-const STATS_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL for pre-calculated stats
+const STATS_CACHE_TTL_MS = 3000; // 3 seconds TTL
 
 // Facilities operations directly connected with Firestore
 export async function getFacilities(filters = {}) {
@@ -161,27 +161,49 @@ export async function getFacilities(filters = {}) {
   }
 
   return list.filter((f) => {
-    if (district && district !== "all" && f.district !== district) return false;
+    if (district && district !== "all") {
+      const targetDist = String(district).toLowerCase().trim();
+      const fDist = String(f.district || "").toLowerCase().trim();
+      const isKamrupMatch =
+        (targetDist.includes("kamrup") && fDist.includes("kamrup")) ||
+        targetDist === fDist;
+      if (!isKamrupMatch && fDist !== targetDist) return false;
+    }
     if (facility_type && facility_type !== "all") {
-      const isTieUpFilter = facility_type === "Tie-Up Facility" || facility_type === "Tie-Up Hospital";
-      const isFacTieUp = f.facility_type === "Tie-Up Facility" || f.facility_type === "Tie-Up Hospital";
-      const isHospitalFilter = facility_type === "ESIC Hospital" || facility_type === "Hospital";
-      const isFacHospital = f.facility_type === "ESIC Hospital" || f.facility_type === "Hospital";
+      const targetType = String(facility_type).toLowerCase().trim();
+      const fType = String(f.facility_type || "").toLowerCase().trim();
+      const fName = String(f.name || "").toLowerCase().trim();
+
+      const isTieUpFilter = targetType.includes("tie");
+      const isTieUpFac = fType.includes("tie") || fName.includes("tie") || String(f.scheme || "").toLowerCase().includes("tie");
+
+      const isHospitalFilter = targetType.includes("hospital") && !targetType.includes("tie");
+      const isHospitalFac = (fType.includes("hospital") && !fType.includes("tie")) || fName.includes("hospital");
+
+      const isDispensaryFilter = targetType.includes("dispensary");
+      const isDispensaryFac = fType.includes("dispensary") || fName.includes("dispensary");
 
       if (isTieUpFilter) {
-        if (!isFacTieUp) return false;
+        if (!isTieUpFac) return false;
       } else if (isHospitalFilter) {
-        if (!isFacHospital) return false;
-      } else if (f.facility_type !== facility_type) {
+        if (!isHospitalFac) return false;
+      } else if (isDispensaryFilter) {
+        if (!isDispensaryFac) return false;
+      } else if (fType !== targetType) {
         return false;
       }
     }
-    if (q) {
-      const query = q.toLowerCase();
-      const matchName = f.name?.toLowerCase().includes(query);
-      const matchAddr = f.address?.toLowerCase().includes(query);
-      const matchPin = f.pincode ? String(f.pincode).toLowerCase().includes(query) : false;
-      if (!matchName && !matchAddr && !matchPin) return false;
+    if (q && String(q).trim()) {
+      const query = String(q).toLowerCase().trim();
+      const matchName = String(f.name || "").toLowerCase().includes(query);
+      const matchAddr = String(f.address || "").toLowerCase().includes(query);
+      const matchPin = String(f.pincode || "").toLowerCase().includes(query);
+      const matchDist = String(f.district || "").toLowerCase().includes(query);
+      const matchBlock = String(f.block || "").toLowerCase().includes(query);
+      const matchPhone = String(f.phone || "").toLowerCase().includes(query);
+      const matchType = String(f.facility_type || "").toLowerCase().includes(query);
+      const matchSite = String(f.site_code || "").toLowerCase().includes(query);
+      if (!matchName && !matchAddr && !matchPin && !matchDist && !matchBlock && !matchPhone && !matchType && !matchSite) return false;
     }
     return true;
   });

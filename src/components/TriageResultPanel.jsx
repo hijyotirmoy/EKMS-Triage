@@ -357,7 +357,7 @@ const Loading = () => (
   </div>
 );
 
-export const TriageResultPanel = ({ result, loading, callerIntake }) => {
+export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent }) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
 
@@ -907,6 +907,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake }) => {
             <AiFeedbackLearningCard
               result={result}
               callerIntake={callerIntake}
+              currentAgent={currentAgent}
             />
           </div>
         </div>

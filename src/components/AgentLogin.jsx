@@ -108,7 +108,9 @@ export function AgentLogin({ onLoginSuccess }) {
     const sessionObj = { agentId, sessionId: newSessionId };
     if (typeof window !== "undefined") {
       try {
-        sessionStorage.setItem("ekms_active_agent", JSON.stringify(sessionObj));
+        const jsonStr = JSON.stringify(sessionObj);
+        sessionStorage.setItem("ekms_active_agent", jsonStr);
+        localStorage.setItem("ekms_active_agent", jsonStr);
       } catch (_) {}
     }
 

@@ -8,9 +8,9 @@ export const revalidate = 0;
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const lat = searchParams.get("latitude");
-    const lon = searchParams.get("longitude");
-    const pincode = searchParams.get("pincode");
+    const lat = searchParams.get("latitude") || searchParams.get("lat");
+    const lon = searchParams.get("longitude") || searchParams.get("lon") || searchParams.get("lng") || searchParams.get("long");
+    const pincode = searchParams.get("pincode") || searchParams.get("pin");
     const district = searchParams.get("district");
     const city = searchParams.get("city");
 

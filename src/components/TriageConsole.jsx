@@ -750,7 +750,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                 onStopManualRecording={callSession?.stopManualRecording}
               />
             ) : (
-              <TriageResultPanel result={result} loading={loading} callerIntake={form} />
+              <TriageResultPanel result={result} loading={loading} callerIntake={form} currentAgent={currentAgent} />
             )}
 
             {/* Mobile Caller Consultation History - rendered AFTER Triage Outcome / Call Transcript on mobile (< lg) */}

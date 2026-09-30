@@ -177,9 +177,9 @@ export async function groqChatCompletion({
   model = "qwen/qwen3.8-27b",
   candidateModels = ["qwen/qwen3.8-27b"],
   response_format = { type: "json_object" },
-  temperature = 0.3,
-  max_tokens = 400,
-  timeoutMs = 7000,
+  temperature = 0.2,
+  max_tokens = 300,
+  timeoutMs = 3000,
 }) {
   const modelsToTry = candidateModels.length > 0 ? candidateModels : [model];
 
@@ -222,6 +222,10 @@ export async function groqChatCompletion({
               keyIndex,
               maskedKey,
             };
+          }
+
+          if (res.status === 401 || res.status === 403) {
+            return res; // Signal auth issue to rotate key
           }
         } catch (fetchErr) {
           // If aborted or network dropped, continue to next model/key

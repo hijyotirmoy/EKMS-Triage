@@ -66,6 +66,14 @@ function scrubWhisperHallucinations(rawText) {
  */
 export async function POST(request) {
   try {
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("multipart/form-data") && !contentType.includes("application/x-www-form-urlencoded")) {
+      return NextResponse.json(
+        { error: "Content-Type must be multipart/form-data with an audio blob in 'file' field." },
+        { status: 400 }
+      );
+    }
+
     const formData = await request.formData();
     const audioFile = formData.get("file");
     const lang = formData.get("language") || "";

@@ -35,11 +35,26 @@ const REFERRAL_OPTIONS = [
   "Forward to Doctor",
 ];
 
-export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitted }) {
+export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitted, currentAgent }) {
   const [status, setStatus] = useState("idle"); // "idle" | "correcting" | "submitted"
   const [submitting, setSubmitting] = useState(false);
   const [stats, setStats] = useState(null);
   const [showRulesDrawer, setShowRulesDrawer] = useState(false);
+
+  // Helper to get active agent ID dynamically
+  const getActiveAgentId = () => {
+    if (currentAgent?.agentId) return currentAgent.agentId;
+    if (typeof window !== "undefined") {
+      try {
+        const stored = sessionStorage.getItem("ekms_active_agent") || localStorage.getItem("ekms_active_agent");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.agentId) return parsed.agentId;
+        }
+      } catch (_) {}
+    }
+    return "Agent 1";
+  };
 
   // Form states for correction
   const [selectedUrgency, setSelectedUrgency] = useState(result?.urgency_level || "Urgent");
@@ -78,7 +93,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
     try {
       const payload = {
         case_ref: callerIntake?.case_id || "AGENT_CALL",
-        agent_id: "Agent 3",
+        agent_id: getActiveAgentId(),
         type: "triage",
         symptom_notes: callerIntake?.symptom_notes || result?.summary_en || result?.primary_complaint || "",
         is_positive: true,
@@ -125,7 +140,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
     try {
       const payload = {
         case_ref: callerIntake?.case_id || "AGENT_CALL",
-        agent_id: "Agent 3",
+        agent_id: getActiveAgentId(),
         type: "triage",
         symptom_notes: callerIntake?.symptom_notes || result?.summary_en || result?.primary_complaint || "",
         is_positive: false,

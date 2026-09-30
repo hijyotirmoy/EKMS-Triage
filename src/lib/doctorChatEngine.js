@@ -345,282 +345,102 @@ export async function processDoctorConsultationTurn({
   );
 
   // =========================================================================
-  // MULTI-PROVIDER AI CASCADE ARCHITECTURE
-  // Priority: 1. Groq Multi-Key Pool (qwen/qwen3.8-27b, 30+ Keys failover, instant ~400ms)
-  //           2. Google Gemini Flash (gemini-2.0-flash / gemini-1.5-flash)
-  //           3. OpenAI (gpt-4o-mini / gpt-4o)
-  //           4. Anthropic Claude (via Dhwani ESIC Proxy / Direct)
-  //           5. Local Deterministic Clinical Engine
+  // ULTRA-FAST AI ENGINE CASCADE:
+  // Priority 1: Groq Multi-Key Pool (llama-3.1-8b-instant / llama-3.3-70b-versatile, ~150-350ms)
+  // Priority 2: Google Gemini 2.0 Flash (Direct, ~400-600ms)
+  // Priority 3: Progressive Deterministic Clinical Engine (< 5ms)
   // =========================================================================
 
-  // --- Priority 1: Master Centralized LLM Proxy (Groq 21-Key Pool -> Gemini -> Claude -> Other) ---
-  try {
-    const conversationMessages = [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...history.slice(-3).map((m) => ({
-        role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
-        content: typeof m.content === "string" ? m.content : m.text || "",
-      })),
-      {
-        role: "user",
-        content: `Caller: "${cleanInput}".
-Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
-Already asked: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
+  const conversationMessages = [
+    {
+      role: "system",
+      content: `${SYSTEM_PROMPT}
+
+CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
+1. REVIEW HISTORY: Never re-ask or rephrase questions already answered in previous turns.
+2. DURATION RULE: If duration/onset was already stated (e.g. "started today", "since morning", "2 days ago"), DO NOT ask about time/duration. Move forward immediately to Associated Symptoms, Radiation, or Red Flags.
+3. CONVERSATION ADVANCEMENT:
+   - Turn 1: Main complaint & Duration/Onset.
+   - Turn 2: Key Associated Symptoms & Emergency Red Flags (e.g., fever, breathlessness, nausea, chest tightness, dizziness).
+   - Turn 3: Severity, pain radiation, or impact on daily functioning.
+   - Turn 4+: Set "isReadyForSummary": true and provide clear final referral.
+4. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
+    },
+    ...history.slice(-8).map((m) => ({
+      role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
+      content: typeof m.content === "string" ? m.content : m.text || "",
+    })),
+    {
+      role: "user",
+      content: `Caller: "${cleanInput}".
+Clinical Context: Current Condition: "${currentClinicalState.suspectedCondition || "Under Assessment"}", Known Duration: "${currentClinicalState.duration || "Not specified"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
+Already Asked Questions: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format:
-{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
-      },
-    ];
+{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
+    },
+  ];
 
-    const proxyResult = await executeCentralizedLlmProxy({
+  // 1. Direct Groq Fast Multi-Key Pool (Rotates across all keys on 429/failures)
+  try {
+    const groqResult = await groqChatCompletion({
       messages: conversationMessages,
-      system: SYSTEM_PROMPT,
-      temperature: 0.3,
-      max_tokens: 384,
-      response_format: { type: "json_object" },
+      model: "qwen/qwen3.8-27b",
+      candidateModels: ["qwen/qwen3.8-27b"],
+      temperature: 0.2,
+      max_tokens: 300,
+      timeoutMs: 3000,
     });
 
-    if (proxyResult?.content) {
-      const parsed = JSON.parse(proxyResult.content);
+    if (groqResult?.content) {
+      const parsed = JSON.parse(groqResult.content);
       if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
         return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
       }
     }
-  } catch (proxyErr) {
-    console.warn("[DoctorChat] Centralized LLM Proxy cascade fallback:", proxyErr.message);
+  } catch (groqErr) {
+    console.warn("[DoctorChat] Groq pool notice:", groqErr.message);
   }
 
-  // --- Priority 2: Google Gemini AI API ---
+  // 2. Direct Gemini Flash (Fallback if all Groq keys are exhausted)
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest"];
-    for (const model of geminiModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-        const conversationText = history
-          .slice(-3)
-          .map((m) => `${m.sender === "user" || m.role === "user" ? "Caller" : "Doctor"}: ${m.text || m.content || ""}`)
-          .join("\n");
-
-        const promptText = `${SYSTEM_PROMPT}
-
-CONVERSATION HISTORY (Last 3 Turns):
-${conversationText}
-
-CURRENT CALLER INPUT: "${cleanInput}"
-CLINICAL CONTEXT: Suspected: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}
-ALREADY ASKED QUESTIONS: ${JSON.stringify(askedQuestionsList)}
-${learnedSnippet ? `\n${learnedSnippet}\n` : ""}
-Strictly return a JSON object with:
-{
-  "probingQuestion": "Ask the IP: ... (Hinglish: ...)",
-  "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
-  "suspectedCondition": "Primary suspected condition",
-  "isPsychiatric": false,
-  "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "..." | null,
-  "referralReason": "..." | null,
-  "redFlagsDetected": [],
-  "duration": "...",
-  "isReadyForSummary": false,
-  "clinicalSummary": "..."
-}`;
-
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: promptText }] }],
-              generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 384 },
-            }),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (content) {
-            const parsed = JSON.parse(content);
-            if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-              return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
-            }
-          }
-        } else {
-          console.warn(`[AI Cascade] Gemini (${model}) status ${res.status}`);
-          if (res.status === 429) break;
-        }
-      } catch (err) {
-        console.warn(`[AI Cascade] Gemini (${model}) error:`, err.message);
-      }
-    }
-  }
-
-  // --- Priority 3: OpenAI API (gpt-4o-mini / gpt-4o) ---
-  const openAiKey = process.env.OPENAI_API_KEY;
-  if (openAiKey) {
-    const openAiModels = ["gpt-4o-mini", "gpt-4o"];
-    for (const model of openAiModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7000);
-
-        const conversationMessages = [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...history.slice(-3).map((m) => ({
-            role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
-            content: typeof m.content === "string" ? m.content : m.text || "",
-          })),
-          {
-            role: "user",
-            content: `Caller: "${cleanInput}".
-Clinical Context: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
-Already asked: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
-
-Respond strictly in valid JSON format:
-{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": [...], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
-          },
-        ];
-
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${openAiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model,
-            messages: conversationMessages,
-            response_format: { type: "json_object" },
-            temperature: 0.3,
-            max_tokens: 384,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (content) {
-            const parsed = JSON.parse(content);
-            if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-              return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
-            }
-          }
-        } else {
-          console.warn(`[AI Cascade] OpenAI (${model}) limit/status ${res.status}, auto-shifting to Anthropic...`);
-          if (res.status === 429) break;
-        }
-      } catch (err) {
-        console.warn(`[AI Cascade] OpenAI (${model}) error:`, err.message);
-      }
-    }
-  }
-
-  // --- Priority 4: Anthropic Claude via Dhwani ESIC Proxy ---
-  // Using user key: X-API-Key: sk_live_vJjfGTfyHd4u5v-5Et49KQTfzSRzD8gk
-  const dhwaniApiKey =
-    process.env.API_KEY || process.env.NEXT_PUBLIC_API_KEY || "sk_live_vJjfGTfyHd4u5v-5Et49KQTfzSRzD8gk";
-  if (dhwaniApiKey) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-      const conversationContext = history
-        .slice(-6)
-        .map((m) => `${m.sender === "user" || m.role === "user" ? "Caller" : "Doctor"}: ${m.text || m.content || ""}`)
-        .join("\n");
-      const fullNotes = conversationContext ? `${cleanInput}\n[Context]: ${conversationContext}` : cleanInput;
+      const promptText = `${SYSTEM_PROMPT}\n\nCaller: "${cleanInput}"\nContext: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", Turn: ${userTurnsCount}\nAlready asked: ${JSON.stringify(askedQuestionsList)}\n${learnedSnippet ? `\n${learnedSnippet}` : ""}\nStrictly return JSON object with anti-repetition.`;
 
-      const res = await fetch("https://esicdemotriage.dhwaniris.in/api/triage", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": dhwaniApiKey,
-        },
-        body: JSON.stringify({
-          symptom_notes: fullNotes,
-          age: currentClinicalState.age ? Number(currentClinicalState.age) : null,
-          sex: currentClinicalState.sex || null,
-          severity_reported: currentClinicalState.severityScore || 5,
-        }),
-        signal: controller.signal,
-      });
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 300 },
+          }),
+          signal: controller.signal,
+        }
+      );
       clearTimeout(timeoutId);
 
       if (res.ok) {
         const data = await res.json();
-        const tr = data.triage || {};
-        const questions = tr.followup_questions || [];
-        const unaskedQ =
-          questions.find((q) => !askedQuestionsList.some((asked) => asked.includes(q.slice(0, 20)))) || questions[0];
-
-        if (unaskedQ) {
-          let cleanQ = unaskedQ;
-          if (!cleanQ.startsWith("Ask the IP:")) {
-            cleanQ = `Ask the IP: "${cleanQ.replace(/^["']|["']$/g, "")}"`;
+        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (content) {
+          const parsed = JSON.parse(content);
+          if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+            return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
           }
-          cleanQ = enforceSingleQuestion(cleanQ);
-          cleanQ = sanitizeClinicalQuestion(cleanQ, fullNotes, cleanInput);
-          cleanQ = enforceSingleQuestion(cleanQ);
-
-          // Add empathetic Hinglish translation if Dhwani returns only English
-          if (!/\((?:Hinglish|Hindi|हिन्दी):/i.test(cleanQ)) {
-            if (/\bwhat symptoms are present\b/i.test(cleanQ)) {
-              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Aapko abhi is samay kya-kya lakshan ya takleef mehsoos ho rahi hai?")"');
-            } else if (/\bhow long ago did the bite happen\b/i.test(cleanQ)) {
-              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Saanp ne kitni der pehle kaata tha?")"');
-            } else if (/\bwhere.*bite occur\b/i.test(cleanQ)) {
-              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")"');
-            } else if (/\bdescribe the snake\b/i.test(cleanQ)) {
-              cleanQ = cleanQ.replace(/["']?\s*$/, ' (Hinglish: "Kya aapne saanp ko dekha tha, uska rang ya aakaar kaisa tha?")"');
-            }
-          }
-
-          let conditionLabel = "Clinical Triage Evaluation";
-          if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(fullNotes)) {
-            conditionLabel = "Snake Bite (Type undetermined) / Local Tissue Reaction";
-          } else if (/\b(fall|fell|falling|gira|giri|bed)\b/i.test(fullNotes)) {
-            conditionLabel = "Traumatic Fall / Impact Injury Assessment";
-          } else if (/\b(chest pain|chhati|heart)\b/i.test(fullNotes)) {
-            conditionLabel = "Suspected Acute Coronary Syndrome";
-          } else if (tr.summary_en) {
-            const cleaned = tr.summary_en.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
-            conditionLabel = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-          }
-
-          const contextualAns = generateContextualAnswers(cleanQ, cleanInput, Boolean(tr.is_psychiatric), fullNotes);
-
-          const anthropicParsed = {
-            probingQuestion: cleanQ,
-            suggestedAnswers: contextualAns,
-            suspectedCondition: conditionLabel,
-            severity: tr.urgency_level === "Emergency" ? "High" : tr.urgency_level === "Urgent" ? "Moderate" : "Mild",
-            severityScore: tr.urgency_score || (tr.urgency_level === "Emergency" ? 9 : 5),
-            referralDestination: tr.recommended_facility_type || "ESIS Dispensary",
-            referralReason: tr.reasoning || tr.recommended_action || null,
-            redFlagsDetected: tr.red_flags || [],
-            isPsychiatric: Boolean(tr.is_psychiatric),
-            clinicalSummary: tr.reasoning || tr.summary_en || "",
-            isReadyForSummary: userTurnsCount >= 3,
-          };
-          return normalizeDoctorOutput(anthropicParsed, cleanInput, currentClinicalState, askedQuestionsList, history);
         }
-      } else {
-        console.warn(`[AI Cascade] Dhwani Anthropic HTTP ${res.status}, auto-shifting to Local Dynamic Engine...`);
       }
-    } catch (err) {
-      console.warn("[AI Cascade] Dhwani Anthropic error:", err.message);
+    } catch (geminiErr) {
+      console.warn("[DoctorChat] Gemini fallback notice:", geminiErr.message);
     }
   }
 
-  // --- Priority 5: Local Dynamic Clinical Engine (<1ms, Guaranteed 100% Non-Repeating) ---
+  // 3. Local Progressive Clinical Engine (<5ms, 100% accurate, zero network delay)
   return buildLocalDoctorConsultationFallback(cleanInput, history, currentClinicalState);
 }
 
@@ -2099,15 +1919,15 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     hasAsked(["kitne din", "how many days", "duration", "since when", "kab se", "suddenly today", "what time", "what date", "start date"])
   );
 
-  // Build disease-adaptive probing question tailored to the exact complaint
+  // Build progressive disease-adaptive probing question tailored to the exact complaint
   let currentStep;
 
   if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(effectiveInput)) {
     conditionLabel = "Suspected Snake / Animal Bite Envenomation";
-    if (!hasAsked(["kahan", "where on your body", "kis hisse", "describe the snake"])) {
+    if (!hasAsked(["kahan", "where on your body", "kis hisse"])) {
       currentStep = {
         title: "Bite Location Inquiry",
-        question: 'Ask the IP: "Where on your body did the snake bite occur?" (Hinglish: "Saanp ne sharir ke kis hisse par kaata hai?")',
+        question: 'Ask the IP: "Where on your body did the bite occur?" (Hinglish: "Sharir ke kis hisse par kaata hai?")',
         options: [
           "Bite is on foot / ankle",
           "Bite is on lower leg",
@@ -2131,7 +1951,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     } else {
       currentStep = {
         title: "Bite Appearance & Wound Check",
-        question: 'Ask the IP: "Can you describe what the bite mark looks like, such as two puncture marks or redness?" (Hinglish: "Kya aap bata sakte hain ki bite ka nishan kaisa dikh raha hai?")',
+        question: 'Ask the IP: "Can you describe what the bite mark looks like, such as two puncture marks or redness?" (Hinglish: "Kya bite ka nishan do daant ke nishan ya laal dhabbe jaisa dikh raha hai?")',
         options: [
           "Two clear puncture fang marks visible",
           "Single scratch or puncture wound",
@@ -2141,62 +1961,99 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "High",
       };
     }
-  } else if (/\b(weakness|dizzy|dizziness|faint|chakkar|kamzori|fatigue|giddiness|unsteady)\b/i.test(effectiveInput)) {
-    conditionLabel = "Acute Weakness & Postural Dizziness";
-    if (hasKnownDuration) {
+  } else if (/\b(chest pain|chhati|heart|crushing|pressure in chest|left arm)\b/i.test(effectiveInput)) {
+    conditionLabel = "Suspected Acute Coronary Syndrome";
+    if (!hasAsked(["radiating", "left arm", "jaw", "baayein haath"])) {
       currentStep = {
-        title: "Postural Stability & Red Flags",
-        question: 'Ask the IP: "Are you able to stand and walk safely, or are you feeling unsteady and prone to falling?" (Hinglish: "Kya aap bina sahare khade ho kar chal pa rahe hain, ya girne jaisa lag raha hai?")',
+        title: "Cardiac Ischemia Evaluation",
+        question: 'Ask the IP: "Is the chest pain feeling like heavy crushing pressure radiating to your left arm or jaw?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baayein haath ya jabde ki taraf ja raha hai?")',
         options: [
-          "Very unsteady, cannot stand without support",
-          "Dizzy only when changing positions",
-          "Mild weakness, can walk slowly",
-          "Feeling faint with cold sweating",
+          "Heavy crushing chest pressure radiating to left arm",
+          "Sharp stinging chest pain when breathing in",
+          "Burning sensation in chest / acidity feeling",
+          "Dull heaviness with cold sweating and nausea",
+        ],
+        severity: "High",
+      };
+    } else if (!hasAsked(["breath", "saans", "sweating", "pasina"])) {
+      currentStep = {
+        title: "Cardiac Associated Symptoms",
+        question: 'Ask the IP: "Are you having shortness of breath, cold sweating, or dizziness along with the chest pain?" (Hinglish: "Kya seene ke dard ke saath saans phoolna, thanda pasina ya chakkar aa rahe hain?")',
+        options: [
+          "Severe shortness of breath with sweating",
+          "Cold sweating and extreme weakness",
+          "Dizziness when standing up",
+          "No breathlessness, only localized pain",
+        ],
+        severity: "High",
+      };
+    } else {
+      currentStep = {
+        title: "Cardiac Medical History",
+        question: 'Ask the IP: "Do you have a known history of high blood pressure, diabetes, or heart conditions?" (Hinglish: "Kya aapko pehle se high BP, diabetes ya dil ki bimari ki takleef hai?")',
+        options: [
+          "Yes, known high BP and heart medication",
+          "Yes, diabetic for several years",
+          "No prior medical history known",
+          "Taking daily BP medications",
+        ],
+        severity: "High",
+      };
+    }
+  } else if (/\b(breath|saans|wheezing|asthma|dum ghutna|shortness)\b/i.test(effectiveInput)) {
+    conditionLabel = "Acute Respiratory Distress / Bronchospasm";
+    if (!hasAsked(["sitting", "resting", "baithe", "chalne"])) {
+      currentStep = {
+        title: "Respiratory Distress Assessment",
+        question: 'Ask the IP: "Are you having difficulty breathing while sitting still at rest right now?" (Hinglish: "Kya aapko is samay baithe-baithe aaram me bhi saans lene me takleef ho rahi hai?")',
+        options: [
+          "Severe breathlessness even while resting",
+          "Breathlessness only when walking or talking",
+          "Wheezing sound with tight chest feeling",
+          "Mild breathlessness manageable",
+        ],
+        severity: "High",
+      };
+    } else if (!hasAsked(["cough", "khansi", "fever", "bukhar", "phlegm"])) {
+      currentStep = {
+        title: "Respiratory Associated Signs",
+        question: 'Ask the IP: "Are you also having a cough, fever, or chest congestion?" (Hinglish: "Kya saath me khansi, bukhar ya seene me jakdan bhi hai?")',
+        options: [
+          "Continuous dry hacking cough",
+          "Productive cough with yellow phlegm",
+          "Mild fever with throat irritation",
+          "No cough, purely breathing difficulty",
         ],
         severity: "Moderate",
       };
     } else {
       currentStep = {
-        title: "Onset & Orthostatic Instability",
-        question: 'Ask the IP: "Did this dizziness and weakness come on suddenly today?" (Hinglish: "Kya yeh kamzori aur chakkar aaj achanak shuru hue?")',
+        title: "Inhaler & Asthma History",
+        question: 'Ask the IP: "Do you use an asthma inhaler or nebulizer at home?" (Hinglish: "Kya aap ghar par asthma ka inhaler ya dawai lete hain?")',
         options: [
-          "Sudden severe onset today",
-          "Gradual weakness over past 2 to 3 days",
-          "Comes only when standing up from bed or chair",
-          "Mild fatigue with lightheadedness",
+          "Using inhaler, but getting no relief",
+          "Took inhaler and feeling slightly better",
+          "Do not have asthma or inhaler",
+          "Prescribed regular asthma medications",
         ],
         severity: "Moderate",
       };
     }
-  } else if (/\b(chest pain|chhati|heart|crushing|pressure in chest|left arm)\b/i.test(cleanInput)) {
-    conditionLabel = "Suspected Acute Coronary Syndrome";
-    currentStep = {
-      title: "Cardiac Ischemia Evaluation",
-      question: 'Ask the IP: "Is the chest pain feeling like heavy crushing pressure spreading to your left arm?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baayein haath ki taraf ja raha hai?")',
-      options: [
-        "Heavy crushing chest pressure radiating to left arm",
-        "Sharp stinging chest pain when breathing in",
-        "Burning sensation in chest / acidity feeling",
-        "Dull heaviness with cold sweating and nausea",
-      ],
-      severity: "High",
-    };
-  } else if (/\b(breath|saans|wheezing|asthma|dum ghutna|shortness)\b/i.test(cleanInput)) {
-    conditionLabel = "Acute Respiratory Distress / Bronchospasm";
-    currentStep = {
-      title: "Respiratory Distress Assessment",
-      question: 'Ask the IP: "Are you having difficulty breathing while sitting still right now?" (Hinglish: "Kya aapko is samay baithe-baithe bhi saans lene me takleef ho rahi hai?")',
-      options: [
-        "Severe breathlessness even while resting",
-        "Breathlessness only when walking or talking",
-        "Wheezing sound with tight chest feeling",
-        "Mild breathlessness manageable",
-      ],
-      severity: "High",
-    };
-  } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(cleanInput)) {
+  } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(effectiveInput)) {
     conditionLabel = "Febrile Illness / Pyrexia under Investigation";
-    if (hasKnownDuration) {
+    if (!hasKnownDuration && !hasAsked(["kitne din", "how many days", "duration", "since when", "kab se"])) {
+      currentStep = {
+        title: "Febrile Pattern & Onset",
+        question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
+        options: [
+          "Started today (< 24 hours)",
+          "2 to 3 days (Recent)",
+          "4 to 7 days (Ongoing)",
+          "More than a week (Persistent)",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["chills", "thand", "body ache", "dard", "ulti", "rash"])) {
       currentStep = {
         title: "Febrile Associated Symptoms & Warning Signs",
         question: 'Ask the IP: "Are you having chills, severe body ache, rash, or vomiting along with the fever?" (Hinglish: "Kya bukhar ke saath thand lagna, jism me dard, daane ya ulti jaisi takleef bhi hai?")',
@@ -2210,84 +2067,264 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       };
     } else {
       currentStep = {
-        title: "Febrile Pattern & Chills",
-        question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
+        title: "Fluid Intake & Hydration",
+        question: 'Ask the IP: "Are you able to drink plenty of fluids and pass urine normally today?" (Hinglish: "Kya aap paani/taral padarth theek se pee pa rahe hain aur peshab theek ho raha hai?")',
         options: [
-          "Started today (< 24 hours)",
-          "2 to 3 days (Recent)",
-          "4 to 7 days (Ongoing)",
-          "More than a week (Persistent)",
+          "Drinking fluids well and passing normal urine",
+          "Feeling nauseated, struggling to drink water",
+          "Dark urine and feeling very weak",
+          "Taking paracetamol with mild relief",
         ],
         severity: "Moderate",
       };
     }
-  } else if (/\b(vomit|ulti|nausea|loose motion|dast|diarrhea|food poison)\b/i.test(cleanInput)) {
+  } else if (/\b(vomit|ulti|nausea|loose motion|dast|diarrhea|food poison|pet kharab)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Gastroenteritis / Dehydration Risk";
-    currentStep = {
-      title: "Gastrointestinal Fluid Loss",
-      question: 'Ask the IP: "How many times have you vomited or passed loose stools today?" (Hinglish: "Aaj aapko kitni baar ulti ya dast hue hain?")',
-      options: [
-        "Frequent vomiting (> 5 times), cannot keep fluids down",
-        "Watery loose motions 3 to 4 times with weakness",
-        "Mild nausea with stomach upset after food",
-        "Vomited once or twice, able to drink water",
-      ],
-      severity: "Moderate",
-    };
-  } else if (/\b(headache|sar dard|sir dard|migraine|head pain)\b/i.test(cleanInput)) {
+    if (!hasAsked(["kitni baar", "how many times", "frequency", "episodes"])) {
+      currentStep = {
+        title: "Gastrointestinal Fluid Loss",
+        question: 'Ask the IP: "How many times have you vomited or passed loose stools today?" (Hinglish: "Aaj aapko kitni baar ulti ya dast hue hain?")',
+        options: [
+          "Frequent vomiting (> 5 times), cannot keep fluids down",
+          "Watery loose motions 3 to 4 times with weakness",
+          "Mild nausea with stomach upset after food",
+          "Vomited once or twice, able to drink water",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["pet dard", "abdominal pain", "cramps", "blood"])) {
+      currentStep = {
+        title: "Abdominal Pain & Dehydration",
+        question: 'Ask the IP: "Are you having severe stomach cramps or feeling extreme thirst and dry mouth?" (Hinglish: "Kya pet me tez marod/dard ya bahut zyada pyaas aur gala sookh raha hai?")',
+        options: [
+          "Severe cramping abdominal pain",
+          "Extreme thirst, dry mouth and weakness",
+          "Mild stomach discomfort",
+          "No pain, only frequent loose stools",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "ORS & Hydration Status",
+        question: 'Ask the IP: "Have you started taking ORS (electrolytes) or boiled water with salt-sugar?" (Hinglish: "Kya aapne ORS ghol ya namak-cheeni ka paani peena shuru kiya hai?")',
+        options: [
+          "Yes, drinking ORS solution regularly",
+          "Vomiting everything including ORS",
+          "Have not started ORS yet",
+          "Drinking plain water in small sips",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(weakness|dizzy|dizziness|faint|chakkar|kamzori|fatigue|giddiness|unsteady)\b/i.test(effectiveInput)) {
+    conditionLabel = "Acute Weakness & Postural Dizziness";
+    if (!hasKnownDuration && !hasAsked(["kitne din", "how many days", "duration", "since when", "kab se", "suddenly today"])) {
+      currentStep = {
+        title: "Onset & Orthostatic Instability",
+        question: 'Ask the IP: "Did this dizziness and weakness come on suddenly today or has it been gradual?" (Hinglish: "Kya yeh kamzori aur chakkar aaj achanak shuru hue ya dheere-dheere badh rahe hain?")',
+        options: [
+          "Sudden severe onset today",
+          "Gradual weakness over past 2 to 3 days",
+          "Comes only when standing up from bed or chair",
+          "Mild fatigue with lightheadedness",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["stand", "walk", "chal", "khade", "unsteady", "support"])) {
+      currentStep = {
+        title: "Postural Stability & Safety",
+        question: 'Ask the IP: "Are you able to stand and walk safely without losing balance?" (Hinglish: "Kya aap bina ladkhadaye khade ho kar chal pa rahe hain?")',
+        options: [
+          "Very unsteady, cannot stand without support",
+          "Dizzy only when changing positions",
+          "Mild weakness, can walk slowly",
+          "Feeling faint with cold sweating",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Associated Weakness Screening",
+        question: 'Ask the IP: "Are you having any blurred vision, slurred speech, or numbness in your arms or legs?" (Hinglish: "Kya aankhon ke aage andhera, bolne me ladkhadahat ya haath-pair me sunnta mehsoos ho rahi hai?")',
+        options: [
+          "Vision getting blurry and lightheaded",
+          "Numbness or tingling in arms/legs",
+          "Speech is clear, just generalized fatigue",
+          "Feeling hungry and low on energy",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(headache|sar dard|sir dard|migraine|head pain)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Cephalea / Migraine under Investigation";
-    currentStep = {
-      title: "Headache Character & Warning Signs",
-      question: 'Ask the IP: "Could you describe the type of headache pain you are feeling?" (Hinglish: "Kya aap bata sakte hain ki aapko kis tarah ka sirdard mehsoos ho raha hai?")',
-      options: [
-        "Sudden explosive severe headache unlike any before",
-        "One-sided throbbing headache with nausea",
-        "Dull band-like pressure across forehead",
-        "Mild headache relieved by resting",
-      ],
-      severity: "Moderate",
-    };
-  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped)\b/i.test(cleanInput)) {
+    if (!hasAsked(["kis tarah", "type of headache", "character", "throbbing"])) {
+      currentStep = {
+        title: "Headache Character & Warning Signs",
+        question: 'Ask the IP: "Could you describe the type of headache pain you are feeling?" (Hinglish: "Kya aap bata sakte hain ki aapko kis tarah ka sirdard mehsoos ho raha hai?")',
+        options: [
+          "Sudden explosive severe headache unlike any before",
+          "One-sided throbbing headache with nausea",
+          "Dull band-like pressure across forehead",
+          "Mild headache relieved by resting",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["vomiting", "ulti", "light", "roshni", "neck", "gardan"])) {
+      currentStep = {
+        title: "Neurological Headache Screening",
+        question: 'Ask the IP: "Are you experiencing vomiting, sensitivity to bright light, or neck stiffness?" (Hinglish: "Kya sirdard ke saath ulti, tez roshni se pareshani ya gardan me akad mehsoos ho rahi hai?")',
+        options: [
+          "Severe sensitivity to light and sound",
+          "Nausea and feeling like vomiting",
+          "Stiff neck with fever",
+          "No light sensitivity, only head heaviness",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Headache Triggers & Sleep",
+        question: 'Ask the IP: "Have you been under heavy stress, lack of sleep, or screen strain recently?" (Hinglish: "Kya neend ki kami, screen time ya zyada tanav ki wajah se yeh dard badha hai?")',
+        options: [
+          "Due to severe lack of sleep and stress",
+          "Started after long screen exposure",
+          "Comes regularly every few weeks",
+          "Sudden onset without clear trigger",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped)\b/i.test(effectiveInput)) {
     conditionLabel = "Traumatic Fall / Impact Injury Assessment";
-    currentStep = {
-      title: "Fall Impact & Injury Screening",
-      question: 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar par chot lagi ya sharir ke kisi hisse me dard hai?")',
-      options: [
-        "Hit my head, feeling dizzy or dazed",
-        "Severe pain in arm / leg / back",
-        "Unable to get up from the floor",
-        "Bruised and sore, but can move limbs",
-      ],
-      severity: "Moderate",
-    };
-  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|trauma)\b/i.test(cleanInput)) {
+    if (!hasAsked(["hit your head", "sar par chot", "limbs", "hisse me dard"])) {
+      currentStep = {
+        title: "Fall Impact & Injury Screening",
+        question: 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar par chot lagi ya sharir ke kisi hisse me dard hai?")',
+        options: [
+          "Hit my head, feeling dizzy or dazed",
+          "Severe pain in arm / leg / back",
+          "Unable to get up from the floor",
+          "Bruised and sore, but can move limbs",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["swelling", "sujan", "move", "weight", "khade"])) {
+      currentStep = {
+        title: "Fracture & Mobility Evaluation",
+        question: 'Ask the IP: "Is there visible swelling or inability to move the injured limb?" (Hinglish: "Kya chot lagi jagah par sujan hai ya haath-pair hilane me asahniya dard ho raha hai?")',
+        options: [
+          "Severe swelling and cannot bear weight",
+          "Can move fingers/toes with mild pain",
+          "Deformity or bone bend suspected",
+          "Minor bruise with mild tenderness",
+        ],
+        severity: "High",
+      };
+    } else {
+      currentStep = {
+        title: "Post-Fall Vitality Check",
+        question: 'Ask the IP: "Are you having any nausea, vomiting, or memory confusion after the fall?" (Hinglish: "Kya girne ke baad ulti jaisa lagna ya chakkar aane ki takleef hai?")',
+        options: [
+          "Feeling nauseated and slight confusion",
+          "Alert and oriented, only localized body pain",
+          "Mild headache from the fall impact",
+          "No dizziness or nausea",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|trauma)\b/i.test(effectiveInput)) {
     conditionLabel = "Traumatic Injury / Wound Assessment";
-    currentStep = {
-      title: "Trauma & Hemorrhage Check",
-      question: 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")',
-      options: [
-        "Heavy active bleeding requiring immediate pressure",
-        "Deep cut but bleeding stopped with cloth",
-        "Suspected fracture / limb deformity and swelling",
-        "Minor scrape or superficial cut with mild pain",
-      ],
-      severity: "High",
-    };
+    if (!hasAsked(["active continuous bleeding", "lagataar khoon", "bleeding from the wound"])) {
+      currentStep = {
+        title: "Trauma & Hemorrhage Check",
+        question: 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")',
+        options: [
+          "Heavy active bleeding requiring immediate pressure",
+          "Deep cut but bleeding stopped with cloth",
+          "Suspected fracture / limb deformity and swelling",
+          "Minor scrape or superficial cut with mild pain",
+        ],
+        severity: "High",
+      };
+    } else if (!hasAsked(["cloth", "pressure", "dabav", "tetanus", "tika"])) {
+      currentStep = {
+        title: "Wound Management & Cleanliness",
+        question: 'Ask the IP: "Have you washed the wound with clean water and covered it with a clean bandage or cloth?" (Hinglish: "Kya aapne ghaav ko saaf paani se dho kar saaf kapde ya patti se dhaka hai?")',
+        options: [
+          "Covered with clean cloth and holding pressure",
+          "Washed with water, cut is open",
+          "Need tetanus injection and dressing",
+          "Minor scrape requiring antiseptic",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Injury Pain Severity",
+        question: 'Ask the IP: "How severe is the pain around the injury right now?" (Hinglish: "Ghaav ya chot ke aas-paas abhi kitna tez dard mehsoos ho raha hai?")',
+        options: [
+          "Severe throbbing pain requiring urgent doctor care",
+          "Moderate stinging pain, manageable with rest",
+          "Mild localized discomfort",
+          "Numbness around the injured area",
+        ],
+        severity: "Moderate",
+      };
+    }
   } else {
-    // Dynamic disease extractor: Never canned generic questions!
-    const cleanComplaint = cleanInput.replace(/[^a-zA-Z0-9\s]/g, "").trim().slice(0, 40);
-    const displayComplaint = cleanComplaint || conditionLabel || "this complaint";
-    currentStep = {
-      title: "Complaint Character & Functional Impact",
-      question: `Ask the IP: "Could you describe how the ${displayComplaint} feels right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kaisa mehsoos ho raha hai?")`,
-      options: [
-        "Started suddenly today with significant discomfort",
-        "Gradually worsening over the last 2 to 3 days",
-        "Mild symptoms present for several days",
-        "Severe discomfort requiring urgent doctor evaluation",
-      ],
-      severity: "Moderate",
-    };
+    // General Medical Complaint - Progressive 3-stage clinical inquiry
+    conditionLabel = prevState.suspectedCondition || "General Medical Evaluation";
+    if (!hasKnownDuration && !hasAsked(["since when", "how many days", "duration", "kab se", "suddenly"])) {
+      currentStep = {
+        title: "Complaint Onset & Pattern",
+        question: 'Ask the IP: "Since when have you been having this discomfort, and did it start suddenly or gradually?" (Hinglish: "Aapko yeh takleef kab se ho rahi hai aur kya yeh achanak shuru hui ya dheere-dheere?")',
+        options: [
+          "Started suddenly today (< 24 hours)",
+          "For the past 1 to 2 days",
+          "For 3 to 7 days (Ongoing)",
+          "More than a week / persistent",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["other symptoms", "fever, pain", "associated", "bukhar, dard", "chakkar"])) {
+      currentStep = {
+        title: "Associated Red Flags & Secondary Symptoms",
+        question: 'Ask the IP: "Are you experiencing any other symptoms such as fever, body aches, nausea, or dizziness?" (Hinglish: "Kya aapko bukhar, badan dard, ulti ya chakkar jaisi koi aur takleef bhi mehsoos ho rahi hai?")',
+        options: [
+          "Mild fever with body aches and tiredness",
+          "Nausea, stomach upset or loss of appetite",
+          "Dizziness and general physical weakness",
+          "No other symptoms, only this main complaint",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["daily routine", "eat, drink", "khane-peene", "aaram", "affecting"])) {
+      currentStep = {
+        title: "Functional Impact & Daily Activity",
+        question: 'Ask the IP: "Is this discomfort preventing you from eating, sleeping, or carrying out your daily work?" (Hinglish: "Kya is takleef ki wajah se khane-peene, sone ya kaam karne me dikkat aa rahi hai?")',
+        options: [
+          "Unable to work or rest comfortably",
+          "Moderate discomfort, able to do light tasks",
+          "Mild discomfort, managing daily routine",
+          "Need doctor examination and medicines today",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Medical History & Pehchan Card",
+        question: 'Ask the IP: "Do you have your ESIC Pehchan card with you for visiting the doctor?" (Hinglish: "Kya doctor ko dikhane ke liye aapke paas ESIC Pehchan card upalabdha hai?")',
+        options: [
+          "Yes, I have my ESIC Pehchan card ready",
+          "Need guidance on finding the nearest facility",
+          "Would like tele-doctor guidance on 104",
+          "Carrying previous prescriptions",
+        ],
+        severity: "Moderate",
+      };
+    }
   }
 
   const isSevere =

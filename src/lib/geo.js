@@ -467,29 +467,8 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
   };
 
   // 1. Prioritize facilities within <= 100km, fallback to all scored if none under 100km
-  const within100 = scored.filter((f) => f.distance_km == null || f.distance_km <= 100);
-  const pool = within100.length > 0 ? within100 : scored;
-
-  // Group and sort each of the 4 facility groups by proximity within 100km
-  const esicHospitals = pool
-    .filter((f) => f.facility_category_type === "ESIC_HOSPITAL")
-    .sort(byProximity);
-
-  const govtDistrictHospitals = pool
-    .filter((f) => f.facility_category_type === "GOVT_DISTRICT_HOSPITAL")
-    .sort(byProximity);
-
-  const dispensaries = pool
-    .filter((f) => f.facility_category_type === "DISPENSARY")
-    .sort(byProximity);
-
-  const tieUpHospitals = pool
-    .filter((f) => f.facility_category_type === "TIE_UP_HOSPITAL")
-    .sort(byProximity);
-
-  const allHospitals = pool
-    .filter((f) => f.is_hospital)
-    .sort(byProximity);
+  // Sort strictly by true proximity to the caller
+  const sortedByProximity = [...scored].sort(byProximity);
 
   const selected = [];
   const selectedKeys = new Set();
@@ -503,55 +482,51 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     }
   };
 
-  // Facility Hierarchy:
-  // 1. If an ESIC Hospital is available within <= 100km, show ESIC Hospital first.
-  //    If NO ESIC Hospital is available within 100km, show the Nearest Hospital (Govt District Hospital / Civil Hospital <= 100km) first!
-  if (esicHospitals.length > 0) {
-    addFacility(esicHospitals[0]);
-    // 2. Govt District Hospital
-    if (govtDistrictHospitals[0]) {
-      addFacility(govtDistrictHospitals[0]);
-    }
-  } else {
-    // No ESIC Hospital within 100km -> Nearest Hospital in 1st position
-    if (allHospitals[0]) {
-      addFacility(allHospitals[0]);
-    }
-    // 2. Next nearest hospital if available
-    const nextHosp = allHospitals.find((f) => !selectedKeys.has(f.id || f.name));
-    if (nextHosp) {
-      addFacility(nextHosp);
-    }
+  // 1. Absolute closest hospital / facility to caller at TOP position (Slot 1)
+  if (sortedByProximity.length > 0) {
+    addFacility(sortedByProximity[0]);
   }
 
-  // 3. Dispensary (whether open or closed, it sits above tie-up if available)
-  if (dispensaries[0]) {
-    addFacility(dispensaries[0]);
+  // 2. Ensure nearest Govt District Hospital is included
+  const nearestGovtHosp = sortedByProximity.find(
+    (f) => f.facility_category_type === "GOVT_DISTRICT_HOSPITAL" && !selectedKeys.has(f.id || f.name)
+  );
+  if (nearestGovtHosp) {
+    addFacility(nearestGovtHosp);
   }
 
-  // 4 & 5. Next nearest open non-tie-up facilities
-  const nonTieUpPool = pool.filter((f) => !f.is_tie_up).sort(byProximity);
-  for (const fac of nonTieUpPool) {
-    if (selected.length >= limit - 1) break;
-    addFacility(fac);
+  // 3. Ensure nearest Dispensary is included
+  const nearestDispensary = sortedByProximity.find(
+    (f) => f.facility_category_type === "DISPENSARY" && !selectedKeys.has(f.id || f.name)
+  );
+  if (nearestDispensary) {
+    addFacility(nearestDispensary);
   }
 
-  // 6. Strictly nearest ESIC Tie-Up Hospital at the LAST position (below dispensary)
-  if (tieUpHospitals[0]) {
-    addFacility(tieUpHospitals[0]);
+  // 4. Ensure nearest ESIC Hospital is included in the list (without forcing to top)
+  const nearestEsic = sortedByProximity.find(
+    (f) => f.facility_category_type === "ESIC_HOSPITAL" && !selectedKeys.has(f.id || f.name)
+  );
+  if (nearestEsic) {
+    addFacility(nearestEsic);
   }
 
-  // If still fewer than limit, fill with remaining facilities in pool
-  for (const fac of pool.slice().sort(byProximity)) {
+  // 5. Ensure nearest Tie-Up facility is included
+  const nearestTieUp = sortedByProximity.find(
+    (f) => f.facility_category_type === "TIE_UP_HOSPITAL" && !selectedKeys.has(f.id || f.name)
+  );
+  if (nearestTieUp) {
+    addFacility(nearestTieUp);
+  }
+
+  // 6. Fill remaining slots with the closest remaining facilities
+  for (const fac of sortedByProximity) {
     if (selected.length >= limit) break;
     addFacility(fac);
   }
 
-  // Guarantee that up to `limit` facilities are always returned
-  for (const fac of scored.slice().sort(byProximity)) {
-    if (selected.length >= limit) break;
-    addFacility(fac);
-  }
+  // Strictly sort all selected facilities by distance so closest is always #1
+  selected.sort(byProximity);
 
   return selected.slice(0, limit);
 }

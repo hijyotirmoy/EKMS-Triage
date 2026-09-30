@@ -47,7 +47,12 @@ export const FacilityDirectory = ({ meta, onImported }) => {
     setLoading(true);
     return api
       .get("/facilities", {
-        params: { q: q || undefined, district, facility_type: type },
+        params: {
+          q: q?.trim() || undefined,
+          district: district !== "all" ? district : undefined,
+          facility_type: type !== "all" ? type : undefined,
+          _t: Date.now(),
+        },
       })
       .then(({ data }) => {
         setFacilities(data || []);
