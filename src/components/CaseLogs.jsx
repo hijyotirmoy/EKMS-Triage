@@ -102,18 +102,32 @@ export function getReferralBadge(c) {
 export function getAgentCode(c) {
   const explicit = c?.agent_id || c?.intake?.agent_id || c?.agent || c?.intake?.agent;
   if (explicit) {
-    const s = String(explicit).toUpperCase();
-    if (s.includes("3")) return "A3";
-    if (s.includes("2")) return "A2";
-    if (s.includes("1")) return "A1";
+    const s = String(explicit).toUpperCase().trim();
+    if (s.includes("ADMIN 1") || s.includes("ADMIN1") || s === "AD1") return "AD1";
+    if (s.includes("ADMIN 2") || s.includes("ADMIN2") || s === "AD2") return "AD2";
+    if (s.includes("3") || s === "A3") return "A3";
+    if (s.includes("2") || s === "A2") return "A2";
+    if (s.includes("1") || s === "A1") return "A1";
   }
   const ref = String(c?.case_ref || "").toUpperCase();
-  const m = ref.match(/^C(A[1-3])/);
-  if (m) return m[1];
+  const mAdmin = ref.match(/^C(AD[1-2])/i);
+  if (mAdmin) return mAdmin[1].toUpperCase();
+  const m = ref.match(/^C(A[1-3])/i);
+  if (m) return m[1].toUpperCase();
   // Stable fallback for legacy cases
   let hash = 0;
   for (let i = 0; i < ref.length; i++) hash = (hash + ref.charCodeAt(i)) % 2;
   return `A${hash + 1}`;
+}
+
+export function getAgentFullLabel(agentCode) {
+  const s = String(agentCode || "").toUpperCase().trim();
+  if (s === "AD1" || s.includes("ADMIN 1") || s.includes("ADMIN1")) return "Admin 1";
+  if (s === "AD2" || s.includes("ADMIN 2") || s.includes("ADMIN2")) return "Admin 2";
+  if (s === "A1" || s.includes("AGENT 1") || s.includes("AGENT1")) return "Agent 1";
+  if (s === "A2" || s.includes("AGENT 2") || s.includes("AGENT2")) return "Agent 2";
+  if (s === "A3" || s.includes("AGENT 3") || s.includes("AGENT3")) return "Agent 3";
+  return agentCode ? `Agent ${agentCode}` : "Agent";
 }
 
 export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
@@ -684,7 +698,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                   {caseItem.case_ref}
                 </span>
                 <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-bold text-foreground border border-border">
-                  Agent {agentCode}
+                  {getAgentFullLabel(agentCode)}
                 </span>
                 <UrgencyBadge level={triage.urgency_level} size="sm" />
               </div>
@@ -776,7 +790,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 text-[10px] opacity-80 font-semibold">
-                      <span>{isAgent ? `Agent ${agentCode}` : "EKMS AI Assistant"}</span>
+                      <span>{isAgent ? getAgentFullLabel(agentCode) : "EKMS AI Assistant"}</span>
                       {isAgent && (m.isVoice === true || m.source === "voice") && (
                         <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase">
                           Voice NLP
@@ -818,7 +832,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3.5 shadow-2xs bg-primary text-primary-foreground space-y-1">
                   <div className="flex items-center justify-between text-[10px] opacity-80 font-semibold">
-                    <span>Agent {agentCode} (Caller Intake)</span>
+                    <span>{getAgentFullLabel(agentCode)} (Caller Intake)</span>
                   </div>
                   <p className="text-xs sm:text-[13px] leading-relaxed">
                     {intake.symptom_notes || triage.summary_en || "Caller arrived with acute health inquiry."}
@@ -886,7 +900,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3 shadow-2xs bg-primary/90 text-primary-foreground space-y-1">
                   <div className="text-[10px] opacity-80 font-semibold">
-                    <span>Agent {agentCode} (Probing Completed)</span>
+                    <span>{getAgentFullLabel(agentCode)} (Probing Completed)</span>
                   </div>
                   <p className="text-xs leading-relaxed">
                     Verified caller location ({intake.district || intake.city || "District"}, PIN: {intake.pincode || "Mapped"}) and confirmed symptom severity. Requesting final dispatch referral.

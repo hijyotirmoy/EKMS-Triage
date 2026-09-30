@@ -411,7 +411,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
                       Rule #{idx + 1}: {rule.keywords?.slice(0, 3).join(", ") || "General"}
                     </span>
                     <span className="text-[10px] text-muted-foreground font-medium">
-                      Agent {rule.agent_id}
+                      {rule.agent_id ? (String(rule.agent_id).toLowerCase().includes("admin") ? rule.agent_id : `Agent ${rule.agent_id}`) : "Agent"}
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px]">

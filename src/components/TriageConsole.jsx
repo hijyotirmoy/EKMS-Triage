@@ -307,9 +307,14 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         }
       } catch (e) {}
     }
-    const agentCode = rawAgent && String(rawAgent).includes("3")
+    const rawUpper = String(rawAgent || "").toUpperCase();
+    const agentCode = rawUpper.includes("ADMIN 1") || rawUpper.includes("ADMIN1") || rawUpper === "AD1"
+      ? "AD1"
+      : rawUpper.includes("ADMIN 2") || rawUpper.includes("ADMIN2") || rawUpper === "AD2"
+      ? "AD2"
+      : rawUpper.includes("3")
       ? "A3"
-      : rawAgent && String(rawAgent).includes("2")
+      : rawUpper.includes("2")
       ? "A2"
       : "A1";
 
@@ -636,6 +641,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           <label className="field-label mb-2 block">Complaint Notes &amp; Adaptive Questioning</label>
           <EkmsAiChatArea
             ref={chatRef}
+            currentAgent={currentAgent}
             initialNotes={chatPresetTrigger}
             onComplaintChange={(compiledNotes, ctx) => {
               setForm((f) => ({ ...f, symptom_notes: compiledNotes }));
@@ -735,6 +741,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
             {currentRightView === "scribe" ? (
               <LiveScribeWindow
+                currentAgent={currentAgent}
                 transcripts={callSession?.transcripts || []}
                 interimTranscript={callSession?.interimTranscript || null}
                 isCallActive={isCallActive}

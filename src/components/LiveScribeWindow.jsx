@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { speakText } from "@/lib/speechRecognition";
 
 export const LiveScribeWindow = ({
+  currentAgent,
   transcripts = [],
   interimTranscript = null,
   isCallActive = false,
@@ -38,6 +39,27 @@ export const LiveScribeWindow = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const chatContainerRef = useRef(null);
+
+  const getAgentSpeakerLabel = () => {
+    let agentId = currentAgent?.agentId;
+    if (!agentId) {
+      try {
+        const stored = sessionStorage.getItem("ekms_active_agent");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          agentId = parsed?.agentId;
+        }
+      } catch (e) {}
+    }
+    if (!agentId) return "Admin 1 (You)";
+    const upper = String(agentId).toUpperCase().trim();
+    if (upper === "ADMIN 1" || upper === "ADMIN1" || upper === "AD1") return "Admin 1 (You)";
+    if (upper === "ADMIN 2" || upper === "ADMIN2" || upper === "AD2") return "Admin 2 (You)";
+    if (upper === "AGENT 1" || upper === "AGENT1" || upper === "A1") return "Agent 1 (You)";
+    if (upper === "AGENT 2" || upper === "AGENT2" || upper === "A2") return "Agent 2 (You)";
+    if (upper === "AGENT 3" || upper === "AGENT3" || upper === "A3") return "Agent 3 (You)";
+    return `${agentId} (You)`;
+  };
 
   // Auto-scroll ONLY the chat container, preventing the browser page from jumping to the Run button
   useEffect(() => {
@@ -408,7 +430,7 @@ export const LiveScribeWindow = ({
                                 : "text-primary-foreground/95 font-extrabold"
                             }`}
                           >
-                            {isCaller ? (item.speakerName || "Caller (IP)") : "Agent (You)"}
+                            {isCaller ? (item.speakerName || "Caller (IP)") : getAgentSpeakerLabel()}
                           </span>
                           <div className="flex items-center gap-1">
                             <span

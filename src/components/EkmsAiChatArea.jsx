@@ -50,13 +50,35 @@ function formatReferralReason(reason) {
 }
 
 export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
-  { onComplaintChange, onSyncFields, initialNotes, onReadyToShowResult, onRunTriage },
+  { onComplaintChange, onSyncFields, initialNotes, onReadyToShowResult, onRunTriage, currentAgent },
   ref
 ) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSummaryCard, setShowSummaryCard] = useState(false);
+
+  const getActiveAgentLabel = () => {
+    let agentId = currentAgent?.agentId;
+    if (!agentId) {
+      try {
+        const stored = sessionStorage.getItem("ekms_active_agent");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          agentId = parsed?.agentId;
+        }
+      } catch (e) {}
+    }
+    if (!agentId) return "Admin 1";
+    const clean = String(agentId).trim();
+    const upper = clean.toUpperCase();
+    if (upper === "ADMIN 1" || upper === "ADMIN1" || upper === "AD1") return "Admin 1";
+    if (upper === "ADMIN 2" || upper === "ADMIN2" || upper === "AD2") return "Admin 2";
+    if (upper === "AGENT 1" || upper === "AGENT1" || upper === "A1") return "Agent 1";
+    if (upper === "AGENT 2" || upper === "AGENT2" || upper === "A2") return "Agent 2";
+    if (upper === "AGENT 3" || upper === "AGENT3" || upper === "A3") return "Agent 3";
+    return clean;
+  };
 
   const [clinicalState, setClinicalState] = useState({
     suspectedCondition: null,
@@ -91,14 +113,15 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     }));
 
     try {
+      const activeAgent = getActiveAgentLabel();
       const payload = {
-        agent_id: "Agent 3",
+        agent_id: activeAgent,
         type: "probing",
         symptom_notes: m.suspectedCondition || clinicalState.suspectedCondition || m.text,
         is_positive: isPositive,
         notes: isPositive
-          ? `Agent approved probing question: "${m.text}"`
-          : `Agent flagged question as low relevance: "${m.text}". Needs more direct triage focus.`,
+          ? `${activeAgent} approved probing question: "${m.text}"`
+          : `${activeAgent} flagged question as low relevance: "${m.text}". Needs more direct triage focus.`,
       };
 
       const res = await fetch("/api/feedback", {
@@ -516,7 +539,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                   <div className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider text-primary-foreground/75 mb-0.5">
                     <div className="flex items-center gap-1">
                       <Sparkles className="h-3 w-3" />
-                      <span>Caller Response</span>
+                      <span>{getActiveAgentLabel()}</span>
                     </div>
                     {(m.isVoice === true || m.source === "voice") && (
                       <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">

@@ -17,9 +17,11 @@ export const revalidate = 0;
 function getAgentCode(rawAgent) {
   if (!rawAgent) return "A1";
   const str = String(rawAgent).toUpperCase();
-  if (str.includes("3")) return "A3";
-  if (str.includes("2")) return "A2";
-  if (str.includes("1")) return "A1";
+  if (str.includes("ADMIN 1") || str.includes("ADMIN1") || str === "AD1") return "AD1";
+  if (str.includes("ADMIN 2") || str.includes("ADMIN2") || str === "AD2") return "AD2";
+  if (str.includes("3") || str === "A3") return "A3";
+  if (str.includes("2") || str === "A2") return "A2";
+  if (str.includes("1") || str === "A1") return "A1";
   return "A1";
 }
 
