@@ -40,22 +40,6 @@ export const FORWARDING_TEAMS = [
     isEmergency: false,
   },
   {
-    id: "NACO_1097",
-    name: "NACO 1097 Helpline Team (HIV/AIDS/STI)",
-    shortName: "NACO 1097 Helpline",
-    badgeColor: "bg-rose-800 text-white",
-    icon: "🎗️",
-    isEmergency: false,
-  },
-  {
-    id: "TELE_MANAS",
-    name: "Tele-MANAS 14416 Crisis Counseling",
-    shortName: "Tele-MANAS 14416",
-    badgeColor: "bg-purple-700 text-white",
-    icon: "🧠",
-    isEmergency: false,
-  },
-  {
     id: "ESIC_HOSPITAL",
     name: "ESIC Hospital Casualty / Triage Desk",
     shortName: "ESIC Hospital",
@@ -95,10 +79,6 @@ export function mapDirectiveToTeamId(directiveId, t = {}) {
       return "108_AMBULANCE";
     case "TELE_104":
       return "104_MEDICAL";
-    case "NACO_1097":
-      return "NACO_1097";
-    case "TELE_MANAS":
-      return "TELE_MANAS";
     case "ESIC_HOSPITAL":
       return "ESIC_HOSPITAL";
     case "ESIS_DISPENSARY":
@@ -109,7 +89,6 @@ export function mapDirectiveToTeamId(directiveId, t = {}) {
       return "DIST_HOSPITAL";
     default:
       if (t?.call_108) return "108_AMBULANCE";
-      if (t?.is_psychiatric) return "TELE_MANAS";
       return "104_MEDICAL";
   }
 }
@@ -128,10 +107,6 @@ export function getTeamButtonClass(teamId) {
       return "bg-cyan-700 hover:bg-cyan-800 ring-2 ring-cyan-500/25";
     case "DIST_HOSPITAL":
       return "bg-blue-800 hover:bg-blue-900 ring-2 ring-blue-500/25";
-    case "TELE_MANAS":
-      return "bg-purple-700 hover:bg-purple-800 ring-2 ring-purple-500/25";
-    case "NACO_1097":
-      return "bg-rose-800 hover:bg-rose-900 ring-2 ring-rose-500/25";
     case "ESIS_DISPENSARY":
       return "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-500/25";
     default:

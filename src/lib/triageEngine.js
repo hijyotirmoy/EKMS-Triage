@@ -483,49 +483,43 @@ async function evaluateRawTriage(intake) {
       primaryReason = "Severe life-threatening emergency or acute trauma casualty; dispatch 108 Ambulance immediately.";
       call108 = true;
       if (isPsych) {
-        secondaryReferral = "Tele-MANAS (14416)";
-        secondaryReason = "Concurrent acute psychiatric crisis; transfer to Tele-MANAS (14416) for emotional stabilization once ambulance is en route.";
-        isDualProtocol = true;
+        secondaryReferral = "104 Health Helpline";
+        secondaryReason = "Concurrent acute psychiatric crisis; connect with 104 Health Helpline for emotional stabilization once ambulance is en route.";
+        isDualProtocol = false;
       } else {
         secondaryReferral = "ESIC Hospital";
         secondaryReason = "24x7 Casualty & Emergency Department at nearest ESIC Hospital for trauma resuscitation and admission.";
         isDualProtocol = false;
       }
     }
-    // Tier 2: Tele-MANAS Services (Priority: Mental Health)
-    // Rule: In case of psychiatric cases always give Tele-MANAS as a forward system.
-    // If psychiatric AND medical/health, refer to health first, then psychiatric secondary!
+    // Tier 2: Mental Health & Emotional Distress -> 104 Health Helpline
     else if (isPsych && !hasPhysicalHealthSymptoms) {
-      primaryReferral = "Tele-MANAS (14416)";
-      primaryReason = "Beneficiary requires psychological counseling or emotional support; transfer immediately to Tele-MANAS (14416) for confidential crisis counseling.";
-      secondaryReferral = "104 Health Helpline";
-      secondaryReason = "104 Health Helpline tele-doctor consultation for physical health evaluation and medical support.";
-      isDualProtocol = true;
+      primaryReferral = "104 Health Helpline";
+      primaryReason = "Beneficiary requires psychological counseling, emotional support or tele-doctor guidance; connect with 104 Health Helpline for 24x7 doctor & counselling assistance.";
+      secondaryReferral = "ESIC Hospital";
+      secondaryReason = "ESIC Hospital for physical checkup if symptoms persist.";
+      isDualProtocol = false;
       call108 = false;
     }
-    // Tier 3: NACO/HIV (Priority: HIV/AIDS & STI)
+    // Tier 3: HIV/AIDS / STI -> 104 Health Helpline
     else if (isNacoHIV) {
-      primaryReferral = "NACO 1097 Helpline";
-      primaryReason = "National AIDS Control Organisation (NACO) Helpline (Toll-Free 1097); 24x7 confidential counselling, STI guidance, and ART/ICTC testing center locator.";
-      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for supportive counseling."
-        : "Nearest ESIC Hospital Integrated Counselling & Testing Centre (ICTC) and Specialist OPD.";
-      isDualProtocol = isPsych;
+      primaryReferral = "104 Health Helpline";
+      primaryReason = "Confidential sexual health / HIV-AIDS medical guidance; connect with 104 Health Helpline for 24x7 confidential doctor guidance and testing information.";
+      secondaryReferral = "ESIC Hospital";
+      secondaryReason = "Nearest ESIC Hospital Integrated Counselling & Testing Centre (ICTC) and Specialist OPD.";
+      isDualProtocol = false;
       call108 = false;
     }
-    // Tier 8: Dist Hosp (Priority: Public Healthcare outside ESIC)
+    // Tier 6: Dist Hosp (Priority: Public Healthcare outside ESIC)
     else if (isDistHospRequest) {
       primaryReferral = "Govt District Hospital";
       primaryReason = "Beneficiary needs public healthcare services outside the ESIC network (public admissions, specialist care, or child immunization); guide to nearest Govt District Hospital.";
-      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "104 Health Helpline for 24x7 tele-doctor assistance.";
-      isDualProtocol = isPsych;
+      secondaryReferral = "104 Health Helpline";
+      secondaryReason = "104 Health Helpline for 24x7 tele-doctor assistance.";
+      isDualProtocol = false;
       call108 = false;
     }
-    // Tier 7: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
+    // Tier 5: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
     else if (isTieUpEligible) {
       primaryReferral = "Nearest Tie-Up Facility";
       primaryReason = isIpdEmergency
@@ -533,52 +527,40 @@ async function evaluateRawTriage(intake) {
         : hasEsicReferral
         ? "Patient possesses direct referral from ESIC Hospital; refer to nearest Empanelled Tie-Up Facility for specialist treatment."
         : "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI empanelment guidelines.";
-      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "ESIC Hospital casualty / triage desk.";
-      isDualProtocol = isPsych;
+      secondaryReferral = "ESIC Hospital";
+      secondaryReason = "ESIC Hospital casualty / triage desk.";
+      isDualProtocol = false;
       call108 = false;
     }
     // Non-Emergency Cases: Refer to ESIC Hospital / Healthcare facility first
     else {
       primaryReferral = "ESIC Hospital";
       primaryReason = "Beneficiary clinical consultation: guide to ESIC Hospital (if within 25km) or nearest district/tie-up hospital.";
-      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "104 Health Helpline for 24x7 tele-doctor consultation and phone guidance.";
-      isDualProtocol = isPsych;
+      secondaryReferral = "104 Health Helpline";
+      secondaryReason = "104 Health Helpline for 24x7 tele-doctor consultation and phone guidance.";
+      isDualProtocol = false;
       call108 = false;
     }
 
-    // MANDATORY PSYCHIATRIC RULE:
-    // If psychiatric, give Tele-MANAS. If health was primary, Tele-MANAS is secondary.
-    // If Tele-MANAS is primary, secondary MUST be different (104 Health Helpline).
-    if (primaryReferral === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
-      secondaryReferral = "104 Health Helpline";
-      secondaryReason = "104 Health Helpline tele-doctor consultation for medical support.";
-    } else if (isPsych && primaryReferral !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
-      secondaryReferral = "Tele-MANAS (14416)";
-      secondaryReason = "Concurrent psychological distress / mental health support; transfer to Tele-MANAS (14416) alongside physical medical care.";
-      isDualProtocol = true;
+    if (primaryReferral === secondaryReferral) {
+      secondaryReferral = primaryReferral === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
     }
 
     let summaryEn = "";
     let summaryHi = "";
 
     if (isNacoHIV) {
-      summaryEn = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential counseling (1097), and ICTC testing referral indicated.";
-      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; गोपनीय परामर्श (1097) और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+      summaryEn = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential 104 tele-doctor counseling, and ICTC testing referral indicated.";
+      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; 104 गोपनीय परामर्श और आईसीटीसी केंद्र रेफरल आवश्यक है।";
     } else if (isPsych && hasSelfHarmAction) {
-      summaryEn = `Caller in acute emotional crisis with ${selfHarmActionEn}, presenting a life safety risk requiring emergency 108 ambulance dispatch and psychiatric intervention.`;
-      summaryHi = `कॉलर गंभीर मानसिक संकट में है और उसने ${selfHarmActionHi} की है; तुरंत 108 एम्बुलेंस और मनोचिकित्सकीय सहायता आवश्यक है।`;
+      summaryEn = `Caller in acute emotional crisis with ${selfHarmActionEn}, presenting a life safety risk requiring emergency 108 ambulance dispatch and medical intervention.`;
+      summaryHi = `कॉलर गंभीर मानसिक संकट में है और उसने ${selfHarmActionHi} की है; तुरंत 108 एम्बुलेंस और चिकित्सकीय सहायता आवश्यक है।`;
     } else if (isPsych && callerHasSuicideWords) {
-      summaryEn = "Caller reports acute emotional distress with thoughts of ending their life, requiring urgent psychiatric intervention and support via Tele-MANAS (14416).";
-      summaryHi = "कॉलर ने गंभीर मानसिक तनाव और आत्महत्या के विचारों की शिकायत की है, जिसके लिए तत्काल मनोचिकित्सकीय परामर्श (14416) आवश्यक है।";
+      summaryEn = "Caller reports acute emotional distress with thoughts of ending their life, requiring urgent tele-doctor intervention and support via 104 Health Helpline.";
+      summaryHi = "कॉलर ने गंभीर मानसिक तनाव और आत्महत्या के विचारों की शिकायत की है, जिसके लिए 104 हेल्पलाइन द्वारा तत्काल परामर्श आवश्यक है।";
     } else if (isPsych) {
-      summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via Tele-MANAS (14416).";
-      summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; टेली-मानस (14416) द्वारा परामर्श आवश्यक है।";
+      summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via 104 Health Helpline.";
+      summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; 104 हेल्पलाइन द्वारा परामर्श उपयुक्त है।";
     } else if (primaryReferral === "104 Health Helpline" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
       const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "mild symptoms";
       const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
@@ -641,15 +623,13 @@ async function evaluateRawTriage(intake) {
       summary_hi: summaryHi,
       reasoning: isPsych
         ? (hasSelfHarmAction
-            ? "Active physical self-harm trauma casualty requires immediate emergency dispatch followed by mental health stabilization."
-            : "Caller is experiencing emotional distress or mental health challenges. Connecting with Tele-MANAS (14416) provides 24x7 confidential crisis counselling.")
+            ? "Active physical self-harm trauma casualty requires immediate emergency dispatch followed by medical stabilization."
+            : "Caller is experiencing emotional distress or mental health challenges. Connecting with 104 Health Helpline provides 24x7 confidential crisis counselling and doctor support.")
         : (tState?.referralReason || "Clinical evaluation based on reported symptoms, onset, and duration."),
       red_flags: summarizedFlags,
       recommended_facility_type: primaryReferral === "108 Ambulance"
         ? "108 Emergency Ambulance / ESIC Hospital Casualty"
-        : (primaryReferral === "Tele-MANAS (14416)" || primaryReferral === "Psychological Counselling Department"
-          ? "Tele-MANAS (14416)"
-          : primaryReferral),
+        : primaryReferral,
       recommended_action: primaryReason,
       detected_language: "Hinglish",
       followup_questions: [
@@ -912,24 +892,24 @@ function normalizeTriageDecision(triage, intake) {
 
   const dispensaryStatus = getDispensaryOperatingStatus();
 
-  // 1. HIV / AIDS / Sexual Disease: NACO 1097 Helpline
+  // 1. HIV / AIDS / Sexual Disease: 104 Health Helpline
   if (isNacoHIV) {
     triage.is_psychiatric = false;
     triage.call_108 = false;
-    triage.referral_destination = "NACO 1097 Helpline";
+    triage.referral_destination = "104 Health Helpline";
     triage.referral_reason =
-      "National AIDS Control Organisation (NACO) Helpline (Toll-Free 1097); 24x7 confidential counselling, STI guidance, and ART/ICTC testing center locator.";
+      "Confidential sexual health, STI & HIV tele-consultation; connect with 104 Health Helpline for 24x7 doctor guidance and testing centre locator.";
     triage.secondary_referral_destination = "ESIC Hospital";
     triage.secondary_referral_reason =
       "Nearest ESIC Hospital Integrated Counselling & Testing Centre (ICTC) and Specialist OPD.";
-    triage.recommended_facility_type = "NACO 1097 Helpline (HIV / AIDS / STI Toll-Free)";
+    triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
     triage.recommended_action =
-      "Transfer call to NACO National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counselling, STI support, and ICTC/ART testing center guidance.";
-    triage.call_referral_primary = "NACO 1097 Helpline";
+      "Transfer call to 104 Health Helpline for 24x7 confidential doctor counselling, STI guidance, and testing support.";
+    triage.call_referral_primary = "104 Health Helpline";
     triage.call_referral_secondary = "ESIC Hospital";
     if (!triage.summary_en || triage.summary_en.includes("distress") || triage.summary_en.includes("psychological") || triage.summary_en.includes("Tele-MANAS")) {
-      triage.summary_en = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential counseling (1097), and ICTC testing referral indicated.";
-      triage.summary_hi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; गोपनीय परामर्श (1097) और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+      triage.summary_en = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential 104 tele-doctor counseling, and ICTC testing referral indicated.";
+      triage.summary_hi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; 104 गोपनीय परामर्श और आईसीटीसी केंद्र रेफरल आवश्यक है।";
     }
     if (!triage.primary_complaint || triage.primary_complaint.includes("Distress") || triage.primary_complaint.includes("Mental")) {
       triage.primary_complaint = "HIV / AIDS / STI Health Consultation";
@@ -966,32 +946,32 @@ function normalizeTriageDecision(triage, intake) {
     triage.referral_destination = "108 Ambulance";
     triage.referral_reason =
       "Active physical trauma or severe self-harm injury; immediate 108 emergency ambulance dispatch required.";
-    triage.secondary_referral_destination = "Tele-MANAS (14416)";
+    triage.secondary_referral_destination = "104 Health Helpline";
     triage.secondary_referral_reason =
-      "Concurrent acute psychiatric crisis; transfer to Tele-MANAS (14416) for emotional stabilization once ambulance is en route.";
+      "104 Health Helpline for emotional stabilization and counselling once ambulance is en route.";
     triage.recommended_facility_type = "108 Emergency Ambulance / ESIC Hospital Casualty";
     triage.recommended_action =
       "Dispatch 108 Emergency Ambulance immediately. Maintain call connection and provide compassionate reassurance.";
     return triage;
   }
 
-  // 3. Pure Psychiatric Crisis / Depression / Suicidal Ideation: Tele-MANAS + 104 Tele-Doctor
+  // 3. Pure Psychiatric Crisis / Depression / Suicidal Ideation: 104 Health Helpline + ESIC Hospital
   if (isPsych && !isPoisonOrTrauma) {
     triage.is_psychiatric = true;
     triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    triage.referral_destination = "Tele-MANAS (14416)";
+    triage.is_dual_protocol = false;
+    triage.referral_destination = "104 Health Helpline";
     triage.referral_reason =
-      "Transfer call immediately to Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
-    triage.secondary_referral_destination = "104 Health Helpline";
+      "Transfer call immediately to 104 Health Helpline for 24x7 confidential doctor consultation and emotional support.";
+    triage.secondary_referral_destination = "ESIC Hospital";
     triage.secondary_referral_reason =
-      "104 Health Helpline tele-doctor consultation for physical medical evaluation and support.";
-    triage.recommended_facility_type = "Tele-MANAS (14416)";
+      "ESIC Hospital for in-person doctor checkup if symptoms persist.";
+    triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
     triage.recommended_action =
-      "Transfer call immediately to Toll-Free 14416 (National Tele-MANAS). Speak with calm empathy and do not disconnect.";
+      "Transfer call immediately to 104 Health Helpline. Speak with calm empathy and do not disconnect.";
     if (!triage.summary_en || triage.summary_en.toLowerCase().includes("physical") || triage.summary_en.toLowerCase().includes("hospital")) {
-      triage.summary_en = "Caller presents with severe emotional distress / suicidal ideation requiring urgent psychiatric counselling.";
-      triage.summary_hi = "कॉलर गंभीर मानसिक तनाव/अवसाद में है, तुरंत टेली-मानस (14416) परामर्श सहायता की आवश्यकता है।";
+      triage.summary_en = "Caller presents with severe emotional distress / suicidal ideation requiring urgent counselling via 104 Health Helpline.";
+      triage.summary_hi = "कॉलर गंभीर मानसिक तनाव/अवसाद में है, तुरंत 104 हेल्पलाइन परामर्श सहायता की आवश्यकता है।";
     }
     return triage;
   }

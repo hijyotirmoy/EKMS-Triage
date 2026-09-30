@@ -3,24 +3,13 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey:
-    process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
-    "AIzaSyDOtpV7lrQB1Igt4dPtGuBLkH-JzeAGYUE",
-  authDomain:
-    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||
-    "ekms-triage.firebaseapp.com",
-  projectId:
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    "ekms-triage",
-  storageBucket:
-    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-    "ekms-triage.firebasestorage.app",
-  messagingSenderId:
-    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ||
-    "49607245644",
-  appId:
-    process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||
-    "1:49607245644:web:7130c6c7beba4d70b159e9",
+  apiKey: "AIzaSyAPNBkYTc5IXcy2PMZXkWgM_ob8MmEAlFA",
+  authDomain: "triage2-b07fc.firebaseapp.com",
+  projectId: "triage2-b07fc",
+  storageBucket: "triage2-b07fc.firebasestorage.app",
+  messagingSenderId: "413992734264",
+  appId: "1:413992734264:web:bcdf1595f161c548d0a0cd",
+  measurementId: "G-BRKZM6JX4R",
 };
 
 let app = null;

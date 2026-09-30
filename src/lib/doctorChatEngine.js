@@ -31,17 +31,13 @@ CORE CLINICAL RULES:
 7. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
 8. EMPATHY & EMOTIONAL REASSURANCE:
    - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
-9. 8-TIER LOGICAL ROUTING HIERARCHY (Route user to the first category where conditions are met):
+9. 6-TIER LOGICAL ROUTING HIERARCHY (Route user to the first category where conditions are met):
    Tier 1. 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency): Accidents, severe bleeding, life-threatening cases, or any emergency ambulance requests.
-   Tier 2. Tele-MANAS Services (Priority: Mental Health): Beneficiary requires psychological counseling or emotional support (distress, anxiety, depression, suicidal thoughts).
-          * PSYCHIATRIC RULE: In case of psychiatric cases, ALWAYS provide Tele-MANAS as a forward system.
-          * If beneficiary has BOTH psychiatric AND physical medical/health symptoms, REFER TO HEALTH FIRST as Primary, then PSYCHIATRIC SECONDARY based on condition!
-   Tier 3. NACO/HIV (Priority: HIV/AIDS & STI): Queries specifically related to the NACO ecosystem, HIV testing, prevention, counseling, ART support, PPTCT, or linked STI services.
-   Tier 4. 104 Health Helpline (Priority: Tele-Consultation / General Info): Beneficiary needs health guidance without visiting a physical facility (basic symptom guidance, general medical advice, helpline referrals).
-   Tier 5. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours. Strict Constraint: Only route here if request falls between 10:00 AM and 4:00 PM.
-   Tier 6. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, or inpatient care within ESIC network (specialist consultations, inpatient admissions, surgeries, advanced diagnostics, institutional maternity).
-   Tier 7. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment. Strict Constraint: Route here ONLY if: (a) Inpatient IPD emergency, (b) Off-hours emergency (between 4:00 PM and 8:00 AM), OR (c) Patient possesses direct referral from an ESIC Hospital.
-   Tier 8. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network (non-ESIC public admissions, general public specialist care, child immunization).
+   Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling, or HIV/AIDS/STI confidential information over the phone.
+   Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
+   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, or inpatient care within ESIC network (specialist consultations, inpatient admissions, surgeries, advanced diagnostics, institutional maternity).
+   Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment (Inpatient IPD emergency, off-hours emergency, or direct referral).
+   Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network (non-ESIC public admissions, general public specialist care, child immunization).
 10. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
    - We are triage helpline call operators, NOT diagnosing doctors.
    - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes unless caller explicitly named that disease in their own words.
@@ -55,7 +51,7 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "suspectedCondition": "Reported symptom area only (e.g. 'Abdominal Pain / Cramps'); NEVER diagnose a disease",
   "isPsychiatric": true | false,
   "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "108 Ambulance" | "Psychological Counselling Department" | "NACO 1097 Helpline" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Nearest Tie-Up Facility" | "Govt District Hospital" | null,
+  "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Nearest Tie-Up Facility" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
   "duration": "detected duration or accident time",
@@ -249,21 +245,21 @@ export function detectDirectCallerReferralIntent(text) {
     };
   }
 
-  // 7. Direct Mental Health / Counselling / Tele-MANAS Intent
+  // 7. Direct Mental Health / Counselling Intent
   if (
-    /\b(tele manas|tele-manas|14416|counsellor|psychiatrist|counseling|counselling|dimag ke doctor|mental doctor|depression doctor|manorog)\b/i.test(
+    /\b(counsellor|psychiatrist|counseling|counselling|dimag ke doctor|mental doctor|depression doctor|manorog|tele manas|tele-manas|14416)\b/i.test(
       clean
     )
   ) {
     return {
-      destination: "Psychological Counselling Department",
+      destination: "104 Health Helpline",
       reason:
-        "Caller explicitly requested psychological counselling / emotional support; forward to Psychological Counselling Department (Tele-MANAS 14416).",
+        "Caller requested psychological counselling / emotional support; forward to 104 Health Helpline for 24x7 doctor and counseling on phone.",
       suspectedConditionSuffix: "Psychological Counselling Support",
       suggestedQuestion:
-        'Ask the IP: "We are connecting you with our compassionate mental health counselling team. Are you in a comfortable place to speak freely?" (Hinglish: "Hum aapko counselling team se connect kar rahe hain. Kya aap bina kisi jhijhak ke akele me baat karne ke liye safe jagah par hain?")',
+        'Ask the IP: "We are connecting you with our compassionate health and counselling helpline. Are you in a comfortable place to speak freely?" (Hinglish: "Hum aapko 104 helpline se connect kar rahe hain. Kya aap bina kisi jhijhak ke akele me baat karne ke liye safe jagah par hain?")',
       suggestedAnswers: [
-        "Yes, please connect to counsellor now",
+        "Yes, please connect to 104 counsellor now",
         "Experiencing extreme stress and anxiety",
         "Feeling deeply depressed and hopeless",
         "Need confidential counselling",
@@ -271,24 +267,24 @@ export function detectDirectCallerReferralIntent(text) {
     };
   }
 
-  // 9. Direct NACO 1097 / HIV / AIDS / Sexual Disease Intent
+  // 9. Direct HIV / AIDS / Sexual Disease Intent
   if (
     /\b(naco|1097|hiv|aids|gupt rog|sexual health|sexually transmitted|std\b|sti\b|art center|ictc|cd4|pep\b|prep\b|syphilis|gonorrhea|unprotected sex)\b/i.test(
       clean
     )
   ) {
     return {
-      destination: "NACO 1097 Helpline",
+      destination: "104 Health Helpline",
       reason:
-        "Caller inquiring about HIV/AIDS, STI, or sexual health; transfer call to National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counselling and testing guidance.",
+        "Caller inquiring about HIV/AIDS, STI, or sexual health; transfer call to 104 Health Helpline for 24x7 confidential doctor guidance and counseling.",
       suspectedConditionSuffix: "HIV / AIDS & Sexual Health Guidance",
       suggestedQuestion:
-        'Ask the IP: "Your consultation is completely confidential. Are you seeking free HIV/STI testing information, counseling, or emergency PEP guidance?" (Hinglish: "Aapki baatcheet bilkul confidential hai. Kya aap free HIV/STI test, counselling ya emergency PEP guidance chahte hain?")',
+        'Ask the IP: "Your consultation is completely confidential. Are you seeking free testing information, counseling, or emergency guidance?" (Hinglish: "Aapki baatcheet bilkul confidential hai. Kya aap free test, counselling ya emergency guidance chahte hain?")',
       suggestedAnswers: [
-        "Need confidential HIV counseling & testing center info",
+        "Need confidential counseling & testing center info",
         "Recent possible exposure — need emergency PEP guidance (< 72 hrs)",
         "Experiencing symptoms of sexually transmitted infection",
-        "Need routine information on NACO toll-free 1097 services",
+        "Need doctor consultation on 104 helpline",
       ],
     };
   }
@@ -1093,44 +1089,36 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   if (directIntent) {
     referralDestination = directIntent.destination;
     referralReason = directIntent.reason;
-    if (isPsych && referralDestination !== "Tele-MANAS (14416)") {
-      secondaryReferral = "Tele-MANAS (14416)";
-      isDualProtocol = true;
-    }
+    secondaryReferral = "ESIC Hospital";
   }
   // Tier 1: 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency)
   else if (isEmergency108) {
     referralDestination = "108 Ambulance";
     referralReason = "Life-threatening acute emergency or accident casualty; dispatch 108 Ambulance immediately.";
-    if (isPsych) {
-      secondaryReferral = "Tele-MANAS (14416)";
-      isDualProtocol = true;
-    } else {
-      secondaryReferral = "ESIC Hospital";
-    }
+    secondaryReferral = "ESIC Hospital";
   }
-  // Tier 2: Tele-MANAS Services (Priority: Mental Health)
-  else if (isPsych && !hasPhysicalHealthSymptoms) {
-    referralDestination = "Tele-MANAS (14416)";
-    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer immediately to Tele-MANAS (14416) for confidential crisis counseling.";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = true;
+  // Tier 2: Mental Health / Emotional Distress / Suicide Crisis -> 104 Health Helpline
+  else if (isPsych) {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Beneficiary requires psychological counseling, doctor support or emotional guidance; connect with 104 Health Helpline for 24x7 doctor & counselling assistance.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   }
-  // Tier 3: NACO/HIV (Priority: HIV/AIDS & STI)
+  // Tier 3: HIV/AIDS / STI -> 104 Health Helpline
   else if (isNacoHIV) {
-    referralDestination = "NACO 1097 Helpline";
-    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsych;
+    referralDestination = "104 Health Helpline";
+    referralReason = "Confidential sexual health / HIV-AIDS medical guidance; connect with 104 Health Helpline for tele-doctor consultation.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   }
-  // Tier 8: Dist Hosp (Priority: Public Healthcare outside ESIC)
+  // Tier 6: Dist Hosp (Priority: Public Healthcare outside ESIC)
   else if (isDistHospRequest) {
     referralDestination = "Govt District Hospital";
     referralReason = "Beneficiary needs public healthcare services outside the ESIC network (public admissions, specialist care, or child immunization); guide to nearest Govt District Hospital.";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
-    isDualProtocol = isPsych;
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = false;
   }
-  // Tier 7: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
+  // Tier 5: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
   else if (isTieUpEligible) {
     referralDestination = "Nearest Tie-Up Facility";
     referralReason = isIpdEmergency
@@ -1138,50 +1126,43 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       : hasEsicReferral
       ? "Patient possesses direct referral from ESIC Hospital; refer to nearest Empanelled Tie-Up Facility for specialist treatment."
       : "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI empanelment guidelines.";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsych;
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   }
-  // USER MANDATE: If off-hours (after 4 PM to 10 AM) and NO emergency:
-  // Refer to 104 Health Helpline FIRST, then any hospital or dispensary!
+  // If off-hours (after 4 PM to 10 AM) and NO emergency:
   else if (isOffHours || !dispensaryStatus.isOpen) {
     referralDestination = "104 Health Helpline";
     referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsych;
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   }
-  // Tier 4: 104 Health Helpline (Priority: Tele-Consultation / General Info during daytime)
+  // Tier 2: 104 Health Helpline (Priority: Tele-Consultation / General Info during daytime)
   else if (
     is104PhoneDoctor ||
     (isAdviceSeeking && severity !== "High")
   ) {
     referralDestination = "104 Health Helpline";
     referralReason = "Beneficiary needs health guidance without visiting a physical facility; transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
-    secondaryReferral = isPsych
-      ? "Tele-MANAS (14416)"
-      : "ESIS Dispensary";
-    isDualProtocol = isPsych;
+    secondaryReferral = "ESIS Dispensary";
+    isDualProtocol = false;
   }
-  // Tier 5: ESIS Dispensary (Priority: Primary / Routine Care)
+  // Tier 3: ESIS Dispensary (Priority: Primary / Routine Care)
   else if (dispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
     referralReason = "Beneficiary needs basic outpatient (OPD) primary care during standard working hours (10:00 AM – 4:00 PM); visit nearest ESIS Dispensary for doctor consultation and medicines.";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
-    isDualProtocol = isPsych;
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = false;
   }
-  // Tier 6: ESIC Hospital (Priority: Secondary / Specialist Care)
+  // Tier 4: ESIC Hospital (Priority: Secondary / Specialist Care)
   else {
     referralDestination = "ESIC Hospital";
     referralReason = "Beneficiary needs advanced specialized care or secondary evaluation within ESIC network (OPD 10:00 AM – 4:00 PM, IPD & Emergency 24x7).";
-    secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIS Dispensary";
-    isDualProtocol = isPsych;
+    secondaryReferral = "ESIS Dispensary";
+    isDualProtocol = false;
   }
 
-  // MANDATORY PSYCHIATRIC RULE:
-  if (referralDestination === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
-    secondaryReferral = "104 Health Helpline";
-  } else if (isPsych && referralDestination !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
-    secondaryReferral = "Tele-MANAS (14416)";
-    isDualProtocol = true;
+  if (secondaryReferral === referralDestination) {
+    secondaryReferral = referralDestination === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
   }
 
   const userTurnsCount = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
@@ -1656,9 +1637,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       duration: "Reported today",
       isReadyForSummary: true,
       is_dual_protocol: true,
-      call_referral_secondary: "Psychological Counselling Department",
-      call_referral_secondary_reason: "Crisis emotional de-escalation & mental health counselling support (Tele-MANAS 14416).",
-      clinicalSummary: "Caller presents with acute self-harm trauma with bleeding and severe psychological distress. Immediate dual protocol activated: 108 Ambulance trauma dispatch with Psychological Counselling co-referral.",
+      call_referral_secondary: "104 Health Helpline",
+      call_referral_secondary_reason: "Crisis emotional de-escalation & mental health counselling support via 104 Health Helpline.",
+      clinicalSummary: "Caller presents with acute self-harm trauma with bleeding and severe psychological distress. Immediate dual protocol activated: 108 Ambulance trauma dispatch with 104 Health Helpline co-referral.",
     };
   }
 
@@ -1721,12 +1702,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "psych_handover",
         condition: true,
         question:
-          'Ask the IP: "Thank you for trusting me with that. Please know you are not alone, and help is available right now. Are you currently in a safe place right now? We are connecting you immediately to our Psychological Counselling Department and Tele-MANAS (14416) for free support." (Hinglish: "Mujhpar bharosa karne ke liye dhanyawad. Kripya jaanein ki aap akele nahi hain. Kya aap abhi kisi safe jagah par hain?")',
+          'Ask the IP: "Thank you for trusting me with that. Please know you are not alone, and help is available right now. Are you currently in a safe place right now? We are connecting you immediately to 104 Health Helpline for free doctor and counseling support." (Hinglish: "Mujhpar bharosa karne ke liye dhanyawad. Kripya jaanein ki aap akele nahi hain. Kya aap abhi kisi safe jagah par hain? Hum aapko 104 helpline se connect kar rahe hain.")',
         options: [
-          "Yes, please connect me to the counsellor right now",
+          "Yes, please connect me to 104 counsellor right now",
           "I am at home alone, please connect urgently",
           "Family member is near me, please guide transfer",
-          "Will stay on the line for counselling team",
+          "Will stay on the line for 104 helpline team",
         ],
       },
     ];
@@ -1740,12 +1721,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       isPsychiatric: true,
       severity: "High",
       severityScore: 9,
-      referralDestination: "Psychological Counselling Department",
-      referralReason: "Caller exhibits emotional distress / psychological crisis; priority transfer to Psychological Counselling Department (Tele-MANAS 14416).",
+      referralDestination: "104 Health Helpline",
+      referralReason: "Caller exhibits emotional distress / psychological crisis; priority transfer to 104 Health Helpline for 24x7 doctor & counseling support.",
       redFlagsDetected: ["Emotional crisis / Psychological distress"],
       duration: prevState.duration || "Recent days",
       isReadyForSummary: history.length >= 4,
-      clinicalSummary: "Caller presents with psychological distress and depression symptoms. Priority routing to Psychological Counselling Department.",
+      clinicalSummary: "Caller presents with psychological distress and depression symptoms. Priority routing to 104 Health Helpline.",
     };
   }
 
@@ -2364,56 +2345,52 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   if (severity === "High" && /chest pain|heart|stroke|unconscious|poison|snake|bite|massive bleed|accident/i.test(effectiveInput)) {
     referralDestination = "108 Ambulance";
     referralReason = "Acute emergency requiring immediate ambulance dispatch.";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsychFallback;
-  } else if (isPsychFallback && !hasPhysicalHealth) {
-    referralDestination = "Tele-MANAS (14416)";
-    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer to Tele-MANAS (14416).";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = true;
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
+  } else if (isPsychFallback) {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer to 104 Health Helpline for 24x7 doctor & counselling support.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   } else if (isNacoHIV) {
-    referralDestination = "NACO 1097 Helpline";
-    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to National AIDS Helpline (Toll-Free 1097).";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsychFallback;
+    referralDestination = "104 Health Helpline";
+    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to 104 Health Helpline.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   } else if (isDistHospRequest) {
     referralDestination = "Govt District Hospital";
     referralReason = "Public healthcare outside ESIC network; guide to nearest Govt District Hospital.";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "104 Health Helpline";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = false;
   } else if (isTieUpEligible) {
     referralDestination = "Nearest Tie-Up Facility";
     referralReason = "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI guidelines.";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   } else if (isOffHours || !fallbackDispensaryStatus.isOpen) {
     referralDestination = "104 Health Helpline";
     referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIC Hospital";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   } else if (severity === "Mild" || /advice|phone doctor|guidance|information/i.test(effectiveInput)) {
     referralDestination = "104 Health Helpline";
     referralReason = `Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIS Dispensary";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "ESIS Dispensary";
+    isDualProtocol = false;
   } else if (fallbackDispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
     referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines (10:00 AM – 4:00 PM).";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "104 Health Helpline";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "104 Health Helpline";
+    isDualProtocol = false;
   } else {
     referralDestination = "ESIC Hospital";
     referralReason = "Advanced specialized or secondary hospital care within ESIC network.";
-    secondaryReferral = isPsychFallback ? "Tele-MANAS (14416)" : "ESIS Dispensary";
-    isDualProtocol = isPsychFallback;
+    secondaryReferral = "ESIS Dispensary";
+    isDualProtocol = false;
   }
 
-  // MANDATORY PSYCHIATRIC RULE:
-  if (referralDestination === "Tele-MANAS (14416)" && secondaryReferral === "Tele-MANAS (14416)") {
-    secondaryReferral = "104 Health Helpline";
-  } else if (isPsychFallback && referralDestination !== "Tele-MANAS (14416)" && secondaryReferral !== "Tele-MANAS (14416)") {
-    secondaryReferral = "Tele-MANAS (14416)";
-    isDualProtocol = true;
+  if (secondaryReferral === referralDestination) {
+    secondaryReferral = referralDestination === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
   }
 
   const fallbackUserTurns = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;

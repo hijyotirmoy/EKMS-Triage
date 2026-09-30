@@ -103,11 +103,12 @@ export async function POST(request) {
     if (isNacoHIV) {
       triage.is_psychiatric = false;
       triage.call_108 = false;
-      triage.call_referral_primary = "NACO 1097 Helpline";
-      triage.referral_destination = "NACO 1097 Helpline";
-      triage.recommended_facility_type = "NACO 1097 Helpline (HIV / AIDS / STI)";
-      triage.recommended_action = "Transfer call directly to National AIDS Helpline (1097) for 24x7 counseling and ICTC/ART support.";
-      triage.summary_en = "Caller inquiry regarding HIV / AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer directly to NACO 1097 Toll-Free Helpline.";
+      triage.call_referral_primary = "104 Health Helpline";
+      triage.referral_destination = "104 Health Helpline";
+      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
+      triage.recommended_action = "Transfer call directly to 104 Health Helpline for 24x7 confidential doctor counseling, STI guidance, and testing support.";
+      triage.summary_en = "Caller inquiry regarding HIV / AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer directly to 104 Health Helpline.";
+      triage.summary_hi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी परामर्श चाहता है; 104 हेल्पलाइन से संपर्क आवश्यक है।";
     }
 
     const isEmergency =
@@ -157,17 +158,18 @@ export async function POST(request) {
       isNacoHIV ||
       isPsychCase ||
       explicitReferral.includes("108") ||
-      explicitReferral.includes("1097") ||
-      explicitReferral.includes("manas") ||
-      explicitReferral.includes("14416");
+      explicitReferral.includes("104");
 
     if (isPsychCase) {
-      triage.call_referral_primary = "Tele-MANAS (14416)";
-      triage.referral_destination = "Tele-MANAS (14416)";
-      triage.call_referral_secondary = "104 Health Helpline";
-      triage.secondary_referral_destination = "104 Health Helpline";
+      triage.call_referral_primary = "104 Health Helpline";
+      triage.referral_destination = "104 Health Helpline";
+      triage.call_referral_secondary = "ESIC Hospital";
+      triage.secondary_referral_destination = "ESIC Hospital";
       triage.secondary_referral_reason =
-        "104 Health Helpline tele-doctor consultation for physical medical evaluation and guidance.";
+        "ESIC Hospital for physical checkup if symptoms persist.";
+      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
+      triage.recommended_action =
+        "Transfer call to 104 Health Helpline for 24x7 confidential doctor tele-consultation and counseling.";
     }
 
     const nearestHospital = nearest_facilities.find((f) => isHospital(f)) || nearest_facilities[0] || null;
@@ -184,10 +186,10 @@ export async function POST(request) {
       triage.referral_destination = "108 Ambulance";
       triage.call_referral_primary = "108 Ambulance";
       triage.call_referral_secondary = nearestHospital?.name || "ESIC Hospital";
-    } else if (isPsychCase) {
-      triage.referral_destination = "Tele-MANAS (14416)";
-      triage.call_referral_primary = "Tele-MANAS (14416)";
-      triage.call_referral_secondary = "104 Health Helpline";
+    } else if (isPsychCase || isNacoHIV) {
+      triage.referral_destination = "104 Health Helpline";
+      triage.call_referral_primary = "104 Health Helpline";
+      triage.call_referral_secondary = "ESIC Hospital";
     } else if (isEmergency) {
       // -------------------------------------------------------------
       // EMERGENCY CASES:
@@ -307,19 +309,11 @@ export async function POST(request) {
     let pDest = String(triage.call_referral_primary || triage.referral_destination || "").trim();
     let sDest = String(triage.call_referral_secondary || triage.secondary_referral_destination || "").trim();
 
-    if (pDest.includes("Psychological Counselling")) pDest = "Tele-MANAS (14416)";
-    if (sDest.includes("Psychological Counselling")) sDest = "Tele-MANAS (14416)";
+    if (pDest.includes("Psychological Counselling") || pDest.includes("Tele-MANAS") || pDest.includes("NACO")) pDest = "104 Health Helpline";
+    if (sDest.includes("Psychological Counselling") || sDest.includes("Tele-MANAS") || sDest.includes("NACO")) sDest = "ESIC Hospital";
 
-    const isPrimaryTele = /tele.?manas|psychological/i.test(pDest);
-    const isSecondaryTele = /tele.?manas|psychological/i.test(sDest);
-
-    if (isPrimaryTele && isSecondaryTele) {
-      sDest = "104 Health Helpline";
-      triage.secondary_referral_reason =
-        "104 Health Helpline tele-doctor consultation for physical medical evaluation and guidance.";
-      triage.call_referral_secondary_reason = triage.secondary_referral_reason;
-    } else if (pDest && sDest && pDest.toLowerCase() === sDest.toLowerCase()) {
-      sDest = "104 Health Helpline";
+    if (pDest && sDest && pDest.toLowerCase() === sDest.toLowerCase()) {
+      sDest = pDest === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
     }
 
     triage.call_referral_primary = pDest;

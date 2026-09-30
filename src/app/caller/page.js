@@ -347,6 +347,8 @@ export default function IpCallerPage() {
                   onChange={(e) => setSelectedAgent(e.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-800/80 py-3 px-3.5 text-base sm:text-sm font-semibold text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 >
+                  <option value="Admin 1">Admin 1 (Administrator Desk 1)</option>
+                  <option value="Admin 2">Admin 2 (Administrator Desk 2)</option>
                   <option value="Agent 1">Agent 1 (Triage Desk 1)</option>
                   <option value="Agent 2">Agent 2 (Triage Desk 2)</option>
                   <option value="Agent 3">Agent 3 (Triage Desk 3)</option>

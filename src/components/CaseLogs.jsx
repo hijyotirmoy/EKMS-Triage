@@ -37,35 +37,11 @@ export function getReferralBadge(c) {
 
   const notes = `${c?.intake?.symptom_notes || ""} ${dest}`.toLowerCase();
 
-  if (
-    dest.includes("naco") ||
-    dest.includes("1097") ||
-    notes.includes("hiv") ||
-    notes.includes("aids")
-  ) {
-    return {
-      label: "NACO 1097 Helpline",
-      icon: "🎗️",
-      color: "bg-rose-800 text-white border-rose-900",
-    };
-  }
   if (t.call_108 || dest.includes("108") || dest.includes("ambulance")) {
     return {
       label: "108 Ambulance",
       icon: "🚨",
       color: "bg-rose-700 text-white border-rose-800",
-    };
-  }
-  if (
-    t.is_psychiatric ||
-    dest.includes("manas") ||
-    dest.includes("psych") ||
-    dest.includes("14416")
-  ) {
-    return {
-      label: "Psychiatric Team / Tele-MANAS",
-      icon: "🧠",
-      color: "bg-purple-700 text-white border-purple-800",
     };
   }
   if (dest.includes("tie") || dest.includes("empanelled")) {

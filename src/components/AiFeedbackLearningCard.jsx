@@ -29,8 +29,7 @@ const REFERRAL_OPTIONS = [
   "ESIC Hospital",
   "ESIS Dispensary",
   "Nearest Tie-Up Facility",
-  "Tele-MANAS (14416)",
-  "NACO 1097 Helpline",
+  "Govt District Hospital",
   "Nearest Pharmacy",
   "Forward to Doctor",
 ];

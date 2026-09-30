@@ -27,7 +27,6 @@ import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { AiFeedbackLearningCard } from "./AiFeedbackLearningCard";
-import defaultFacilities from "../data/facilities.json";
 import {
   isHospital,
   isDispensary,
@@ -39,24 +38,6 @@ import {
 } from "../lib/geo";
 
 export const ACTION_DIRECTIVES = {
-  NACO_1097: {
-    id: "NACO_1097",
-    title: "TRANSFER TO NACO 1097 HELPLINE (HIV / AIDS / STI)",
-    category: "HIV, AIDS & Sexual Health Counseling",
-    badge: "NACO 1097 Helpline",
-    badgeColor: "bg-rose-800 text-white font-bold",
-    cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
-    panelLightTint: "border-rose-300/80 bg-rose-50/50 dark:bg-rose-950/25",
-    topBar: "bg-rose-800",
-    icon: "🎗️",
-    summary:
-      "Caller is inquiring about HIV, AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer immediately to the National AIDS Control Organisation (NACO) 24x7 Toll-Free Helpline (1097).",
-    checklist: [
-      "1. Speak with strict confidentiality, dignity, and non-judgmental reassurance.",
-      "2. Transfer call to National AIDS Helpline (Toll-Free 1097) for 24x7 confidential counseling and ICTC/ART center locator.",
-      "3. Direct to nearest ESIC Hospital ICTC / Specialist OPD if post-exposure prophylaxis (PEP) is needed within 72 hours.",
-    ],
-  },
   CALL_108: {
     id: "CALL_108",
     title: "CALL 108 AMBULANCE IMMEDIATELY",
@@ -72,24 +53,6 @@ export const ACTION_DIRECTIVES = {
       "1. Verify caller's current location, landmark, and contact phone number.",
       "2. Initiate 108 Emergency Ambulance dispatch immediately.",
       "3. Instruct patient to lie down, remain calm, and NOT exert or travel unassisted.",
-    ],
-  },
-  TELE_MANAS: {
-    id: "TELE_MANAS",
-    title: "TRANSFER TO TELE-MANAS (14416)",
-    category: "Mental Health Crisis Protocol",
-    badge: "Tele-MANAS (14416)",
-    badgeColor: "bg-purple-700 text-white font-bold",
-    cardBorder: "border-purple-400 bg-purple-50 text-purple-950 shadow-xs",
-    panelLightTint: "border-purple-300/80 bg-purple-50/50 dark:bg-purple-950/25",
-    topBar: "bg-purple-700",
-    icon: "🧠",
-    summary:
-      "Caller is in emotional crisis, experiencing depression, severe anxiety, or thoughts of self-harm. Transfer call to Tele-MANAS (14416) for 24x7 confidential crisis counseling.",
-    checklist: [
-      "1. Speak calmly with reassurance: 'You are safe, and we are connecting you to professional help.'",
-      "2. Transfer call to Toll-Free 14416 (National Tele-MANAS) for 24x7 confidential counseling.",
-      "3. Stay on line until safely handed over if self-harm risk is active.",
     ],
   },
   ESIC_HOSPITAL: {
@@ -187,9 +150,7 @@ export function mapDestinationToDirectiveId(dest) {
   if (!dest || typeof dest !== "string") return "ESIS_DISPENSARY";
   const d = dest.toLowerCase();
   if (d.includes("108") || d.includes("ambulance")) return "CALL_108";
-  if (d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("pep")) return "NACO_1097";
-  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team") || d.includes("health helpline") || d.includes("advice")) return "TELE_104";
-  if (d.includes("manas") || d.includes("psych") || (d.includes("counsel") && !d.includes("naco") && !d.includes("hiv"))) return "TELE_MANAS";
+  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team") || d.includes("health helpline") || d.includes("advice") || d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("manas") || d.includes("psych") || d.includes("counsel")) return "TELE_104";
   if (d.includes("tie") || d.includes("empanelled") || d.includes("swasti") || d.includes("ayursundra") || d.includes("dispur hospital") || d.includes("narayana") || d.includes("hayat") || d.includes("excelcare") || d.includes("down town")) return "TIE_UP_FACILITY";
   if (d.includes("district") || d.includes("dist hosp") || d.includes("public health") || d.includes("civil hospital") || d.includes("immunization")) return "DIST_HOSPITAL";
   if (d.includes("hospital") || d.includes("casualty")) return "ESIC_HOSPITAL";
@@ -198,9 +159,9 @@ export function mapDestinationToDirectiveId(dest) {
 }
 
 export function resolveDirectiveIds(t, result) {
-  // Check if caller inquiry is explicitly NACO 1097 / HIV
   const intakeText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
   const isNacoHIV = /\b(hiv|aids|naco|1097|post.?exposure|pep\b|anti.?retroviral|art\s*center)\b/i.test(intakeText);
+  const isPsych = /\b(suicid|depress|anxiety|mental|counsel|udaas)\b/i.test(intakeText);
 
   // Check off-hours (between 4:00 PM and 10:00 AM)
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -220,13 +181,9 @@ export function resolveDirectiveIds(t, result) {
     result?.ekms_ai_context?.referralDestination;
 
   if (!primaryDest) {
-    if (isNacoHIV) {
-      primaryDest = "NACO 1097 Helpline";
-    } else if (isEmergency) {
+    if (isEmergency) {
       primaryDest = "108 Ambulance";
-    } else if (t?.is_psychiatric) {
-      primaryDest = "Psychiatric Team / Tele-MANAS";
-    } else if (isOffHours) {
+    } else if (isNacoHIV || isPsych || isOffHours) {
       primaryDest = "104 Health Helpline";
     } else {
       primaryDest = "ESIS Dispensary";
@@ -592,14 +549,7 @@ export const TriageResultPanel = ({
               <p className="eyebrow">Triage outcome</p>
               <div className="mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3">
                 <UrgencyBadge level={t.urgency_level} score={t.urgency_score} />
-                {activeDirective.id === "NACO_1097" ? (
-                  <span
-                    data-testid="triage-naco-1097"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-800 px-3 py-1 text-xs font-bold text-white shadow-2xs"
-                  >
-                    🎗️ NACO 1097 HELPLINE
-                  </span>
-                ) : activeDirective.id === "CALL_108" || t.call_108 ? (
+                {activeDirective.id === "CALL_108" || t.call_108 ? (
                   <span
                     data-testid="triage-call-108"
                     className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
@@ -612,13 +562,6 @@ export const TriageResultPanel = ({
                     className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-blue-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
                   >
                     <PhoneCall className="h-3.5 w-3.5" /> 104 HEALTH HELPLINE
-                  </span>
-                ) : activeDirective.id === "TELE_MANAS" ? (
-                  <span
-                    data-testid="triage-tele-manas"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-purple-300 bg-purple-700 px-3 py-1 text-xs font-bold text-white shadow-2xs"
-                  >
-                    <PhoneCall className="h-3.5 w-3.5" /> TELE-MANAS 14416
                   </span>
                 ) : activeDirective.id === "ESIC_HOSPITAL" ? (
                   <span

@@ -16,6 +16,8 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { resolveClientIpAndGeo } from "@/lib/geoIpResolver";
 
 const VALID_AGENTS = [
+  { id: "Admin 1", label: "Admin 1 (Administrator Desk 1)" },
+  { id: "Admin 2", label: "Admin 2 (Administrator Desk 2)" },
   { id: "Agent 1", label: "Agent 1 (Triage Desk 1)" },
   { id: "Agent 2", label: "Agent 2 (Triage Desk 2)" },
   { id: "Agent 3", label: "Agent 3 (Triage Desk 3)" },
@@ -24,7 +26,7 @@ const VALID_AGENTS = [
 const VALID_PASSWORD = "pass123";
 
 export function AgentLogin({ onLoginSuccess }) {
-  const [selectedAgent, setSelectedAgent] = useState("Agent 1");
+  const [selectedAgent, setSelectedAgent] = useState("Admin 1");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -33,6 +35,8 @@ export function AgentLogin({ onLoginSuccess }) {
 
   const normalizeAgentId = (id) => {
     const clean = id.trim().toLowerCase().replace(/\s+/g, "");
+    if (clean === "admin1") return "Admin 1";
+    if (clean === "admin2") return "Admin 2";
     if (clean === "agent1") return "Agent 1";
     if (clean === "agent2") return "Agent 2";
     if (clean === "agent3") return "Agent 3";
@@ -44,8 +48,8 @@ export function AgentLogin({ onLoginSuccess }) {
     setErrorMsg("");
 
     const normAgent = normalizeAgentId(selectedAgent);
-    if (!["Agent 1", "Agent 2", "Agent 3"].includes(normAgent)) {
-      setErrorMsg("Please select a valid Agent (Agent 1, Agent 2, or Agent 3)");
+    if (!["Admin 1", "Admin 2", "Agent 1", "Agent 2", "Agent 3"].includes(normAgent)) {
+      setErrorMsg("Please select a valid Account (Admin 1, Admin 2, Agent 1, Agent 2, or Agent 3)");
       return;
     }
 
@@ -138,10 +142,10 @@ export function AgentLogin({ onLoginSuccess }) {
             <ShieldCheck className="h-6 w-6 sm:h-7 sm:w-7" />
           </div>
           <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-950">
-            Agent Authentication
+            Console Authentication
           </h2>
           <p className="mt-1 text-xs text-slate-600 font-medium">
-            Sign in to your assigned triage operator desk
+            Sign in with your Admin or Agent operator account
           </p>
         </div>
 
@@ -155,7 +159,7 @@ export function AgentLogin({ onLoginSuccess }) {
         <form onSubmit={handleLoginAttempt} className="space-y-4">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-800">
-              Agent ID / Desk
+              Account ID / Role
             </label>
             <div className="relative">
               <UserCheck className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />

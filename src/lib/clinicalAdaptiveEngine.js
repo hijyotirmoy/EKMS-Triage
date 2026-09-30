@@ -1253,11 +1253,11 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
         },
         {
           id: "psych_q5",
-          title: "Counseling & Tele-MANAS Referral",
-          question: "We care about your safety. Can we immediately connect you to our Psychological Counselling Department and National Tele-MANAS (14416)?",
+          title: "Counseling & 104 Health Helpline Referral",
+          question: "We care about your safety. Can we immediately connect you to a doctor and mental health counselor via 104 Health Helpline?",
           options: [
-            "Yes, please connect me to a counselor right now",
-            "Yes, please forward this call to the mental health team",
+            "Yes, please connect me to 104 Health Helpline right now",
+            "Yes, please forward this call to the 104 doctor team",
             "I just want someone to listen to me for a few minutes",
             "I will talk to my family first",
           ],
@@ -3050,9 +3050,9 @@ export function processTranscriptionForAi(rawSpeech, currentClinicalState = {}, 
   } else if (isPharmacy && !nlp.primarySymptom) {
     standardText = "Caller Request: Medicine refill at nearest dispensary pharmacy";
     entitySignature = "req::pharmacy";
-  } else if (isPsychiatric && !nlp.primarySymptom) {
-    standardText = "Caller Request: Transfer to Tele-MANAS / Psychiatric Counseling Team";
-    entitySignature = "req::telemanas";
+  } else if ((isPsychiatric || isNaco) && !nlp.primarySymptom) {
+    standardText = "Caller Request: Transfer to 104 Health Helpline for tele-doctor consultation and counseling";
+    entitySignature = "req::104";
   } else if (nlp.primarySymptom) {
     const items = [`Complaint: ${nlp.primarySymptom}`];
     if (nlp.detectedDuration) items.push(`Duration: ${nlp.detectedDuration}`);
