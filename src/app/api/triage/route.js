@@ -110,50 +110,17 @@ export async function POST(request) {
       triage.summary_en = "Caller inquiry regarding HIV / AIDS, STI symptoms, testing, PEP, or sexual health counseling. Transfer directly to NACO 1097 Toll-Free Helpline.";
     }
 
-    const isSevere =
+    const isEmergency =
       !isNacoHIV && (
         triage.urgency_level === "Emergency" ||
-        triage.urgency_level === "Urgent" ||
-        Number(intake.severity_reported) >= 7 ||
-        (triage.urgency_score && triage.urgency_score >= 7)
+        Number(intake.severity_reported) >= 8 ||
+        triage.call_108 ||
+        explicitReferral.includes("108")
       );
 
-    // If explicit caller preference was detected, respect it
-    if (explicitReferral.includes("108")) {
-      triage.call_108 = true;
-      triage.recommended_facility_type = "108 Emergency Ambulance / ESIC Hospital Casualty";
-      triage.referral_destination = "108 Ambulance";
-      triage.referral_reason = "Emergency medical priority; dispatch 108 Ambulance immediately.";
-      triage.recommended_action = "Dispatch 108 Emergency Ambulance immediately. Instruct caller to stay calm and not exert.";
-    } else if (explicitReferral.includes("104") || explicitReferral.includes("doctor")) {
-      triage.call_108 = false;
-      triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
-      triage.referral_destination = "104 Health Helpline";
-      triage.referral_reason = "Caller requests telephone medical advice; forward to 104 Health Helpline tele-doctor.";
-      triage.recommended_action = "Transfer call to 104 Health Helpline queue for tele-doctor consultation.";
-    }
+    const isSevere = isEmergency;
 
-    triage.call_referral_primary = triage.call_referral_primary || triage.referral_destination;
-    triage.call_referral_secondary = triage.call_referral_secondary || triage.secondary_referral_destination;
-
-    // Ensure red flags strictly reflect caller-reported symptoms without hallucinations
-    const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm)\b/i.test(callerSpokenText);
-    triage.red_flags = summarizeRedFlags(triage.red_flags, callerSpokenText, isSafe);
-
-    triage.primary_complaint =
-      triage.primary_complaint ||
-      tState?.suspectedCondition ||
-      tState?.condition ||
-      tState?.symptom ||
-      "Primary Clinical Assessment";
-    triage.duration = triage.duration || intake.duration || tState?.duration || "Reported today";
-    triage.assessed_severity =
-      triage.assessed_severity ||
-      (tState?.severity
-        ? `${tState.severity} (${tState?.severityScore || triage.urgency_score || 5}/10)`
-        : (isSevere ? `High (${triage.urgency_score || 8}/10)` : `Moderate (${triage.urgency_score || 5}/10)`));
-
-    // 2. Resolve location & rank 6 nearest facilities safely
+    // 2. Resolve location & rank nearest facilities safely (max 50km, exact pincode match first)
     let facilities = [];
     try {
       facilities = (await getFacilities()) || [];
@@ -186,18 +153,13 @@ export async function POST(request) {
       /tele.?manas|psychological|anxiety|depression|mental/i.test(triage.call_referral_primary || "") ||
       /anxious|anxiety|depression|depressed|stress|suicid|self.?harm|mental|panic/i.test(callerSpokenText);
 
-    const hasSpecialReferral =
-      triage.referral_destination === "104 Health Helpline" ||
-      triage.referral_destination === "108 Ambulance" ||
-      triage.referral_destination === "Tele-MANAS (14416)" ||
-      triage.referral_destination === "Psychological Counselling Department" ||
-      triage.referral_destination === "NACO 1097 Helpline" ||
-      triage.referral_destination === "Nearest Tie-Up Facility" ||
-      triage.referral_destination === "Govt District Hospital" ||
+    const hasExplicitSpecialReferral =
+      isNacoHIV ||
       isPsychCase ||
       explicitReferral.includes("108") ||
-      explicitReferral.includes("104") ||
-      explicitReferral.includes("doctor");
+      explicitReferral.includes("1097") ||
+      explicitReferral.includes("manas") ||
+      explicitReferral.includes("14416");
 
     if (isPsychCase) {
       triage.call_referral_primary = "Tele-MANAS (14416)";
@@ -208,115 +170,134 @@ export async function POST(request) {
         "104 Health Helpline tele-doctor consultation for physical medical evaluation and guidance.";
     }
 
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-    const hour = istDate.getHours();
-    const currentMinutes = hour * 60 + istDate.getMinutes();
-    const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM (960) to 10:00 AM (600)
-    const isAfter7PM = hour >= 19 || hour < 5;
-    const dispensaryStatus = getDispensaryOperatingStatus();
-
-    const nearestHospital = nearest_facilities.find((f) => isHospital(f)) || nearest_facilities[0];
-    const nearestDispensary = nearest_facilities.find((f) => isDispensary(f));
-    const isEsicNearby = nearestHospital && isEsicHospital(nearestHospital) && (nearestHospital.distance_km == null || nearestHospital.distance_km <= 100);
+    const nearestHospital = nearest_facilities.find((f) => isHospital(f)) || nearest_facilities[0] || null;
+    const nearestEsic = nearest_facilities.find((f) => isEsicHospital(f));
+    const nearestDistHosp = nearest_facilities.find((f) => isGovtDistrictHospital(f));
+    const nearestDispensary = nearest_facilities.find((f) => isDispensary(f)) || (nearest_facilities[0]?.is_dispensary ? nearest_facilities[0] : null);
+    const nearestTieUp = nearest_facilities.find((f) => isTieUp(f));
+    const isEsicWithin25Km = Boolean(nearestEsic && nearestEsic.distance_km != null && nearestEsic.distance_km <= 25);
 
     if (triage.call_108 || explicitReferral.includes("108") || triage.referral_destination === "108 Ambulance") {
-      triage.recommended_facility_type = isEsicNearby
-        ? "108 Emergency Ambulance / ESIC Hospital Casualty"
-        : (nearestHospital ? `108 Emergency Ambulance / Nearest Hospital Casualty (${nearestHospital.name})` : "108 Emergency Ambulance / Nearest Hospital Casualty");
-    }
-
-    if (isPsychCase) {
+      triage.recommended_facility_type = nearestHospital
+        ? `108 Emergency Ambulance / ${nearestHospital.name}`
+        : "108 Emergency Ambulance / Nearest Hospital Casualty";
+      triage.referral_destination = "108 Ambulance";
+      triage.call_referral_primary = "108 Ambulance";
+      triage.call_referral_secondary = nearestHospital?.name || "ESIC Hospital";
+    } else if (isPsychCase) {
       triage.referral_destination = "Tele-MANAS (14416)";
       triage.call_referral_primary = "Tele-MANAS (14416)";
       triage.call_referral_secondary = "104 Health Helpline";
-    } else if (triage.referral_destination === "Nearest Tie-Up Facility" || triage.referral_destination === "Tie-Up Facility") {
-      const nearestTieUp = nearest_facilities.find((f) => isTieUp(f));
-      triage.recommended_facility_type = nearestTieUp ? `${nearestTieUp.name} (ESI Empanelled Tie-Up Hospital)` : "ESI Empanelled Tie-Up Hospital";
-      triage.recommended_action = nearestTieUp
-        ? `Referral priority: Guide patient to empanelled partner hospital ${nearestTieUp.name} (${nearestTieUp.pincode ? `PIN: ${nearestTieUp.pincode}, ` : ""}${nearestTieUp.distance_km != null ? `${nearestTieUp.distance_km} km away` : "nearest"}) under cashless ESI treatment guidelines.`
-        : "Referral priority: Guide patient to nearest empanelled tie-up hospital under cashless ESI treatment guidelines.";
-      triage.referral_destination = "Tie-Up Facility";
-      triage.call_referral_primary = "Tie-Up Facility";
-      triage.call_referral_primary_reason = triage.referral_reason || (nearestTieUp ? `Empanelled tie-up hospital care at ${nearestTieUp.name}.` : "Empanelled tie-up hospital care.");
-      triage.call_referral_secondary = "ESIC Hospital";
-      triage.call_referral_secondary_reason = "ESIC Hospital casualty / triage desk.";
-    } else if (triage.referral_destination === "Govt District Hospital") {
-      const nearestDistHosp = nearest_facilities.find((f) => isGovtDistrictHospital(f));
-      triage.recommended_facility_type = nearestDistHosp ? `${nearestDistHosp.name} (Govt District Hospital · Public Health)` : "Govt District Hospital";
-      triage.recommended_action = nearestDistHosp
-        ? `Guide patient to nearest public health facility ${nearestDistHosp.name} (${nearestDistHosp.pincode ? `PIN: ${nearestDistHosp.pincode}, ` : ""}${nearestDistHosp.distance_km != null ? `${nearestDistHosp.distance_km} km away` : "nearest"}) for specialist evaluation or immunization.`
-        : "Guide patient to nearest Govt District Hospital for specialist evaluation.";
-      triage.referral_destination = "Govt District Hospital";
-      triage.call_referral_primary = "Govt District Hospital";
-      triage.call_referral_primary_reason = triage.referral_reason || (nearestDistHosp ? `Public healthcare outside ESIC network at ${nearestDistHosp.name}.` : "Public healthcare outside ESIC network.");
-      triage.call_referral_secondary = "104 Health Helpline";
-      triage.call_referral_secondary_reason = "104 Health Helpline for tele-doctor consultation.";
-    } else if (isSevere) {
-      if (!hasSpecialReferral) {
-        const isEsicNearby = nearestHospital && isEsicHospital(nearestHospital) && (nearestHospital.distance_km == null || nearestHospital.distance_km <= 100);
-        if (isEsicNearby) {
-          triage.recommended_facility_type = nearestHospital ? `${nearestHospital.name} (ESIC Hospital · 24x7 Casualty)` : "ESIC Hospital (24x7 Casualty)";
-          triage.recommended_action = nearestHospital
-            ? `Emergency priority: Advise patient to proceed immediately to ${nearestHospital.name} (${nearestHospital.pincode ? `PIN: ${nearestHospital.pincode}, ` : ""}${nearestHospital.distance_km != null ? `${nearestHospital.distance_km} km away` : "nearest"}) casualty or emergency department for acute medical stabilization.`
+    } else if (isEmergency) {
+      // -------------------------------------------------------------
+      // EMERGENCY CASES:
+      // Refer to ESIC Hospital if <= 25 KM; if no ESIC Hospital under 25 KM, refer to Govt District Hospital
+      // -------------------------------------------------------------
+      if (!hasExplicitSpecialReferral) {
+        if (isEsicWithin25Km) {
+          triage.recommended_facility_type = nearestEsic
+            ? `${nearestEsic.name} (ESIC Hospital · 24x7 Casualty)`
+            : "ESIC Hospital (24x7 Casualty)";
+          triage.recommended_action = nearestEsic
+            ? `Emergency priority: Advise patient to proceed immediately to ${nearestEsic.name} (${nearestEsic.pincode ? `PIN: ${nearestEsic.pincode}, ` : ""}${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 25km"}) casualty for acute medical stabilization.`
             : "Emergency priority: Proceed to nearest ESIC Hospital casualty.";
           triage.referral_destination = "ESIC Hospital";
           triage.call_referral_primary = "ESIC Hospital";
-          triage.call_referral_primary_reason = nearestHospital ? `Direct patient immediately to nearest hospital (${nearestHospital.name}) casualty for acute clinical evaluation.` : "Proceed immediately to ESIC Hospital casualty.";
+          triage.call_referral_primary_reason = nearestEsic
+            ? `Direct patient immediately to ESIC Hospital (${nearestEsic.name}) casualty for emergency stabilization.`
+            : "Proceed immediately to ESIC Hospital casualty.";
+          triage.call_referral_secondary = "108 Ambulance";
+          triage.call_referral_secondary_reason = "If patient cannot travel unassisted or symptoms escalate, dispatch 108 Emergency Ambulance immediately.";
         } else {
-          const hospName = nearestHospital?.name || "Govt District Hospital";
-          triage.recommended_facility_type = nearestHospital ? `${nearestHospital.name} (Nearest Hospital · 24x7 Casualty)` : "Nearest Hospital (24x7 Casualty)";
-          triage.recommended_action = nearestHospital
-            ? `Emergency priority: No ESIC Hospital within 100km. Advise patient to proceed immediately to nearest emergency facility ${nearestHospital.name} (${nearestHospital.pincode ? `PIN: ${nearestHospital.pincode}, ` : ""}${nearestHospital.distance_km != null ? `${nearestHospital.distance_km} km away` : "nearest"}) casualty for acute medical care.`
-            : "Emergency priority: Proceed immediately to nearest hospital casualty.";
-          triage.referral_destination = hospName;
-          triage.call_referral_primary = hospName;
-          triage.call_referral_primary_reason = nearestHospital ? `Direct patient immediately to nearest hospital (${nearestHospital.name}) casualty for emergency stabilization.` : "Proceed immediately to nearest hospital casualty.";
-        }
-
-        if (!triage.call_referral_secondary) {
+          const hospName = nearestDistHosp?.name || nearestHospital?.name || "Govt District Hospital";
+          triage.recommended_facility_type = nearestDistHosp || nearestHospital
+            ? `${hospName} (Govt District Hospital · 24x7 Casualty)`
+            : "Nearest Govt District Hospital / 24x7 Casualty";
+          triage.recommended_action = nearestDistHosp || nearestHospital
+            ? `Emergency priority: No ESIC Hospital within 25km. Advise patient to proceed immediately to nearest hospital ${hospName} (${nearestDistHosp?.pincode ? `PIN: ${nearestDistHosp.pincode}, ` : ""}${nearestDistHosp?.distance_km != null ? `${nearestDistHosp.distance_km} km away` : "nearest"}) casualty for acute emergency care.`
+            : "Emergency priority: Proceed immediately to nearest hospital emergency casualty or dispatch 108 Emergency Ambulance. Enter caller pincode below to view local emergency facilities.";
+          triage.referral_destination = "Govt District Hospital";
+          triage.call_referral_primary = "Govt District Hospital";
+          triage.call_referral_primary_reason = `Direct patient immediately to nearest hospital (${hospName}) casualty for emergency stabilization.`;
           triage.call_referral_secondary = "108 Ambulance";
           triage.call_referral_secondary_reason = "If patient cannot travel unassisted or symptoms escalate, dispatch 108 Emergency Ambulance immediately.";
         }
       }
-    } else if (isOffHours || !dispensaryStatus.isOpen) {
-      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
-      triage.recommended_action = `Dispensaries and hospital OPDs are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone, or visit nearest hospital if symptoms escalate.`;
-      triage.referral_destination = "104 Health Helpline";
-      triage.call_referral_primary = "104 Health Helpline";
-      triage.call_referral_primary_reason = `Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 tele-doctor consultation and medical guidance.`;
-
-      const isEsicNearby = nearestHospital && isEsicHospital(nearestHospital) && (nearestHospital.distance_km == null || nearestHospital.distance_km <= 100);
-      triage.call_referral_secondary = isEsicNearby ? "ESIC Hospital" : (nearestHospital?.name || "Govt District Hospital");
-      triage.call_referral_secondary_reason = nearestHospital
-        ? `Nearest facility (${nearestHospital.name}) for physical evaluation if symptoms persist or escalate.`
-        : "Nearest hospital casualty / urgent OPD for physical examination.";
     } else {
-      const destDispensary = nearestDispensary || nearest_facilities.find((f) => !isTieUp(f)) || nearest_facilities[0];
-      if (!hasSpecialReferral && destDispensary) {
-        triage.recommended_facility_type = `${destDispensary.name} (ESIS Dispensary · Primary Care OPD)`;
-        triage.recommended_action = `Advise patient to visit ${destDispensary.name} (${destDispensary.pincode ? `PIN: ${destDispensary.pincode}, ` : ""}${destDispensary.distance_km != null ? `${destDispensary.distance_km} km away` : "nearest"}) during regular OPD hours (${dispensaryStatus.operatingHoursText || "10:00 AM – 4:00 PM"}) for doctor consultation and free medicine dispensing.`;
-        triage.referral_destination = "ESIS Dispensary";
-        triage.call_referral_primary = "ESIS Dispensary";
-        triage.call_referral_primary_reason = `Direct patient to ${destDispensary.name} during OPD hours (10:00 AM – 4:00 PM) for physical examination and routine medicines.`;
-
-        if (!triage.call_referral_secondary) {
+      // -------------------------------------------------------------
+      // NON-EMERGENCY / NORMAL CASES (No major issue, mild to moderate):
+      // 1. Always give priority to ESIS Dispensary if dispensary is available / open!
+      // 2. If no dispensary available / open:
+      //    - Refer to ESIC Hospital if within 25 KM
+      //    - If no ESIC Hospital within 25 KM, refer to District Hospital or Tie-Up Hospital
+      // -------------------------------------------------------------
+      if (!hasExplicitSpecialReferral) {
+        if (nearestDispensary || explicitReferral.includes("dispensary") || !nearest_facilities.length) {
+          // Priority 1: ESIS Dispensary (Synchronizes with EKMS AI chatbox outcome)
+          const disp = nearestDispensary;
+          triage.recommended_facility_type = disp
+            ? `${disp.name} (ESIS Dispensary · Primary Care OPD)`
+            : "ESIS Dispensary (Primary Care OPD)";
+          triage.recommended_action = disp
+            ? `Advise patient to visit ${disp.name} (${disp.pincode ? `PIN: ${disp.pincode}, ` : ""}${disp.distance_km != null ? `${disp.distance_km} km away` : "nearest"}) during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM) for doctor consultation and routine medicines.`
+            : "Advise patient to visit their nearest local ESIS Dispensary during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM) for doctor consultation and free medicine dispensing. Enter caller pincode below to locate exact nearest facility.";
+          triage.referral_destination = "ESIS Dispensary";
+          triage.call_referral_primary = "ESIS Dispensary";
+          triage.call_referral_primary_reason = disp
+            ? `Direct patient to ${disp.name} for physical doctor checkup and free prescription dispensing.`
+            : "Visit nearest ESIS Dispensary during OPD hours.";
           triage.call_referral_secondary = "104 Health Helpline";
-          triage.call_referral_secondary_reason = "Connect with 104 Health Helpline for tele-doctor consultation over the phone.";
+          triage.call_referral_secondary_reason = "104 Health Helpline for 24x7 tele-doctor consultation over the phone.";
+        } else if (isEsicWithin25Km) {
+          // Priority 2: ESIC Hospital within 25 KM
+          triage.recommended_facility_type = nearestEsic
+            ? `${nearestEsic.name} (ESIC Hospital · Secondary Care)`
+            : "ESIC Hospital";
+          triage.recommended_action = nearestEsic
+            ? `Referral priority: Guide patient to nearest ESIC Hospital (${nearestEsic.name}${nearestEsic.pincode ? `, PIN: ${nearestEsic.pincode}` : ""}${nearestEsic.distance_km != null ? `, ${nearestEsic.distance_km} km away` : ""}) for doctor consultation and treatment under ESIC coverage.`
+            : "Guide patient to nearest ESIC Hospital.";
+          triage.referral_destination = "ESIC Hospital";
+          triage.call_referral_primary = "ESIC Hospital";
+          triage.call_referral_primary_reason = nearestEsic
+            ? `Refer patient to ESIC Hospital ${nearestEsic.name} (${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 25km"}) for clinical consultation.`
+            : "Refer patient to nearest ESIC Hospital within 25km.";
+          triage.call_referral_secondary = "104 Health Helpline";
+          triage.call_referral_secondary_reason = "104 Health Helpline for tele-doctor consultation over the phone.";
+        } else {
+          // Priority 3: District Hospital or Tie-Up Hospital (whichever is closer)
+          let topAlt = nearestDistHosp;
+          let secAlt = nearestTieUp;
+          if (
+            nearestTieUp &&
+            (!nearestDistHosp ||
+              (nearestTieUp.distance_km != null &&
+                nearestDistHosp.distance_km != null &&
+                nearestTieUp.distance_km < nearestDistHosp.distance_km))
+          ) {
+            topAlt = nearestTieUp;
+            secAlt = nearestDistHosp;
+          }
+          topAlt = topAlt || nearest_facilities[0];
+          const isAltTieUp = isTieUp(topAlt);
+
+          triage.recommended_facility_type = topAlt
+            ? `${topAlt.name} (${isAltTieUp ? "ESIC Tie-Up Hospital" : "Govt District Hospital"})`
+            : "Govt District Hospital";
+          triage.recommended_action = topAlt
+            ? `No ESIC Hospital or dispensary available within 25km. Guide patient to ${isAltTieUp ? "empanelled tie-up hospital" : "Govt district hospital"} ${topAlt.name} (${topAlt.pincode ? `PIN: ${topAlt.pincode}, ` : ""}${topAlt.distance_km != null ? `${topAlt.distance_km} km away` : "nearest"}) for medical care.`
+            : "Guide patient to nearest Govt District Hospital or Tie-Up Hospital.";
+          triage.referral_destination = isAltTieUp ? "Tie-Up Facility" : "Govt District Hospital";
+          triage.call_referral_primary = isAltTieUp ? "Tie-Up Facility" : "Govt District Hospital";
+          triage.call_referral_primary_reason = topAlt
+            ? `Refer patient to ${topAlt.name} (${topAlt.distance_km != null ? `${topAlt.distance_km} km away` : "nearest"}) for clinical care.`
+            : "Refer to nearest district or tie-up facility.";
+          triage.call_referral_secondary = secAlt ? secAlt.name : "104 Health Helpline";
+          triage.call_referral_secondary_reason = "104 Health Helpline for tele-doctor guidance.";
         }
       }
     }
 
-    if (isAfter7PM) {
-      const p = String(triage.call_referral_primary || triage.referral_destination || "").toLowerCase();
-      const s = String(triage.call_referral_secondary || "").toLowerCase();
-      const hasCallOption = p.includes("104") || p.includes("108") || p.includes("call") || p.includes("tele") ||
-                            s.includes("104") || s.includes("108") || s.includes("call") || s.includes("tele");
-      if (!hasCallOption) {
-        triage.call_referral_secondary = "104 Health Helpline";
-        triage.call_referral_secondary_reason = "After 7:00 PM: Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.";
-      }
-    }
+
 
     if (!triage.referral_destination) {
       triage.referral_destination = isSevere ? (nearestHospital?.name || "ESIC Hospital") : (nearestDispensary?.name || "ESIS Dispensary");

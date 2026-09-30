@@ -12,7 +12,19 @@ const isMobileDevice = () => {
 export function isWhisperHallucination(text) {
   if (!text) return true;
   const t = String(text).toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-  if (!t || t.length < 2) return true;
+  if (!t) return true;
+
+  // Explicitly whitelist valid short affirmative/negative clinical answers
+  const validShortClinicalAnswers = new Set([
+    "no", "na", "ha", "haan", "nahi", "nah", "nhi", "not", "none", "nil", "nope",
+    "yes", "ya", "yah", "ok", "okay", "done", "fine", "low", "high", "mild", "pain",
+    "left", "right", "back", "arm", "head", "leg", "eye", "ear", "neck", "hand", "zero"
+  ]);
+  if (validShortClinicalAnswers.has(t)) {
+    return false;
+  }
+
+  if (t.length < 2) return true;
 
   const hallucinationPatterns = [
     /thank\s*you\s*(for\s*watching)?/gi,
@@ -39,7 +51,7 @@ export function isWhisperHallucination(text) {
     stripped = stripped.replace(pattern, "").trim();
   }
 
-  if (stripped.length < 3) return true;
+  if (stripped.length < 2) return true;
 
   // Detect repeating loop phrases
   const words = t.split(/\s+/);

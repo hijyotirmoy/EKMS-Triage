@@ -132,76 +132,78 @@ export function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * Resolves caller location dynamically using facilities from the facility page / DB.
- * Removes hardcoded pincode tables in favor of dynamic facility data matching.
+ * Resolves caller location dynamically based on caller Pincode, District, City, or Coordinates/IP.
+ * Caller's explicit PINCODE/District always takes precedence over workstation IP coordinates.
  */
 export function resolveCallerLocation(input, facilities = []) {
   const cleanFacs = cleanFacilityCoordinates(facilities);
-  const { latitude, longitude, district, city } = input || {};
-  let cleanPin = input?.pincode ? String(input.pincode).trim() : null;
+  let callerPin = input?.pincode ? String(input.pincode).trim() : null;
+  const callerDist = input?.district ? String(input.district).trim() : null;
+  const callerCity = input?.city ? String(input.city).trim() : null;
 
   // Auto-extract 6-digit Assam pincode if mentioned in notes/address
-  if (!cleanPin && input?.symptom_notes) {
+  if (!callerPin && input?.symptom_notes) {
     const extracted = String(input.symptom_notes).match(/\b(78\d{4})\b/);
-    if (extracted) cleanPin = extracted[1];
+    if (extracted) callerPin = extracted[1];
   }
-  if (!cleanPin && input?.address) {
+  if (!callerPin && input?.address) {
     const extracted = String(input.address).match(/\b(78\d{4})\b/);
-    if (extracted) cleanPin = extracted[1];
+    if (extracted) callerPin = extracted[1];
   }
 
-  // If user selected an explicit district other than Kamrup, ignore default 781022 pincode so district routing takes effect
-  const hasExplicitDist = Boolean(district && String(district).trim());
-  const isDefaultPin = cleanPin === "781022";
-  const isKamrupDist = hasExplicitDist && String(district).toLowerCase().includes("kamrup");
-  if (isDefaultPin && hasExplicitDist && !isKamrupDist) {
-    cleanPin = null;
+  // Fallback to IP postal if caller didn't supply pincode
+  if (!callerPin) {
+    callerPin = (input?.ip_pincode ?? input?.postal ?? input?.ip_postal)
+      ? String(input?.ip_pincode ?? input?.postal ?? input?.ip_postal).trim()
+      : null;
   }
 
-  // 1. PINCODE RESOLUTION: Match against facilities from facility directory
-  if (cleanPin) {
+  const rawDistrict = callerDist || input?.ip_district || input?.region || input?.ip_region;
+  const rawCity = callerCity || input?.ip_city || input?.location || input?.ip_location;
+
+  // 1. PINCODE RESOLUTION (Highest Priority: Exact match to caller's postal area)
+  if (callerPin) {
     // 1a. Exact facility pincode match
     const match = cleanFacs.find(
-      (f) => f.pincode && String(f.pincode).trim() === cleanPin && f.latitude != null
+      (f) => f.pincode && String(f.pincode).trim() === callerPin && f.latitude != null
     );
     if (match) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
-        pincode: cleanPin,
-        district: match.district || null,
+        pincode: callerPin,
+        district: match.district || rawDistrict || null,
         method: "pincode",
-        matched: `Pincode ${cleanPin} (${match.name})`,
+        matched: `Pincode ${callerPin} (${match.name})`,
         isDistrictOnly: false,
       };
     }
 
     // 1b. Address text match containing pincode
     const addrMatch = cleanFacs.find(
-      (f) => f.address && f.address.includes(cleanPin) && f.latitude != null
+      (f) => f.address && f.address.includes(callerPin) && f.latitude != null
     );
     if (addrMatch) {
       return {
         latitude: addrMatch.latitude,
         longitude: addrMatch.longitude,
-        pincode: cleanPin,
-        district: addrMatch.district || null,
+        pincode: callerPin,
+        district: addrMatch.district || rawDistrict || null,
         method: "pincode",
-        matched: `Pincode ${cleanPin} (${addrMatch.name})`,
+        matched: `Pincode ${callerPin} (${addrMatch.name})`,
         isDistrictOnly: false,
       };
     }
 
     // 1c. Numerically closest pincode match in same postal delivery zone (e.g. 782411 -> 782410 Jagiroad)
-    if (/^\d{6}$/.test(cleanPin)) {
-      const pinNum = parseInt(cleanPin, 10);
+    if (/^\d{6}$/.test(callerPin)) {
+      const pinNum = parseInt(callerPin, 10);
       const sameZone = cleanFacs.filter(
         (f) => f.pincode && /^\d{6}$/.test(String(f.pincode).trim()) && f.latitude != null
       );
 
       if (sameZone.length > 0) {
-        // First check in same 3-digit circle (e.g. 782xxx)
-        const same3 = sameZone.filter((f) => String(f.pincode).startsWith(cleanPin.slice(0, 3)));
+        const same3 = sameZone.filter((f) => String(f.pincode).startsWith(callerPin.slice(0, 3)));
         const candidates = same3.length > 0 ? same3 : sameZone;
 
         candidates.sort((a, b) => {
@@ -213,21 +215,19 @@ export function resolveCallerLocation(input, facilities = []) {
         const closest = candidates[0];
         const diff = Math.abs(parseInt(closest.pincode, 10) - pinNum);
 
-        // If within neighboring post office cluster (<= 15 difference)
         if (diff <= 15) {
           return {
             latitude: closest.latitude,
             longitude: closest.longitude,
-            pincode: cleanPin,
-            district: closest.district || null,
+            pincode: callerPin,
+            district: closest.district || rawDistrict || null,
             method: "nearby_pincode",
-            matched: `Pincode ${cleanPin} (Near ${closest.name} · ${closest.pincode})`,
+            matched: `Pincode ${callerPin} (Near ${closest.name} · ${closest.pincode})`,
             isDistrictOnly: false,
           };
         }
 
-        // Otherwise within 4-digit prefix
-        const p4 = cleanPin.substring(0, 4);
+        const p4 = callerPin.substring(0, 4);
         const prefix4Matches = sameZone.filter((f) => String(f.pincode).startsWith(p4));
         if (prefix4Matches.length > 0) {
           prefix4Matches.sort((a, b) => Math.abs(parseInt(a.pincode, 10) - pinNum) - Math.abs(parseInt(b.pincode, 10) - pinNum));
@@ -235,10 +235,10 @@ export function resolveCallerLocation(input, facilities = []) {
           return {
             latitude: best.latitude,
             longitude: best.longitude,
-            pincode: cleanPin,
-            district: best.district || null,
+            pincode: callerPin,
+            district: best.district || rawDistrict || null,
             method: "pincode",
-            matched: `Pincode Area ${cleanPin} (Near ${best.name} · ${best.pincode})`,
+            matched: `Pincode Area ${callerPin} (Near ${best.name} · ${best.pincode})`,
             isDistrictOnly: false,
           };
         }
@@ -246,9 +246,9 @@ export function resolveCallerLocation(input, facilities = []) {
     }
   }
 
-  // 2. DISTRICT RESOLUTION: Match against facilities from facility directory
-  if (district && String(district).trim()) {
-    const cleanDist = String(district).trim().toLowerCase();
+  // 2. DISTRICT RESOLUTION: Match against facilities in caller's district
+  if (rawDistrict && String(rawDistrict).trim()) {
+    const cleanDist = String(rawDistrict).trim().toLowerCase();
     const match =
       cleanFacs.find(
         (f) => f.district && f.district.toLowerCase() === cleanDist && f.latitude != null
@@ -260,18 +260,18 @@ export function resolveCallerLocation(input, facilities = []) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
-        pincode: cleanPin || match.pincode || null,
+        pincode: callerPin || match.pincode || null,
         district: match.district,
         method: "district",
         matched: `District ${match.district}`,
-        isDistrictOnly: !cleanPin,
+        isDistrictOnly: !callerPin,
       };
     }
   }
 
-  // 3. CITY RESOLUTION: Match against facilities
-  if (city && String(city).trim()) {
-    const cleanCity = String(city).trim().toLowerCase();
+  // 3. CITY / LOCATION RESOLUTION: Match against facilities in caller's city
+  if (rawCity && String(rawCity).trim()) {
+    const cleanCity = String(rawCity).trim().toLowerCase();
     const match = cleanFacs.find(
       (f) =>
         ((f.district && f.district.toLowerCase().includes(cleanCity)) ||
@@ -283,45 +283,64 @@ export function resolveCallerLocation(input, facilities = []) {
       return {
         latitude: match.latitude,
         longitude: match.longitude,
-        pincode: cleanPin || match.pincode || null,
+        pincode: callerPin || match.pincode || null,
         district: match.district || null,
         method: "city",
-        matched: `City ${city}`,
+        matched: `City / Location ${rawCity}`,
         isDistrictOnly: false,
       };
     }
   }
 
-  // 4. EXPLICIT GPS COORDINATES
-  if (latitude != null && longitude != null && !isNaN(Number(latitude)) && !isNaN(Number(longitude))) {
+  // 4. EXPLICIT GPS COORDINATES (Only if provided explicitly by user)
+  const rawLat = input?.latitude ?? input?.lat;
+  const rawLon = input?.longitude ?? input?.lon;
+
+  if (
+    rawLat != null &&
+    rawLon != null &&
+    !isNaN(Number(rawLat)) &&
+    !isNaN(Number(rawLon)) &&
+    Number(rawLat) !== 0 &&
+    Number(rawLon) !== 0
+  ) {
+    const latNum = Number(rawLat);
+    const lonNum = Number(rawLon);
+
+    let closestFac = null;
+    let minD = Infinity;
+    for (const f of cleanFacs) {
+      if (f.latitude != null && f.longitude != null) {
+        const d = calculateHaversineDistanceKm(latNum, lonNum, f.latitude, f.longitude);
+        if (d != null && d < minD) {
+          minD = d;
+          closestFac = f;
+        }
+      }
+    }
+
     return {
-      latitude: Number(latitude),
-      longitude: Number(longitude),
-      pincode: cleanPin || null,
-      district: null,
+      latitude: latNum,
+      longitude: lonNum,
+      pincode: callerPin || closestFac?.pincode || null,
+      district: (rawDistrict && String(rawDistrict).trim()) || closestFac?.district || null,
       method: "coordinates",
-      matched: `GPS (${Number(latitude).toFixed(4)}, ${Number(longitude).toFixed(4)})`,
+      matched: `Location Coordinates (${latNum.toFixed(4)}, ${lonNum.toFixed(4)})`,
       isDistrictOnly: false,
+      isNoLocation: false,
     };
   }
 
-  // 5. DEFAULT FALLBACK: Default explicitly to ESIC Hospital Beltola (781022)
-  const beltolaFac = cleanFacs.find(
-    (f) =>
-      (f.name && f.name.toLowerCase().includes("beltola")) ||
-      (f.pincode && String(f.pincode).trim() === "781022")
-  );
-  const defaultFac = beltolaFac || cleanFacs.find((f) => f.latitude != null && f.longitude != null) || cleanFacs[0];
-
+  // 5. NO PINCODE / LOCATION ENTERED: DO NOT default to Beltola or any default pincode!
   return {
-    latitude: defaultFac ? defaultFac.latitude : 26.1217525702644,
-    longitude: defaultFac ? defaultFac.longitude : 91.8085511242569,
-    pincode: "781022",
-    district: defaultFac?.district || "Kamrup Metropolitan",
-    method: "default",
-    matched: "ESIC Hospital Beltola (781022)",
+    latitude: null,
+    longitude: null,
+    pincode: null,
+    district: null,
+    method: "none",
+    matched: "No pincode provided",
+    isNoLocation: true,
     isDistrictOnly: false,
-    isDefaultBeltola: true,
   };
 }
 
@@ -342,34 +361,28 @@ export function isDispensaryOpenNow(date = new Date()) {
 }
 
 /**
- * Ranks 6 facilities nearest to caller's pincode / location, guaranteeing all 4 facility types:
- * 1. Govt District Hospital (34 facilities)
- * 2. ESIC Hospital (2 facilities: Beltola, Tinsukia)
- * 3. ESIS Dispensary (33 facilities)
- * 4. ESIC Tie-Up Hospital (29 facilities)
+ * Ranks nearest facilities based on clinical rules:
  *
- * Emergency Case Hierarchy:
- * Slot 1: Nearest Hospital (Emergency casualty: closest Govt District Hospital or ESIC Hospital to caller's PIN)
- * Slot 2: Nearest ESIC Hospital (or nearest Govt District Hospital if Slot 1 was an ESIC Hospital)
- * If Dispensary Open: Slot 3 is Dispensary, next nearest non-tie-up, Slot 6 is strictly Tie-Up
- * If Dispensary Closed: Open hospitals first, Tie-Up hospital ABOVE dispensary, Closed Dispensary at bottom
- *
- * Normal / Routine Case Hierarchy:
- * If Dispensary Open:
- * Slot 1: Nearest ESIS Dispensary (Primary Care OPD)
- * Slot 2: Nearest ESIC Hospital (Secondary Care)
- * Slot 3: Nearest Govt District Hospital
- * Slot 4 & 5: Next two nearest facilities overall
- * Slot 6: Strictly Nearest Tie-Up Hospital
- *
- * If Dispensary Closed:
- * Do NOT show Dispensary in first position!
- * Open hospitals (ESIC Hospital / Govt District Hospital) take top slots.
- * Tie-Up Hospital is placed ABOVE Dispensary.
- * Closed Dispensary is placed at the bottom / last position.
+ * Rules:
+ * 1. Exact match / Pincode match MUST always be shown at the VERY TOP (Position 1)!
+ * 2. Filter out any facility with distance > 50 KM (never force distant Beltola / Tinsukia ESIC hospitals if > 50km).
+ * 3. Only show ESIC Hospitals if they are within <= 25 KM (or <= 50 KM max).
+ * 4. For EMERGENCY cases:
+ *    - If ESIC Hospital <= 25 KM, show ESIC Hospital first.
+ *    - If no ESIC Hospital <= 25 KM, show closest Govt District Hospital first.
+ * 5. For NON-EMERGENCY / NORMAL cases:
+ *    - Always give priority to ESIS Dispensary if dispensary is open / available!
+ *    - If no dispensary, refer to ESIC Hospital (if <= 25km), else District Hospital / Tie-Up Hospital.
  */
 export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isSevere = false) {
   if (!facilities || !facilities.length) return [];
+  if (
+    !callerLoc ||
+    callerLoc.isNoLocation ||
+    (!callerLoc.pincode && !callerLoc.district && callerLoc.latitude == null)
+  ) {
+    return [];
+  }
 
   const cleanFacs = cleanFacilityCoordinates(facilities);
   const callerPin = callerLoc?.pincode ? String(callerLoc.pincode).trim() : null;
@@ -403,7 +416,7 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
         : 9999;
     const isNearbyPinArea = isExactPin || (pinDiff <= 5 && cleanFacPin.startsWith(callerPin.slice(0, 4)));
 
-    if ((isExactPin || (isNearbyPinArea && pinDiff <= 1)) && (dist == null || dist < 1)) {
+    if (isExactPin || (isNearbyPinArea && pinDiff === 0)) {
       dist = 0;
     }
 
@@ -437,38 +450,33 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     };
   });
 
-  // Proximity comparator:
-  // 1. Avoid facilities > 100km: prefer facilities within 100km
-  // 2. If district-only: facilities in that district first, then nearest facilities around that district
-  // 3. Otherwise: exact pincode match first, nearby pincode area, then closer distance, then alphabetical
-  const byProximity = (a, b) => {
-    const aWithin100 = a.distance_km != null && a.distance_km <= 100 ? 1 : 0;
-    const bWithin100 = b.distance_km != null && b.distance_km <= 100 ? 1 : 0;
-    if (aWithin100 !== bWithin100) {
-      return bWithin100 - aWithin100;
-    }
+  // RULE: Filter out any facility with distance > 50 KM (unless no facilities exist <= 50km)
+  const within50Km = scored.filter((f) => f.distance_km != null && f.distance_km <= 50);
+  const eligiblePool = within50Km.length > 0 ? within50Km : scored;
 
-    if (isDistrictOnly) {
-      if (a.is_same_district !== b.is_same_district) {
-        return (b.is_same_district ? 1 : 0) - (a.is_same_district ? 1 : 0);
-      }
-    } else {
-      if (a.is_exact_pincode !== b.is_exact_pincode) {
-        return (b.is_exact_pincode ? 1 : 0) - (a.is_exact_pincode ? 1 : 0);
-      }
-      if (a.is_nearby_pincode !== b.is_nearby_pincode) {
-        return (b.is_nearby_pincode ? 1 : 0) - (a.is_nearby_pincode ? 1 : 0);
-      }
+  // Proximity sorting comparator:
+  // 1. Exact pincode match (distance 0 km) at top
+  // 2. Strict ascending order of distance_km
+  // 3. District match if district-only
+  const byProximity = (a, b) => {
+    if (a.is_exact_pincode !== b.is_exact_pincode) {
+      return (b.is_exact_pincode ? 1 : 0) - (a.is_exact_pincode ? 1 : 0);
     }
-    if (a.distance_km !== b.distance_km) {
-      return a.distance_km - b.distance_km;
+    const distA = a.distance_km != null ? a.distance_km : 9999;
+    const distB = b.distance_km != null ? b.distance_km : 9999;
+    if (distA !== distB) {
+      return distA - distB;
+    }
+    if (a.is_nearby_pincode !== b.is_nearby_pincode) {
+      return (b.is_nearby_pincode ? 1 : 0) - (a.is_nearby_pincode ? 1 : 0);
+    }
+    if (isDistrictOnly && a.is_same_district !== b.is_same_district) {
+      return (b.is_same_district ? 1 : 0) - (a.is_same_district ? 1 : 0);
     }
     return (a.name || "").localeCompare(b.name || "");
   };
 
-  // 1. Prioritize facilities within <= 100km, fallback to all scored if none under 100km
-  // Sort strictly by true proximity to the caller
-  const sortedByProximity = [...scored].sort(byProximity);
+  const sortedByProximity = [...eligiblePool].sort(byProximity);
 
   const selected = [];
   const selectedKeys = new Set();
@@ -482,53 +490,52 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     }
   };
 
-  // 1. Absolute closest hospital / facility to caller at TOP position (Slot 1)
-  if (sortedByProximity.length > 0) {
-    addFacility(sortedByProximity[0]);
+  const exactPinFac = sortedByProximity.find((f) => f.is_exact_pincode);
+  const nearestDispensary = sortedByProximity.find((f) => f.is_dispensary);
+  const nearestEsicUnder25 = sortedByProximity.find((f) => f.is_esic_hospital && f.distance_km <= 25);
+  const nearestGovtHosp = sortedByProximity.find((f) => f.is_govt_district_hospital);
+  const nearestTieUp = sortedByProximity.find((f) => f.is_tie_up);
+
+  if (isSevere) {
+    // -------------------------------------------------------------
+    // EMERGENCY CASES:
+    // Refer to ESIC Hospital if <= 25 KM, else closest Govt District Hospital (any hospital closest to caller)
+    // -------------------------------------------------------------
+    if (nearestEsicUnder25) {
+      addFacility(nearestEsicUnder25);
+    } else if (nearestGovtHosp) {
+      addFacility(nearestGovtHosp);
+    } else if (sortedByProximity.find((f) => f.is_hospital)) {
+      addFacility(sortedByProximity.find((f) => f.is_hospital));
+    } else {
+      addFacility(sortedByProximity[0]);
+    }
+  } else {
+    // -------------------------------------------------------------
+    // NON-EMERGENCY / NORMAL CASES:
+    // 1. If exact pincode match exists (e.g. ESIS Dispensary Hojai for 782435), show at Position 1!
+    // 2. Always give priority to ESIS Dispensary if dispensary is available / open!
+    // 3. If no dispensary, refer to ESIC Hospital if <= 25 KM, else District Hospital or Tie-Up Hospital.
+    // -------------------------------------------------------------
+    if (exactPinFac) {
+      addFacility(exactPinFac);
+    } else if (nearestDispensary) {
+      addFacility(nearestDispensary);
+    } else if (nearestEsicUnder25) {
+      addFacility(nearestEsicUnder25);
+    } else if (nearestGovtHosp || nearestTieUp) {
+      const primaryAlt = (nearestGovtHosp && nearestTieUp)
+        ? (nearestGovtHosp.distance_km <= nearestTieUp.distance_km ? nearestGovtHosp : nearestTieUp)
+        : (nearestGovtHosp || nearestTieUp);
+      addFacility(primaryAlt);
+    }
   }
 
-  // 2. Ensure nearest Govt District Hospital is included
-  const nearestGovtHosp = sortedByProximity.find(
-    (f) => f.facility_category_type === "GOVT_DISTRICT_HOSPITAL" && !selectedKeys.has(f.id || f.name)
-  );
-  if (nearestGovtHosp) {
-    addFacility(nearestGovtHosp);
-  }
-
-  // 3. Ensure nearest Dispensary is included
-  const nearestDispensary = sortedByProximity.find(
-    (f) => f.facility_category_type === "DISPENSARY" && !selectedKeys.has(f.id || f.name)
-  );
-  if (nearestDispensary) {
-    addFacility(nearestDispensary);
-  }
-
-  // 4. Ensure nearest ESIC Hospital is included in the list (without forcing to top)
-  const nearestEsic = sortedByProximity.find(
-    (f) => f.facility_category_type === "ESIC_HOSPITAL" && !selectedKeys.has(f.id || f.name)
-  );
-  if (nearestEsic) {
-    addFacility(nearestEsic);
-  }
-
-  // 5. Ensure nearest Tie-Up facility is included
-  const nearestTieUp = sortedByProximity.find(
-    (f) => f.facility_category_type === "TIE_UP_HOSPITAL" && !selectedKeys.has(f.id || f.name)
-  );
-  if (nearestTieUp) {
-    addFacility(nearestTieUp);
-  }
-
-  // 6. Fill remaining slots with the closest remaining facilities
+  // Populate all remaining slots strictly from sortedByProximity in ascending distance order
   for (const fac of sortedByProximity) {
     if (selected.length >= limit) break;
     addFacility(fac);
   }
 
-  // Strictly sort all selected facilities by distance so closest is always #1
-  selected.sort(byProximity);
-
   return selected.slice(0, limit);
 }
-
-

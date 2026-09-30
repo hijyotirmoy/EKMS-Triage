@@ -1306,10 +1306,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
         question:
           'Ask the IP: "Does this pain spread or radiate to any other part of your body, such as your back, arm, or jaw?" (Hinglish: "Kya yeh dard sharir ke kisi aur hisse jaise peeth, baazu ya jabde ki taraf phail raha hai?")',
         options: [
+          "No, does not radiate / stays in one spot",
+          "No, not spreading to any other part",
           "Radiating towards the left arm / jaw",
           "Spreading across the back / shoulders",
-          "Localized to one single spot",
-          "Spreading across the abdomen",
         ],
       },
       {

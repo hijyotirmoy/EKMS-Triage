@@ -540,54 +540,14 @@ async function evaluateRawTriage(intake) {
       isDualProtocol = isPsych;
       call108 = false;
     }
-    // USER MANDATE: If off-hours (after 4 PM to 10 AM) and NO emergency:
-    // Refer to 104 Health Helpline FIRST, then any hospital or dispensary!
-    else if (isOffHours || !dispensaryStatus.isOpen) {
-      primaryReferral = "104 Health Helpline";
-      primaryReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 tele-doctor consultation and advice.";
-      secondaryReferral = isPsych
-        ? "Tele-MANAS (14416)"
-        : "ESIC Hospital";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "Nearest ESIC Hospital (24x7 Casualty & Emergency) or dispensary during OPD hours (10:00 AM – 4:00 PM) for physical evaluation.";
-      isDualProtocol = isPsych;
-      call108 = false;
-    }
-    // Tier 4: 104 Health Helpline (General Daytime Tele-Consultation)
-    else if (
-      /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(allText)
-    ) {
-      primaryReferral = "104 Health Helpline";
-      primaryReason = "Beneficiary needs health guidance without visiting a physical facility; transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
-      secondaryReferral = isPsych
-        ? "Tele-MANAS (14416)"
-        : "ESIS Dispensary";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "Nearest health facility for physical evaluation if symptoms persist.";
-      isDualProtocol = isPsych;
-      call108 = false;
-    }
-    // Tier 5: ESIS Dispensary (Priority: Primary / Routine Care, Daytime 10:00 AM – 4:00 PM)
-    else if (dispensaryStatus.isOpen && effectiveSeverity <= 6) {
-      primaryReferral = "ESIS Dispensary";
-      primaryReason = "Beneficiary needs basic outpatient (OPD) primary care during standard working hours (10:00 AM – 4:00 PM); visit nearest ESIS Dispensary for doctor consultation and medicines.";
+    // Non-Emergency Cases: Refer to ESIC Hospital / Healthcare facility first
+    else {
+      primaryReferral = "ESIC Hospital";
+      primaryReason = "Beneficiary clinical consultation: guide to ESIC Hospital (if within 25km) or nearest district/tie-up hospital.";
       secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "104 Health Helpline";
       secondaryReason = isPsych
         ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "104 Health Helpline tele-doctor consultation for medical advice over the phone.";
-      isDualProtocol = isPsych;
-      call108 = false;
-    }
-    // Tier 6: ESIC Hospital (Priority: Secondary / Specialist Care, Daytime)
-    else {
-      primaryReferral = "ESIC Hospital";
-      primaryReason = "Beneficiary needs advanced specialized care or secondary evaluation within ESIC network (OPD 10:00 AM – 4:00 PM, IPD & Emergency 24x7).";
-      secondaryReferral = isPsych ? "Tele-MANAS (14416)" : "ESIS Dispensary";
-      secondaryReason = isPsych
-        ? "Concurrent emotional distress; transfer to Tele-MANAS (14416) for counseling."
-        : "ESIS Dispensary during OPD hours (10:00 AM – 4:00 PM) or 104 Health Helpline.";
+        : "104 Health Helpline for 24x7 tele-doctor consultation and phone guidance.";
       isDualProtocol = isPsych;
       call108 = false;
     }
@@ -977,23 +937,22 @@ function normalizeTriageDecision(triage, intake) {
     return triage;
   }
 
-  // 1b. Non-serious case seeking doctor advice or general health advice -> 104 Health Helpline
-  const isAdviceSeeking = /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(notes);
-  const isMild = (triage.urgency_level === "Routine" || triage.urgency_level === "Self-care" || (Number(triage.urgency_score) <= 4));
+  // 1b. Explicit caller request for telephone doctor consultation
+  const isAdviceSeeking = /\b(phone doctor|tele.?consult|104 health|call doctor|doctor on phone|phone par baat|phone par doctor)\b/i.test(notes);
 
-  if ((isAdviceSeeking || isMild) && !isPsych && !isNacoHIV && !triage.call_108 && triage.urgency_level !== "Emergency") {
+  if (isAdviceSeeking && !isPsych && !isNacoHIV && !triage.call_108 && triage.urgency_level !== "Emergency") {
     triage.is_psychiatric = false;
     triage.call_108 = false;
     triage.referral_destination = "104 Health Helpline";
-    triage.referral_reason = "Condition is non-serious; caller requires medical advice or tele-consultation. Transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
-    triage.secondary_referral_destination = "ESIS Dispensary";
-    triage.secondary_referral_reason = "Visit nearest registered ESIS Dispensary for physical doctor checkup and free medicine dispensing during OPD hours.";
+    triage.referral_reason = "Condition is non-serious; caller requests medical tele-consultation. Transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
+    triage.secondary_referral_destination = "ESIC Hospital";
+    triage.secondary_referral_reason = "ESIC Hospital for in-person doctor checkup if symptoms persist.";
     triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
     triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation and medical guidance.";
     triage.call_referral_primary = "104 Health Helpline";
-    triage.call_referral_secondary = "ESIS Dispensary";
+    triage.call_referral_secondary = "ESIC Hospital";
     if (!triage.summary_en || triage.summary_en.includes("distress") || triage.summary_en.includes("emergency")) {
-      triage.summary_en = "Condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.";
+      triage.summary_en = "Condition is non-serious and caller requested tele-doctor consultation via 104 Health Helpline.";
       triage.summary_hi = "स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श व स्वास्थ्य सलाह उपयुक्त है।";
     }
     return triage;
@@ -1055,63 +1014,47 @@ function normalizeTriageDecision(triage, intake) {
     return triage;
   }
 
-  // 5. If Dispensary is Closed (After 4 PM to 10 AM or Weekends) -> USER MANDATE:
-  // If there are no emergency after 4 PM to 10 AM, refer to 104 Health Helpline FIRST, then hospital or dispensary!
-  if (!dispensaryStatus.isOpen) {
-    if (!triage.call_108 && triage.urgency_level !== "Emergency" && Number(triage.urgency_score || 0) < 8) {
-      triage.call_108 = false;
-      triage.is_dual_protocol = true;
-      triage.referral_destination = "104 Health Helpline";
-      triage.call_referral_primary = "104 Health Helpline";
-      triage.referral_reason = `Dispensaries are currently closed (${dispensaryStatus.reason}). Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-      triage.secondary_referral_destination = "ESIC Hospital";
-      triage.call_referral_secondary = "ESIC Hospital";
-      triage.secondary_referral_reason = "Nearest ESIC Hospital (24x7 Casualty & Emergency) or dispensary during OPD hours (10:00 AM – 4:00 PM) for physical evaluation.";
-      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
-      triage.recommended_action = "Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-      return triage;
-    }
+  // 5. Emergency / Urgent Hospital Casualty
+  if (triage.urgency_level === "Emergency" || triage.urgency_level === "Urgent" || Number(triage.urgency_score || 0) >= 7) {
+    triage.call_108 = Number(triage.urgency_score || 0) >= 8 || referral.includes("108");
+    triage.is_dual_protocol = true;
+    triage.referral_destination = triage.call_108 ? "108 Ambulance" : "Nearest Hospital";
+    triage.call_referral_primary = triage.call_108 ? "108 Ambulance" : "Nearest Hospital";
+    triage.referral_reason = "Emergency clinical assessment; proceed immediately to the nearest hospital casualty for urgent medical evaluation.";
+    triage.secondary_referral_destination = triage.call_108 ? "Nearest Hospital" : "108 Ambulance";
+    triage.call_referral_secondary = triage.secondary_referral_destination;
+    triage.secondary_referral_reason = "108 Emergency Ambulance / Emergency Department backup.";
+    triage.recommended_facility_type = triage.call_108 ? "108 Emergency Ambulance / Nearest Hospital" : "Nearest Hospital / Emergency Casualty";
+    triage.recommended_action = "Advise patient to proceed immediately to the nearest hospital casualty for emergency stabilization.";
+    return triage;
   }
 
-  // 6. 104 Health Helpline
+  // 6. Explicit 104 Health Helpline request
   if (referral.includes("104")) {
     triage.call_108 = false;
     triage.is_dual_protocol = true;
     triage.referral_destination = "104 Health Helpline";
+    triage.call_referral_primary = "104 Health Helpline";
     triage.referral_reason = "Caller requested tele-doctor phone consultation; transfer call queue to 104 Health Helpline.";
-    triage.secondary_referral_destination = dispensaryStatus.isOpen ? "ESIS Dispensary" : "Nearest Tie-Up Facility";
-    triage.secondary_referral_reason = dispensaryStatus.isOpen
-      ? "ESIS Dispensary for physical doctor checkup and free prescription dispensing."
-      : "Empanelled Tie-Up Facility for physical examination.";
+    triage.secondary_referral_destination = "ESIC Hospital";
+    triage.call_referral_secondary = "ESIC Hospital";
+    triage.secondary_referral_reason = "ESIC Hospital for clinical examination if symptoms persist.";
     triage.recommended_facility_type = "104 Health Helpline (Tele-Doctor)";
     triage.recommended_action = "Transfer call to 104 Health Helpline for tele-doctor consultation.";
     return triage;
   }
 
-
-
-  // 10. ESIC Hospital
-  if (referral.includes("hospital") || triage.urgency_level === "Urgent" || triage.urgency_level === "Emergency") {
-    triage.call_108 = false;
-    triage.is_dual_protocol = true;
-    triage.referral_destination = "ESIC Hospital";
-    triage.referral_reason = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
-    triage.secondary_referral_destination = "104 Health Helpline";
-    triage.secondary_referral_reason = "104 Health Helpline tele-doctor for interim symptom guidance and first aid.";
-    triage.recommended_facility_type = "Nearest ESIC Hospital / Emergency Casualty";
-    triage.recommended_action = "Advise patient to proceed immediately to the nearest ESIC Hospital casualty or urgent OPD today.";
-    return triage;
-  }
-
-  // 11. ESIS Dispensary (Open Hours)
+  // 7. Non-Emergency Default: Refer to ESIC Hospital (within 25km) or District/Tie-up Hospital
   triage.call_108 = false;
   triage.is_dual_protocol = true;
-  triage.referral_destination = "ESIS Dispensary";
-  triage.referral_reason = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";
+  triage.referral_destination = "ESIC Hospital";
+  triage.call_referral_primary = "ESIC Hospital";
+  triage.referral_reason = "Non-emergency clinical consultation. Guide patient to ESIC Hospital or nearest district / tie-up health facility.";
   triage.secondary_referral_destination = "104 Health Helpline";
-  triage.secondary_referral_reason = "104 Health Helpline for telephonic doctor advice.";
-  triage.recommended_facility_type = "ESIS Dispensary Primary Care";
-  triage.recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours for doctor consultation and routine prescription.";
+  triage.call_referral_secondary = "104 Health Helpline";
+  triage.secondary_referral_reason = "104 Health Helpline for 24x7 tele-doctor consultation over the phone.";
+  triage.recommended_facility_type = "ESIC Hospital / District Healthcare";
+  triage.recommended_action = "Guide patient to the nearest ESIC Hospital (if within 25km) or district/tie-up hospital for clinical checkup.";
   return triage;
 }
 

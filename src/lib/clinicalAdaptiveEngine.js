@@ -2915,7 +2915,7 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
   if (currentStage !== "symptom") {
     if (/\b(ha|haan|yes|yep|present|hai|ji haan)\b/i.test(text)) {
       probingAnswer = "Affirmative (Yes)";
-    } else if (!text.includes("not feeling well") && /\b(nahi|no|none|nahi hai|kuch nahi|not present)\b/i.test(text)) {
+    } else if (!text.includes("not feeling well") && /\b(nahi|no|not|none|nahi hai|kuch nahi|not present|nah|nope|nhi|na|negative|does not|doesn't|nil|no radiation)\b/i.test(text)) {
       probingAnswer = "Negative (No / None)";
     }
   }

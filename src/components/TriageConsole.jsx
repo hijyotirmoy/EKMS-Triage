@@ -313,14 +313,23 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       ? "A2"
       : "A1";
 
+    let ipGeo = null;
+    try {
+      const cached = sessionStorage.getItem("ekms_agent_geo_telemetry");
+      if (cached) ipGeo = JSON.parse(cached);
+    } catch (e) {}
+
     const payload = {
       ...form,
       agent_id: agentCode,
       symptom_notes: compiledNotes,
       age: form.age === "" ? null : Number(form.age),
       severity_reported: Number(form.severity_reported),
-      latitude: form.latitude === "" ? null : Number(form.latitude),
-      longitude: form.longitude === "" ? null : Number(form.longitude),
+      latitude: form.latitude !== "" && form.latitude != null ? Number(form.latitude) : null,
+      longitude: form.longitude !== "" && form.longitude != null ? Number(form.longitude) : null,
+      district: form.district ? String(form.district).trim() : null,
+      pincode: form.pincode ? String(form.pincode).trim() : null,
+      city: form.city ? String(form.city).trim() : null,
       ekms_ai_context: activeContext,
       source_app: "console",
     };
@@ -750,7 +759,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                 onStopManualRecording={callSession?.stopManualRecording}
               />
             ) : (
-              <TriageResultPanel result={result} loading={loading} callerIntake={form} currentAgent={currentAgent} />
+              <TriageResultPanel
+                result={result}
+                loading={loading}
+                callerIntake={form}
+                currentAgent={currentAgent}
+                onUpdatePincode={(newPin) => {
+                  if (newPin) {
+                    setForm((f) => ({ ...f, pincode: newPin }));
+                  }
+                }}
+              />
             )}
 
             {/* Mobile Caller Consultation History - rendered AFTER Triage Outcome / Call Transcript on mobile (< lg) */}

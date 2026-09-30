@@ -173,8 +173,8 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     const rawText = (textToSend || inputText).trim();
     if (!rawText || loading) return;
 
-    // Reject silence/subtitle hallucinations
-    if (isWhisperHallucination(rawText)) {
+    // Reject silence/subtitle hallucinations ONLY for speech recognition stream
+    if (isFromSpeech && isWhisperHallucination(rawText)) {
       return;
     }
 

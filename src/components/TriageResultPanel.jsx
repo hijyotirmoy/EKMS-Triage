@@ -19,6 +19,7 @@ import {
   Sparkles,
   RotateCcw,
   SlidersHorizontal,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
@@ -218,12 +219,6 @@ export function resolveDirectiveIds(t, result) {
     result?.ekms_ai_context?.triageState?.referralDestination ||
     result?.ekms_ai_context?.referralDestination;
 
-  // RULE: If off-hours (after 4 PM to 10 AM) and NO emergency:
-  // Refer to 104 Health Helpline FIRST!
-  if (isOffHours && !isEmergency && !isNacoHIV && !t?.is_psychiatric && !/tie.?up|empanelled/i.test(primaryDest || "")) {
-    primaryDest = "104 Health Helpline";
-  }
-
   if (!primaryDest) {
     if (isNacoHIV) {
       primaryDest = "NACO 1097 Helpline";
@@ -357,12 +352,66 @@ const Loading = () => (
   </div>
 );
 
-export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent }) => {
+export const TriageResultPanel = ({
+  result,
+  loading,
+  callerIntake,
+  currentAgent,
+  onUpdatePincode,
+  onRunTriageWithPincode,
+}) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
 
   const { triage: t, nearest_facilities: facs, resolved_location: loc } = result;
   const s = urgencyStyle(t.urgency_level);
+
+  const [searchPincode, setSearchPincode] = useState("");
+  const [searchedFacilities, setSearchedFacilities] = useState(null);
+  const [searchedLocation, setSearchedLocation] = useState(null);
+  const [isSearchingFacilities, setIsSearchingFacilities] = useState(false);
+
+  const handleFacilitySearch = async (targetQuery) => {
+    const query = String(targetQuery ?? searchPincode).trim();
+    if (!query) {
+      return toast.error("Please enter a 6-digit Assam PIN code or District");
+    }
+
+    setIsSearchingFacilities(true);
+    try {
+      const isSevere = t.urgency_level === "Emergency" || t.call_108;
+      const isPin = /^\d{6}$/.test(query);
+      const url = isPin
+        ? `/api/facilities/nearest?pincode=${encodeURIComponent(query)}&severe=${isSevere}`
+        : `/api/facilities/nearest?district=${encodeURIComponent(query)}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch facilities");
+      const data = await res.json();
+
+      setSearchedFacilities(data.nearest_facilities || []);
+      setSearchedLocation(data.resolved_location || null);
+
+      if (onUpdatePincode) {
+        onUpdatePincode(isPin ? query : (data.resolved_location?.pincode || query));
+      }
+
+      if (data.nearest_facilities?.length > 0) {
+        toast.success(`Found ${data.nearest_facilities.length} facilities near ${query}!`);
+      } else {
+        toast.info(`No facilities found within 50 KM of ${query}.`);
+      }
+    } catch (err) {
+      console.error("Search facilities error:", err);
+      toast.error("Could not load facilities for this location.");
+    } finally {
+      setIsSearchingFacilities(false);
+    }
+  };
+
+  const effectiveLoc = searchedLocation || loc;
+  const effectiveRawFacs =
+    searchedFacilities !== null ? searchedFacilities : (Array.isArray(facs) ? facs : []);
 
   const directiveIds = useMemo(() => {
     return resolveDirectiveIds(t, result);
@@ -387,10 +436,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent 
 
   // Dynamically organize facilities with clear categorization badges and all 4 facility types
   const dynamicFacilities = useMemo(() => {
-    const effectiveFacs =
-      Array.isArray(facs) && facs.length > 0
-        ? facs
-        : rankNearestFacilities(loc || { pincode: "781022" }, defaultFacilities, 6);
+    const effectiveFacs = effectiveRawFacs;
 
     if (!effectiveFacs || effectiveFacs.length === 0) return [];
 
@@ -415,75 +461,32 @@ export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent 
       return "bg-secondary/80 border-border/70 text-foreground/90 font-bold";
     };
 
-    // Tie-Up hospital positioning rule:
-    // If agent selects to refer to Tie-Up (activeDirective.id === "TIE_UP_FACILITY"), Tie-Up comes to the TOP (Position 1).
-    // Otherwise, User hierarchy:
-    // 1. ESIC Hospital (if available within 100km, else Nearest Hospital)
-    // 2. Govt District Hospital
-    // 3. ESIS Dispensary (shown above tie-up even if closed)
-    // 4 & 5. Next nearest open facilities within 100km
-    // 6. ESIC Tie-Up Hospital (at the last position / below dispensary)
-    const isTieUpSelected = activeDirective.id === "TIE_UP_FACILITY";
+    const byDistance = (a, b) => {
+      const distA = a.distance_km != null ? a.distance_km : 9999;
+      const distB = b.distance_km != null ? b.distance_km : 9999;
+      return distA - distB;
+    };
 
-    let orderedFacs = [];
+    let orderedFacs = [...effectiveFacs];
 
-    if (isTieUpSelected) {
-      // 1. Tie-Up selected -> Put nearest Tie-Up facility at the very top (Position 1)
-      const tieUps = effectiveFacs.filter(isTieUp);
-      const nonTieUps = effectiveFacs.filter((f) => !isTieUp(f));
+    if (manualDirectiveId === "TIE_UP_FACILITY" || activeDirective.id === "TIE_UP_FACILITY") {
+      const tieUps = effectiveFacs.filter(isTieUp).sort(byDistance);
+      const nonTieUps = effectiveFacs.filter((f) => !isTieUp(f)).sort(byDistance);
       orderedFacs = [...tieUps, ...nonTieUps].slice(0, 6);
+    } else if (manualDirectiveId === "DIST_HOSPITAL" || activeDirective.id === "DIST_HOSPITAL") {
+      const distHosps = effectiveFacs.filter(isGovtDistrictHospital).sort(byDistance);
+      const others = effectiveFacs.filter((f) => !isGovtDistrictHospital(f)).sort(byDistance);
+      orderedFacs = [...distHosps, ...others].slice(0, 6);
+    } else if (manualDirectiveId === "ESIC_HOSPITAL" || activeDirective.id === "ESIC_HOSPITAL") {
+      const esicHosps = effectiveFacs.filter(isEsicHospital).sort(byDistance);
+      const others = effectiveFacs.filter((f) => !isEsicHospital(f)).sort(byDistance);
+      orderedFacs = [...esicHosps, ...others].slice(0, 6);
+    } else if (manualDirectiveId === "ESIS_DISPENSARY" || activeDirective.id === "ESIS_DISPENSARY") {
+      const dispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
+      const others = effectiveFacs.filter((f) => !isDispensary(f)).sort(byDistance);
+      orderedFacs = [...dispensaries, ...others].slice(0, 6);
     } else {
-      const esicHosp = effectiveFacs.find(isEsicHospital);
-      const govtHosp = effectiveFacs.find(isGovtDistrictHospital);
-      const disp = effectiveFacs.find(isDispensary);
-      const tieUp = effectiveFacs.find(isTieUp);
-
-      const chosen = [];
-      const chosenKeys = new Set();
-      const add = (f) => {
-        if (!f) return;
-        const key = f.id || f.name;
-        if (!chosenKeys.has(key)) {
-          chosen.push(f);
-          chosenKeys.add(key);
-        }
-      };
-
-      // 1. ESIC Hospital
-      add(esicHosp);
-      // 2. Govt District Hospital
-      add(govtHosp);
-      // 3. Dispensary (shown above tie-up even if closed!)
-      add(disp);
-
-      // 4 & 5. Other non-tie-up facilities <= 100km
-      const nonTieUpsWithin100 = effectiveFacs.filter(
-        (f) => !isTieUp(f) && (f.distance_km == null || f.distance_km <= 100)
-      );
-      for (const f of nonTieUpsWithin100) {
-        if (chosen.length >= 5) break;
-        add(f);
-      }
-
-      // If still fewer than 5, add other non-tie-ups
-      const allNonTieUps = effectiveFacs.filter((f) => !isTieUp(f));
-      for (const f of allNonTieUps) {
-        if (chosen.length >= 5) break;
-        add(f);
-      }
-
-      // 6. Tie-Up Hospital at the last position (below dispensary)
-      if (tieUp) {
-        add(tieUp);
-      }
-
-      // If still fewer than 6, fill with any remaining
-      for (const f of effectiveFacs) {
-        if (chosen.length >= 6) break;
-        add(f);
-      }
-
-      orderedFacs = chosen.length > 0 ? chosen.slice(0, 6) : effectiveFacs.slice(0, 6);
+      orderedFacs = [...effectiveFacs].sort(byDistance);
     }
 
     return orderedFacs.map((f) => ({
@@ -491,7 +494,7 @@ export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent 
       facility_tag: getTag(f),
       category_style: getCategoryStyle(f),
     }));
-  }, [facs, loc, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
+  }, [effectiveRawFacs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -940,16 +943,16 @@ export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent 
               )}
             </p>
           </div>
-          {loc && (
+          {effectiveLoc && (
             <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-foreground/80 shadow-2xs">
               <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span>{loc.matched}</span>
+              <span>{effectiveLoc.isNoLocation ? "No Location Provided" : effectiveLoc.matched?.replace(/\b(78\d{4})\b/g, "").replace(/\(\s*\)/g, "").replace(/\s+/g, " ").trim()}</span>
             </div>
           )}
         </div>
 
         {/* Weekend Operating Notice */}
-        {isWeekend && (
+        {isWeekend && dynamicFacilities?.length > 0 && (
           <div className="mt-3.5 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-50/80 dark:bg-amber-950/30 p-3 text-xs text-amber-950 dark:text-amber-200 shadow-2xs">
             <AlertOctagon className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
             <div>
@@ -964,93 +967,204 @@ export const TriageResultPanel = ({ result, loading, callerIntake, currentAgent 
         )}
 
         {dynamicFacilities?.length ? (
-          <ul className="mt-4 space-y-3">
-            {dynamicFacilities.map((f, i) => (
-              <li
-                key={f.id || f.name + i}
-                data-testid="facility-card-item"
-                className="group rounded-xl border border-border/70 bg-card/60 hover:bg-card hover:border-primary/50 p-4 transition-all duration-200 shadow-2xs"
+          <>
+            {/* Inline search bar to change/search another pincode anytime */}
+            <div className="mt-3.5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-secondary/40 p-2.5 text-xs shadow-2xs">
+              <div className="flex items-center gap-1.5 text-foreground font-semibold">
+                <Search className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Search / Change Location:</span>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleFacilitySearch();
+                }}
+                className="flex items-center gap-1.5 flex-1 max-w-md ml-auto"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                      <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
-                        {f.facility_tag}
-                      </span>
-                      {f.is_exact_pincode ? (
-                        <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
-                          🎯 Pincode Match ({f.pincode})
+                <input
+                  type="text"
+                  value={searchPincode}
+                  onChange={(e) => setSearchPincode(e.target.value)}
+                  placeholder="Enter PIN code (e.g. 782435) or District (e.g. Hojai)..."
+                  className="flex-1 min-w-0 rounded-lg border border-border/80 bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={isSearchingFacilities || !searchPincode.trim()}
+                  className="flex items-center gap-1 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0 shadow-2xs"
+                >
+                  {isSearchingFacilities ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Search className="h-3 w-3" />
+                  )}
+                  <span>Search</span>
+                </button>
+              </form>
+            </div>
+
+            <ul className="mt-3 space-y-3">
+              {dynamicFacilities.map((f, i) => {
+                const cleanDisplayAddress = f.address
+                  ? f.address
+                      .replace(/\b(pin|pincode)?\s*[-:,]?\s*78\d{4}\b/gi, "")
+                      .replace(/,\s*,/g, ",")
+                      .replace(/\s*,\s*$/g, "")
+                      .trim()
+                  : "";
+
+                return (
+                  <li
+                    key={f.id || f.name + i}
+                    data-testid="facility-card-item"
+                    className="group rounded-xl border border-border/70 bg-card/60 hover:bg-card hover:border-primary/50 p-4 transition-all duration-200 shadow-2xs"
+                  >
+                    <div className="flex flex-col space-y-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
+                          {f.facility_tag}
                         </span>
-                      ) : f.is_nearby_pincode ? (
-                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                          📍 Nearby Area ({f.pincode})
-                        </span>
-                      ) : null}
-                      {(f.is_dispensary || isDispensary(f)) && isWeekend && (
-                        <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
-                          Closed on Weekends (OPD Mon–Fri 10AM–3PM)
-                        </span>
+                        {f.is_exact_pincode ? (
+                          <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                            🎯 Local Area Match
+                          </span>
+                        ) : f.is_nearby_pincode ? (
+                          <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                            📍 Nearby Facility
+                          </span>
+                        ) : null}
+                        {(f.is_dispensary || isDispensary(f)) && isWeekend && (
+                          <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
+                            Closed on Weekends (OPD Mon–Fri 10AM–3PM)
+                          </span>
+                        )}
+                        {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
+                          <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                            OPD: Mon–Fri 10:00 AM – 3:00 PM
+                          </span>
+                        )}
+                        {(f.is_hospital || isHospital(f)) && (
+                          <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
+                            OPD: 10:00 AM – 4:00 PM · IPD &amp; Emergency: 24x7
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="flex items-center gap-2 text-sm font-bold text-foreground">
+                        <Building2 className="h-4 w-4 shrink-0 text-primary" />
+                        <span>{f.name}</span>
+                      </p>
+
+                      {cleanDisplayAddress && (
+                        <p className="text-xs leading-relaxed text-muted-foreground">{cleanDisplayAddress}</p>
                       )}
-                      {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
-                        <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                          OPD: Mon–Fri 10:00 AM – 3:00 PM
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                        <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
+                          {f.facility_type}
                         </span>
-                      )}
-                      {(f.is_hospital || isHospital(f)) && (
-                        <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
-                          OPD: 10:00 AM – 4:00 PM · IPD &amp; Emergency: 24x7
-                        </span>
-                      )}
+                        {f.district && (
+                          <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
+                            {f.district}
+                          </span>
+                        )}
+                        {f.phone && (
+                          <span className="mono text-primary font-bold">{f.phone}</span>
+                        )}
+                      </div>
                     </div>
-                    <p className="flex items-center gap-2 text-sm font-bold text-foreground">
-                      <Building2 className="h-4 w-4 shrink-0 text-primary" />
-                      <span className="truncate">{f.name}</span>
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{f.address}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
-                        {f.facility_type}
-                      </span>
-                      <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                        {f.district}
-                      </span>
-                      {f.pincode && (
-                        <span className="mono text-muted-foreground/80 font-bold">{f.pincode}</span>
-                      )}
-                      {f.phone && (
-                        <span className="mono text-primary font-bold">{f.phone}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="mono text-lg font-bold text-primary">{f.distance_km} km</p>
-                    <div className="mt-2 flex justify-end gap-1.5">
-                      <button
-                        data-testid="facility-send-sms-button"
-                        onClick={() => dispatchSms(f)}
-                        title="Copy address to SMS the caller"
-                        className="rounded-lg border border-border/80 bg-background p-2 text-muted-foreground transition-colors hover:border-primary hover:text-primary cursor-pointer shadow-2xs"
-                      >
-                        <MessageSquare className="h-3.5 w-3.5" />
-                      </button>
-                      <a
-                        href={f.maps_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        data-testid="facility-maps-link"
-                        title="Open in Google Maps"
-                        className="rounded-lg border border-border/80 bg-background p-2 text-muted-foreground transition-colors hover:border-primary hover:text-primary cursor-pointer shadow-2xs"
-                      >
-                        <Navigation className="h-3.5 w-3.5" />
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         ) : (
-          <p className="mt-4 text-sm text-muted-foreground">No open facilities found near this location.</p>
+          /* Interactive Search Card when no pincode/location was provided */
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 p-5 space-y-4 shadow-xs">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+                <MapPin className="h-5 w-5 text-amber-700" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-amber-950 dark:text-amber-200">
+                  No PIN Code Entered by Caller
+                </h4>
+                <p className="text-xs text-amber-900/90 dark:text-amber-300 leading-relaxed">
+                  Triage clinical decision is evaluated above. To view and rank nearest healthcare facilities in ascending distance order, please enter the caller&apos;s 6-digit Assam PIN code or District below:
+                </p>
+              </div>
+            </div>
+
+            {/* Pincode Search Bar */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleFacilitySearch();
+              }}
+              className="flex flex-wrap items-center gap-2 pt-1"
+            >
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchPincode}
+                  onChange={(e) => setSearchPincode(e.target.value)}
+                  placeholder="Enter 6-digit PIN code (e.g. 782435, 781006) or District (e.g. Hojai)..."
+                  className="w-full rounded-lg border border-border/80 bg-background pl-9 pr-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-primary shadow-2xs"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSearchingFacilities || !searchPincode.trim()}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-xs hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {isSearchingFacilities ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Search className="h-3.5 w-3.5" />
+                )}
+                <span>Find Facilities</span>
+              </button>
+            </form>
+
+            {/* Quick Assam Location Shortcuts */}
+            <div className="space-y-2 pt-1">
+              <span className="text-[10.5px] font-bold uppercase tracking-wider text-amber-950 dark:text-amber-300 block">
+                Quick Location Shortcuts (Click to load):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { name: "Hojai", pin: "782435" },
+                  { name: "Guwahati / Beltola", pin: "781022" },
+                  { name: "Dispur", pin: "781006" },
+                  { name: "Dibrugarh", pin: "786001" },
+                  { name: "Silchar", pin: "788001" },
+                  { name: "Tezpur", pin: "784001" },
+                  { name: "Tinsukia", pin: "786125" },
+                  { name: "Bongaigaon", pin: "783380" },
+                  { name: "Nagaon", pin: "782001" },
+                  { name: "Jorhat", pin: "785001" },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setSearchPincode(item.pin);
+                      handleFacilitySearch(item.pin);
+                    }}
+                    className="flex items-center gap-1 rounded-full border border-amber-600/30 bg-white/90 dark:bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:border-primary hover:bg-primary/10 transition-all active:scale-95 cursor-pointer shadow-2xs"
+                  >
+                    <span>📍</span>
+                    <span>{item.name} ({item.pin})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground border-t border-amber-500/20 pt-2.5">
+              💡 Tip: You can also enter the PIN code in the <strong>Caller Intake</strong> form on the left and click <strong>&quot;Run triage&quot;</strong> again.
+            </p>
+          </div>
         )}
       </div>
     </div>
