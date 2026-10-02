@@ -3,232 +3,214 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EKMS Emergency & Clinical Triage Platform — System Overview & Architecture</title>
+  <title>EKMS Triage — System Architecture & Workflow Document</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-    :root {
-      --primary: #059669;
-      --primary-dark: #047857;
-      --primary-light: #ecfdf5;
-      --emergency: #dc2626;
-      --emergency-bg: #fef2f2;
-      --urgent: #d97706;
-      --urgent-bg: #fffbeb;
-      --routine: #2563eb;
-      --routine-bg: #eff6ff;
-      --selfcare: #059669;
-      --selfcare-bg: #ecfdf5;
-      --text-main: #0f172a;
-      --text-muted: #475569;
-      --border: #cbd5e1;
-      --card-bg: #ffffff;
-      --bg-subtle: #f8fafc;
+    @page {
+      size: A4 portrait;
+      margin: 12mm 15mm 12mm 15mm;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #0f172a;
       background-color: #f1f5f9;
-      line-height: 1.6;
-      font-size: 13.5px;
+      line-height: 1.5;
+      font-size: 12.5px;
       -webkit-font-smoothing: antialiased;
     }
 
-    .page-container {
-      max-width: 920px;
-      margin: 30px auto;
-      background: #ffffff;
-      padding: 50px 60px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
-      border-radius: 12px;
-      border: 1px solid #e2e8f0;
+    .page-wrapper {
+      max-width: 840px;
+      margin: 0 auto;
+      padding: 24px 0;
     }
 
-    /* Header & Branding */
-    .doc-header {
-      border-bottom: 2px solid #e2e8f0;
-      padding-bottom: 25px;
-      margin-bottom: 35px;
+    .doc-page {
+      background: #ffffff;
+      width: 100%;
+      min-height: 1120px;
+      padding: 44px 48px 36px 48px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.07);
+      border-radius: 4px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+      break-after: page;
+    }
+
+    .doc-page:last-child {
+      margin-bottom: 0;
+      page-break-after: avoid;
+      break-after: avoid;
+    }
+
+    /* Top Toolbar */
+    .print-bar {
+      background: #0f172a;
+      color: white;
+      padding: 12px 24px;
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.2);
     }
 
-    .badge-govt {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--primary-dark);
-      background: var(--primary-light);
-      padding: 4px 10px;
+    .print-tip {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .print-tip strong {
+      color: #38bdf8;
+    }
+
+    .print-btn {
+      background: #059669;
+      color: white;
+      border: none;
+      padding: 8px 20px;
       border-radius: 6px;
-      border: 1px solid #a7f3d0;
-      margin-bottom: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 6px rgba(5, 150, 105, 0.3);
+    }
+    .print-btn:hover {
+      background: #047857;
+      transform: translateY(-1px);
     }
 
-    .doc-title {
+    /* Header Bar on each page */
+    .page-header-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 500;
+      color: #64748b;
+      margin-bottom: 24px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 8px;
+      letter-spacing: 0.01em;
+    }
+
+    .doc-main-title {
       font-size: 26px;
       font-weight: 800;
       color: #0f172a;
-      letter-spacing: -0.02em;
-      line-height: 1.25;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 12px;
     }
 
-    .doc-subtitle {
-      font-size: 14px;
-      color: var(--text-muted);
-      margin-top: 6px;
-      font-weight: 500;
+    .doc-main-subtitle {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.55;
+      margin-bottom: 24px;
     }
 
-    .meta-box {
-      text-align: right;
-      font-size: 11.5px;
-      color: var(--text-muted);
-      line-height: 1.5;
-      background: var(--bg-subtle);
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid #e2e8f0;
+    .divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin-bottom: 28px;
     }
 
-    .meta-box strong {
-      color: #0f172a;
-    }
-
-    /* Section Typography */
-    h2 {
-      font-size: 17.5px;
+    /* Section Headings */
+    .sec-heading {
+      font-size: 16.5px;
       font-weight: 800;
       color: #0f172a;
-      margin-top: 36px;
-      margin-bottom: 14px;
-      padding-bottom: 8px;
-      border-bottom: 1.5px solid #e2e8f0;
       display: flex;
       align-items: center;
       gap: 10px;
+      margin-top: 24px;
+      margin-bottom: 14px;
+      letter-spacing: -0.01em;
     }
 
-    h2 .sec-num {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 24px;
-      height: 24px;
-      background: var(--primary);
-      color: white;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    h3 {
-      font-size: 14px;
-      font-weight: 700;
-      color: #1e293b;
-      margin-top: 20px;
-      margin-bottom: 8px;
+    .sec-bar {
+      display: inline-block;
+      width: 4.5px;
+      height: 18px;
+      background: #059669;
+      border-radius: 2px;
     }
 
     p {
-      margin-bottom: 12px;
       color: #334155;
+      font-size: 12.5px;
+      line-height: 1.6;
+      margin-bottom: 14px;
     }
 
-    /* Flowchart / Visual Process Diagram */
-    .diagram-container {
-      background: #f8fafc;
-      border: 1.5px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 22px;
-      margin: 20px 0;
+    /* Blue Highlight Box */
+    .blue-callout {
+      border-left: 3.5px solid #2563eb;
+      background: #f8faff;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 20px 0 24px 0;
     }
 
-    .diagram-title {
-      font-size: 12px;
-      font-weight: 700;
+    .blue-callout-title {
+      font-size: 11px;
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: #64748b;
-      margin-bottom: 16px;
-      display: flex;
-      justify-content: space-between;
+      color: #1d4ed8;
+      margin-bottom: 6px;
     }
 
-    .flow-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .blue-callout-text {
+      font-size: 12px;
+      color: #1e3a8a;
+      line-height: 1.55;
     }
 
-    .flow-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+    /* Orange Warning Box */
+    .orange-callout {
+      border-left: 3.5px solid #f59e0b;
+      background: #fffbeb;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 18px 0 22px 0;
     }
 
-    .flow-card {
-      flex: 1;
-      background: white;
-      border: 1.5px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 12px 14px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-      position: relative;
-    }
-
-    .flow-card.accent-emergency {
-      border-color: #f87171;
-      background: #fff5f5;
-    }
-
-    .flow-card.accent-urgent {
-      border-color: #fbbf24;
-      background: #fffdf5;
-    }
-
-    .flow-card.accent-primary {
-      border-color: #34d399;
-      background: #f0fdf4;
-    }
-
-    .flow-card.accent-blue {
-      border-color: #60a5fa;
-      background: #eff6ff;
-    }
-
-    .flow-card .card-title {
-      font-size: 12.5px;
-      font-weight: 700;
-      color: #0f172a;
+    .orange-callout-title {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #b45309;
+      margin-bottom: 6px;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
-    .flow-card .card-desc {
-      font-size: 11.5px;
-      color: #64748b;
-      margin-top: 4px;
-      line-height: 1.4;
-    }
-
-    .flow-arrow {
-      font-size: 16px;
-      font-weight: 800;
-      color: #94a3b8;
-      text-align: center;
+    .orange-callout-text {
+      font-size: 12px;
+      color: #78350f;
+      line-height: 1.55;
     }
 
     /* Tables */
@@ -236,490 +218,875 @@
       width: 100%;
       border-collapse: collapse;
       margin: 16px 0 24px 0;
-      font-size: 12.5px;
+      font-size: 11.5px;
     }
 
     th {
-      background: #f1f5f9;
+      background: #ffffff;
       color: #0f172a;
       font-weight: 700;
       text-align: left;
       padding: 10px 12px;
-      border: 1px solid #cbd5e1;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    td {
-      padding: 9px 12px;
-      border: 1px solid #e2e8f0;
-      color: #334155;
-      vertical-align: top;
-    }
-
-    tr:nth-child(even) {
-      background: #f8fafc;
-    }
-
-    /* Badges */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 5px;
-    }
-
-    .badge-emergency {
-      background: var(--emergency-bg);
-      color: var(--emergency);
-      border: 1px solid #fecaca;
-    }
-
-    .badge-urgent {
-      background: var(--urgent-bg);
-      color: var(--urgent);
-      border: 1px solid #fde68a;
-    }
-
-    .badge-routine {
-      background: var(--routine-bg);
-      color: var(--routine);
-      border: 1px solid #bfdbfe;
-    }
-
-    .badge-selfcare {
-      background: var(--selfcare-bg);
-      color: var(--selfcare);
-      border: 1px solid #a7f3d0;
-    }
-
-    /* Code Blocks */
-    pre, code {
-      font-family: 'JetBrains Mono', monospace;
+      border-bottom: 1.5px solid #cbd5e1;
       font-size: 11.5px;
     }
 
-    code {
-      background: #f1f5f9;
-      padding: 2px 5px;
-      border-radius: 4px;
-      color: #0f172a;
-      border: 1px solid #e2e8f0;
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+      vertical-align: top;
+      line-height: 1.45;
     }
 
-    pre {
-      background: #0f172a;
-      color: #f8fafc;
-      padding: 14px 16px;
-      border-radius: 8px;
-      overflow-x: auto;
-      margin: 12px 0 18px 0;
-      line-height: 1.5;
+    tr:last-child td {
+      border-bottom: none;
     }
 
-    pre code {
-      background: transparent;
-      padding: 0;
-      border: none;
-      color: #f8fafc;
-    }
-
-    /* Callout Boxes */
-    .callout {
-      border-left: 4px solid var(--primary);
-      background: var(--primary-light);
-      padding: 12px 16px;
-      border-radius: 0 8px 8px 0;
-      margin: 16px 0;
-      font-size: 12.5px;
-    }
-
-    .callout-title {
+    .layer-title {
       font-weight: 700;
-      margin-bottom: 4px;
+      color: #0f172a;
+    }
+
+    /* Flow Diagrams */
+    .diagram-box {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 22px 18px;
+      background: #f8fafc;
+      margin: 16px 0 22px 0;
+    }
+
+    .diagram-title {
+      text-align: center;
+      font-size: 11.5px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 20px;
+    }
+
+    .pipeline-grid {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 14px;
+      align-items: stretch;
+    }
+
+    .pipeline-card {
+      flex: 1;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-top: 3.5px solid #059669;
+      border-radius: 6px;
+      padding: 10px 8px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .pipeline-card.c-blue { border-top-color: #2563eb; }
+    .pipeline-card.c-orange { border-top-color: #f59e0b; }
+    .pipeline-card.c-purple { border-top-color: #7c3aed; }
+
+    .pipeline-card-num {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #0f172a;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    .pipeline-card-desc {
+      font-size: 9.5px;
+      color: #64748b;
+      line-height: 1.35;
+    }
+
+    .pipeline-arrow {
       display: flex;
       align-items: center;
-      gap: 6px;
+      color: #94a3b8;
+      font-size: 14px;
+      font-weight: 700;
     }
 
-    /* Print Specific Styles */
+    .outcome-dispatch-box {
+      background: #ffffff;
+      border: 1.5px solid #10b981;
+      border-radius: 8px;
+      padding: 11px 14px;
+      text-align: center;
+      margin: 0 auto 14px auto;
+      max-width: 440px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .outcome-dispatch-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #065f46;
+      margin-bottom: 2px;
+    }
+    .outcome-dispatch-desc {
+      font-size: 9.5px;
+      color: #047857;
+    }
+
+    .feedback-loop-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 11px 16px;
+      text-align: center;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    .feedback-loop-title {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #1e40af;
+      margin-bottom: 2px;
+    }
+    .feedback-loop-sub {
+      font-size: 9px;
+      color: #3b82f6;
+      margin-bottom: 8px;
+    }
+    .feedback-loop-btns {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 6px;
+    }
+    .fb-btn {
+      background: white;
+      border: 1px solid #fcd34d;
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #b45309;
+    }
+    .feedback-loop-note {
+      font-size: 8.5px;
+      color: #64748b;
+    }
+
+    /* 4-Item Grid */
+    .grid-4-items {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px 24px;
+      margin-top: 18px;
+    }
+    .grid-item-num {
+      font-size: 11px;
+      font-weight: 800;
+      color: #94a3b8;
+      margin-bottom: 2px;
+    }
+    .grid-item-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 3px;
+    }
+    .grid-item-desc {
+      font-size: 11.5px;
+      color: #475569;
+      line-height: 1.45;
+    }
+
+    /* Section 4 Anatomy List */
+    .anatomy-item {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 22px;
+      align-items: start;
+      padding: 13px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .anatomy-item:last-child {
+      border-bottom: none;
+    }
+
+    .preview-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 11px 13px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .preview-tag {
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 3px;
+      display: inline-block;
+    }
+    .preview-headline {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.35;
+    }
+    .preview-caption {
+      font-size: 9.5px;
+      color: #64748b;
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+
+    .anatomy-details-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 3px;
+    }
+    .anatomy-details-desc {
+      font-size: 11.5px;
+      color: #334155;
+      line-height: 1.45;
+      margin-bottom: 6px;
+    }
+
+    .reason-box {
+      border-left: 3px solid #2563eb;
+      background: #f8fafc;
+      padding: 7px 11px;
+      font-size: 11px;
+      color: #334155;
+      border-radius: 0 4px 4px 0;
+      line-height: 1.4;
+    }
+    .reason-box strong {
+      color: #1e3a8a;
+    }
+
+    /* Decision Tree Diagram (Section 5) */
+    .decision-tree-container {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin: 16px 0 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .tree-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 11px;
+      text-align: center;
+      font-weight: 700;
+      color: #334155;
+    }
+    .tree-box-diamond {
+      background: #eff6ff;
+      border: 1.5px solid #3b82f6;
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+    }
+    .tree-branch-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+    }
+    .branch-card-green {
+      background: #f0fdf4;
+      border: 1.5px solid #10b981;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 10.5px;
+    }
+    .branch-card-amber {
+      background: #fffbeb;
+      border: 1.5px solid #f59e0b;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 10.5px;
+    }
+
+    /* Formula Box */
+    .formula-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin: 12px 0 16px 0;
+      text-align: center;
+    }
+    .formula-math {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: #0f172a;
+      letter-spacing: 0.02em;
+      margin-bottom: 3px;
+    }
+    .formula-sub {
+      font-size: 10px;
+      color: #64748b;
+    }
+
+    /* Footer for each page */
+    .page-footer {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 500;
+      color: #64748b;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 10px;
+      margin-top: 20px;
+    }
+
+    /* Print Break Utilities */
     @media print {
       body {
-        background: white;
-        font-size: 11.5pt;
+        background: #ffffff;
       }
-      .page-container {
+      .page-wrapper {
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      .doc-page {
         box-shadow: none;
         border: none;
-        padding: 0;
+        border-radius: 0;
+        padding: 10mm 12mm;
         margin: 0;
-        max-width: 100%;
+        min-height: 270mm;
+        page-break-after: always;
+        break-after: page;
+      }
+      .doc-page:last-child {
+        page-break-after: avoid;
+        break-after: avoid;
       }
       .no-print {
         display: none !important;
       }
-      .page-break {
-        page-break-before: always;
-      }
-      tr, .flow-card, .diagram-container {
-        page-break-inside: avoid;
-      }
-      h2, h3 {
-        page-break-after: avoid;
-      }
-    }
-
-    .print-bar {
-      background: #0f172a;
-      color: white;
-      padding: 12px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 1000;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-    }
-
-    .print-btn {
-      background: #059669;
-      color: white;
-      border: none;
-      padding: 8px 18px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 13px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: background 0.2s;
-    }
-
-    .print-btn:hover {
-      background: #047857;
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Action Bar (Hidden when Printing) -->
+  <!-- Top Sticky Print Bar -->
   <div class="print-bar no-print">
-    <div style="font-weight: 600; font-size: 13.5px;">
-      📄 EKMS Triage Sandbox — System Architecture & Operations Manual
+    <div>
+      <div style="font-weight: 700; font-size: 13.5px;">📄 EKMS Triage — System Architecture & Workflow Document</div>
+      <div class="print-tip">💡 <em>Print Tip:</em> Click the button to generate a clean 7-page PDF. In Chrome/Edge print options, leave margins as default and uncheck headers/footers if needed.</div>
     </div>
     <button class="print-btn" onclick="window.print()">
       🖨️ Print / Save as PDF
     </button>
   </div>
 
-  <div class="page-container">
+  <div class="page-wrapper">
 
-    <!-- Document Header -->
-    <header class="doc-header">
+    <!-- ================= PAGE 1 ================= -->
+    <div class="doc-page">
       <div>
-        <div class="badge-govt">Healthcare Operations Platform · ESIC / ESIS Assam</div>
-        <h1 class="doc-title">EKMS Emergency & Clinical Triage Platform</h1>
-        <p class="doc-subtitle">System Architecture, Clinical Protocols & Operations Overview</p>
-      </div>
-      <div class="meta-box">
-        <div><strong>Release Version:</strong> 2.4</div>
-        <div><strong>Documentation Type:</strong> Technical & Operational</div>
-        <div><strong>Availability:</strong> 99.99% High-Availability</div>
-        <div><strong>Coverage:</strong> Statewide (All 34 Districts)</div>
-      </div>
-    </header>
-
-    <!-- 1. Executive Summary -->
-    <section>
-      <h2><span class="sec-num">1</span> Executive Summary & Mission Overview</h2>
-      <p>
-        The <strong>EKMS Triage Platform</strong> is an enterprise clinical decision support and proximity-routing engine designed to streamline emergency intake, patient severity assessment, and facility navigation for the <strong>Employees' State Insurance Scheme (ESIS)</strong> healthcare network in Assam.
-      </p>
-
-      <div class="callout">
-        <div class="callout-title">🎯 Core System Capabilities</div>
-        <div>
-          • <strong>Sub-Second Clinical Triage:</strong> Evaluates reported symptoms, assigns clinical urgency tiers (1 to 10 severity scale), and generates bilingual summaries (English & Hindi) in real time.<br>
-          • <strong>Intelligent LLM Reasoning Engine:</strong> Employs a high-availability multi-LLM architecture with automatic load balancing and zero-downtime failover.<br>
-          • <strong>Geodesic Proximity Engine:</strong> Real-time Haversine distance ranking across 98 authentic ESIC/ESIS hospitals, model dispensaries, and empanelled private tie-up facilities.<br>
-          • <strong>Real-Time Cloud Synchronization:</strong> Centralized cloud database synchronization for cases, live facilities directory, caller history, and multi-agent coordination.
-        </div>
-      </div>
-    </section>
-
-    <!-- 2. End-to-End System Process Flow -->
-    <section>
-      <h2><span class="sec-num">2</span> End-to-End System Process Flow</h2>
-      <p>The diagram below illustrates the sequential workflow from initial call ingestion to clinical routing and case archival:</p>
-
-      <div class="diagram-container">
-        <div class="diagram-title">
-          <span>End-to-End Operational Workflow</span>
-          <span>Phases 1 to 5</span>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 1 of 7</span>
         </div>
 
-        <div class="flow-grid">
-          <!-- Phase 1 & 2 -->
-          <div class="flow-row">
-            <div class="flow-card accent-primary">
-              <div class="card-title">1. Intake & Speech Recognition</div>
-              <div class="card-desc">Call ingestion with live multi-lingual speech-to-text transcription (Hinglish/Hindi/English) and demographic intake capture.</div>
+        <h1 class="doc-main-title">EKMS Triage — System Architecture & Workflow</h1>
+        <p class="doc-main-subtitle">
+          A comprehensive operational and clinical guide on call evaluation, AI inference cascade, geospatial facility routing, and outcome generation.
+        </p>
+
+        <div class="divider"></div>
+
+        <div class="sec-heading">
+          <span class="sec-bar"></span>
+          <span>1. Executive Overview</span>
+        </div>
+
+        <p>
+          <strong>EKMS Triage</strong> is an automated clinical navigation system built for helpline operators managing healthcare inquiries from insured workers and their dependents. It provides real-time algorithmic decision support, symptom probing, danger sign detection, and geospatial facility dispatch.
+        </p>
+
+        <div class="blue-callout">
+          <div class="blue-callout-title">Core Operating Philosophy: Non-Doctor Assistance</div>
+          <div class="blue-callout-text">
+            Call operators are non-physicians. The system strictly analyzes reported symptoms to establish clinical urgency and route the call to the right destination. It does not fabricate disease diagnoses (e.g., Kidney Stone, Appendicitis) and never prescribes medications unless explicitly stated by the caller.
+          </div>
+        </div>
+
+        <div class="sec-heading">
+          <span class="sec-bar"></span>
+          <span>2. Tools and AI Models Used</span>
+        </div>
+
+        <p>
+          The platform combines a multi-provider AI cascade with deterministic clinical rules to guarantee high accuracy, sub-second responses, and 100% operational uptime. Zero secret credentials, private keys, or internal endpoints are exposed.
+        </p>
+      </div>
+
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
+
+
+    <!-- ================= PAGE 2 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 2 of 7</span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25%;">Technology / Layer</th>
+              <th style="width: 32%;">Components Used</th>
+              <th style="width: 43%;">Operational Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="layer-title">Real-Time AI Inference Cascade</td>
+              <td>Ultra-Fast High-Throughput LLMs</td>
+              <td>Sub-500ms conversational inference. Dynamically formulates single probing questions, extracts symptom duration/triggers, and delivers instant suggested reply chips.</td>
+            </tr>
+            <tr>
+              <td class="layer-title">Clinical Cross-Validation AI</td>
+              <td>High-Accuracy Clinical Validation LLMs</td>
+              <td>Secondary clinical safety screening, red-flag cross-verification, and high-complexity severity validation.</td>
+            </tr>
+            <tr>
+              <td class="layer-title">Speech Recognition & Voice</td>
+              <td>Browser Web Speech Recognition API</td>
+              <td>Instant bilingual voice transcription (English, Hindi, and Hinglish). Audio is converted directly in the operator's browser without external audio file storage.</td>
+            </tr>
+            <tr>
+              <td class="layer-title">Full-Stack Application Core</td>
+              <td>Next.js App Router, React, Tailwind CSS</td>
+              <td>Server-side rendering, secure API routes, real-time reactive interface, and zero-layout-shift UI components.</td>
+            </tr>
+            <tr>
+              <td class="layer-title">Geospatial Intelligence Engine</td>
+              <td>Haversine Distance Algorithm, Pincode GIS Database</td>
+              <td>High-precision mathematical distance calculation between caller location and national ESIC/ESIS facilities, enforcing strict radius rules.</td>
+            </tr>
+            <tr>
+              <td class="layer-title">State Persistence & Feedback Cache</td>
+              <td>Cloud Database & In-Memory High-Speed Cache</td>
+              <td>Real-time synchronization of call sessions, case histories, and dynamic human feedback rules across all operator consoles.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="sec-heading" style="margin-top: 32px;">
+          <span class="sec-bar"></span>
+          <span>3. End-to-End Caller-to-Dispatch Flow</span>
+        </div>
+
+        <p>
+          The platform processes each call through a structured 5-stage pipeline, taking raw spoken caller input and translating it into a verified facility referral.
+        </p>
+      </div>
+
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
+
+
+    <!-- ================= PAGE 3 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 3 of 7</span>
+        </div>
+
+        <div class="diagram-box">
+          <div class="diagram-title">System Execution Architecture & Pipeline</div>
+
+          <div class="pipeline-grid">
+            <div class="pipeline-card">
+              <div class="pipeline-card-num">1. INTAKE</div>
+              <div class="pipeline-card-desc">Caller Speaks Symptoms<br>(Voice / Manual Typing)</div>
             </div>
-            <div class="flow-arrow">➔</div>
-            <div class="flow-card accent-blue">
-              <div class="card-title">2. Caller Encounter History</div>
-              <div class="card-desc">Automatic query matches caller contact number with past recorded triage encounters, previous routings, and chronic conditions.</div>
+            <div class="pipeline-arrow">➔</div>
+            <div class="pipeline-card c-blue">
+              <div class="pipeline-card-num">2. PROBING ENGINE</div>
+              <div class="pipeline-card-desc">1 Question at a Time<br>Eng + Hinglish (~400ms)</div>
+            </div>
+            <div class="pipeline-arrow">➔</div>
+            <div class="pipeline-card c-orange">
+              <div class="pipeline-card-num">3. SEVERITY EVALUATION</div>
+              <div class="pipeline-card-desc">Calculate Acuity (1–10)<br>Emergency / Urgent / Routine</div>
+            </div>
+            <div class="pipeline-arrow">➔</div>
+            <div class="pipeline-card c-purple">
+              <div class="pipeline-card-num">4. 15 KM RADIUS FILTER</div>
+              <div class="pipeline-card-desc">Pincode Distance Matrix<br>ESIC vs Tie-Up Priority</div>
             </div>
           </div>
 
-          <div class="flow-arrow" style="margin: 4px 0;">⬇</div>
+          <div style="text-align: center; font-size: 13px; color: #94a3b8; margin: 6px 0;">⬇</div>
 
-          <!-- Phase 3 & 4 -->
-          <div class="flow-row">
-            <div class="flow-card accent-emergency">
-              <div class="card-title">3. LLM Clinical Assessment</div>
-              <div class="card-desc">The LLM Reasoning Engine computes clinical urgency (1-10 score), isolates red-flag symptoms, and generates bilingual clinical summaries.</div>
-            </div>
-            <div class="flow-arrow">➔</div>
-            <div class="flow-card accent-urgent">
-              <div class="card-title">4. Geodesic Facility Ranking</div>
-              <div class="card-desc">Caller coordinates / PIN code resolved against 98 registered facilities via Haversine geodesic calculation to rank top 6 nearest centers.</div>
-            </div>
+          <div class="outcome-dispatch-box">
+            <div class="outcome-dispatch-title">5. RECOMMENDED DISPATCH OUTCOME</div>
+            <div class="outcome-dispatch-desc">Primary Facility 01 + Secondary Option 02 · Action Steps Checklist & Directions</div>
           </div>
 
-          <div class="flow-arrow" style="margin: 4px 0;">⬇</div>
+          <div style="text-align: center; font-size: 13px; color: #94a3b8; margin: 4px 0;">⬇</div>
 
-          <!-- Phase 5 -->
-          <div class="flow-row">
-            <div class="flow-card accent-primary" style="flex: 2;">
-              <div class="card-title">5. Case Archival & Dispatch Action</div>
-              <div class="card-desc">Case saved to secure cloud database with unique reference code (e.g. <code>CAD1KM00412E</code>). Caller provided with SMS address, turn-by-turn Maps link, or immediate 108 ambulance dispatch.</div>
+          <div class="feedback-loop-box">
+            <div class="feedback-loop-title">HUMAN-IN-THE-LOOP FEEDBACK & UNLEARNING ENGINE</div>
+            <div class="feedback-loop-sub">[Note: Feature Under Active Development / Continuous Improvement]</div>
+            <div class="feedback-loop-btns">
+              <div class="fb-btn">👍 Accurate Outcome<br><span style="font-size: 8px; font-weight: 400; color: #78350f;">Reinforces pattern</span></div>
+              <div class="fb-btn">👎 Needs Correction<br><span style="font-size: 8px; font-weight: 400; color: #78350f;">Instant rule adaptation</span></div>
+            </div>
+            <div class="feedback-loop-note">Rules persist in Cloud Database with Delete/Unlearn capability</div>
+          </div>
+        </div>
+
+        <div class="grid-4-items">
+          <div>
+            <div class="grid-item-num">1</div>
+            <div class="grid-item-title">Intake & Transcription</div>
+            <div class="grid-item-desc">Captures caller demographic details and translates mixed Hinglish/Hindi speech to normalized symptom text.</div>
+          </div>
+          <div>
+            <div class="grid-item-num">2</div>
+            <div class="grid-item-title">Clinical Probing</div>
+            <div class="grid-item-desc">Formulates single empathetic questions with realistic suggested answer chips to uncover duration and triggers.</div>
+          </div>
+          <div>
+            <div class="grid-item-num">3</div>
+            <div class="grid-item-title">Severity & Red Flags</div>
+            <div class="grid-item-desc">Classifies urgency into 4 levels (Emergency, Urgent, Routine, Self-care) strictly evaluating caller danger signs.</div>
+          </div>
+          <div>
+            <div class="grid-item-num">4</div>
+            <div class="grid-item-title">15 KM Radius Routing</div>
+            <div class="grid-item-desc">Prioritizes direct ESIC Hospitals and Dispensaries within 15 km before considering private tie-up facilities.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
+
+
+    <!-- ================= PAGE 4 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 4 of 7</span>
+        </div>
+
+        <div class="sec-heading">
+          <span class="sec-bar"></span>
+          <span>4. Anatomy of the Triage Outcome Page (What is Displayed & Why)</span>
+        </div>
+
+        <p>
+          When the operator completes caller probing and clicks "Generate Triage Outcome", the application presents a structured, auditable clinical result card. Below is the exact visual sequence from the top summary line to the recommended facility, along with the operational rationale for each element.
+        </p>
+
+        <div class="anatomy-item">
+          <div class="preview-card" style="border-left: 3.5px solid #d97706;">
+            <span class="preview-tag" style="color: #d97706;">URGENT PRIORITY (ACUITY 6/10)</span>
+            <div class="preview-headline">Urgent medical evaluation recommended within 2 to 4 hours.</div>
+            <div class="preview-caption">Primary Summary Headline</div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">1. Severity Badge & One-Line Summary Headline</div>
+            <div class="anatomy-details-desc">Displays the color-coded triage acuity level (RED: Emergency, AMBER: Urgent, YELLOW: Routine, GREEN: Self-Care) alongside a clear, concise headline in plain language.</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Helpline operators need instant 1-second situational awareness. During a call, the operator cannot read paragraphs of clinical notes; the top banner immediately tells them whether an ambulance is needed or if outpatient clinic referral is sufficient.
+            </div>
+          </div>
+        </div>
+
+        <div class="anatomy-item">
+          <div class="preview-card" style="border-left: 3.5px solid #d97706;">
+            <span class="preview-tag" style="color: #d97706;">Action Timeframe:</span>
+            <div class="preview-headline">Visit Hospital Casualty / OPD within 2–4 Hours</div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">2. Action Directive & Time-to-Treatment Target</div>
+            <div class="anatomy-details-desc">Provides a concrete operational directive (e.g., "Call 108 Emergency Ambulance Immediately", "Seek Casualty / OPD within 2 to 4 Hours", or "Schedule Dispensary Visit in 24 to 48 Hours").</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Eliminates subjective hesitation or delays by translating clinical scores into an unambiguous, non-negotiable time window for the patient and operator.
+            </div>
+          </div>
+        </div>
+
+        <div class="anatomy-item">
+          <div class="preview-card" style="border-left: 3.5px solid #dc2626; background: #fef2f2;">
+            <span class="preview-tag" style="color: #dc2626;">⚠️ DANGER SIGNS DETECTED:</span>
+            <div style="font-size: 10.5px; color: #991b1b; line-height: 1.4;">
+              • Severe progressive pain<br>
+              • High fever with chills<br>
+              • Inability to keep liquids down
+            </div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">3. Red Flags & Danger Signs Box</div>
+            <div class="anatomy-details-desc">An alert box highlighting any critical symptoms detected during call probing (e.g., radiating chest pain, breathing difficulty, sudden confusion, high fever with altered vitals).</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Ensures life-threatening danger signs are never missed, gives clinical justification for high-urgency routing, and protects patient safety in medico-legal audits.
             </div>
           </div>
         </div>
       </div>
-    </section>
 
-    <div class="page-break"></div>
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
 
-    <!-- 3. Clinical Urgency Matrix -->
-    <section>
-      <h2><span class="sec-num">3</span> Clinical Urgency Matrix & Triage Protocols</h2>
-      <p>Intake complaints are classified strictly into one of four standardized urgency categories:</p>
 
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 15%;">Urgency Level</th>
-            <th style="width: 10%;">Score</th>
-            <th style="width: 25%;">Clinical Protocol</th>
-            <th style="width: 25%;">Recommended Action</th>
-            <th style="width: 25%;">Representative Symptoms</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><span class="badge badge-emergency">🚨 Emergency</span></td>
-            <td><strong>8 – 10</strong></td>
-            <td>Immediate 108 Emergency Dispatch (&lt; 15 mins)</td>
-            <td>Mobilize 108 Ambulance; instruct caller to remain calm and avoid exertion; route directly to nearest 24x7 Hospital Casualty.</td>
-            <td>Acute severe chest pain, radiating arm pain, cold sweating, acute breathlessness, unconsciousness, major trauma.</td>
-          </tr>
-          <tr>
-            <td><span class="badge badge-urgent">⚠️ Urgent</span></td>
-            <td><strong>5 – 7</strong></td>
-            <td>Same-Day Clinical OPD Evaluation (&lt; 2–4 hrs)</td>
-            <td>Direct patient to nearest operational ESIC / ESIS Dispensary or Government Civil Hospital during OPD hours.</td>
-            <td>High persistent fever (&gt;102°F) &gt;3 days, severe abdominal pain, persistent vomiting with dehydration, deep lacerations.</td>
-          </tr>
-          <tr>
-            <td><span class="badge badge-routine">📋 Routine</span></td>
-            <td><strong>3 – 4</strong></td>
-            <td>Scheduled Dispensary OPD Visit (24–48 hrs)</td>
-            <td>Advise regular visit to registered ESIS Dispensary (Mon-Fri 9AM-4PM, Sat 9AM-1PM) with insured person credentials.</td>
-            <td>Mild seasonal viral symptoms, localized joint aches, chronic prescription refills, regular health checkups.</td>
-          </tr>
-          <tr>
-            <td><span class="badge badge-selfcare">🌿 Self-care</span></td>
-            <td><strong>1 – 2</strong></td>
-            <td>Home Care & Tele-Doctor Guidance (104)</td>
-            <td>Provide telephonic home care guidance and transfer to 104 Tele-Doctor helpline if consultation is requested.</td>
-            <td>Minor superficial scratches, mild fatigue, general health queries, preventive wellness inquiries.</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    <!-- ================= PAGE 5 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 5 of 7</span>
+        </div>
 
-    <!-- 4. Multi-LLM Architecture -->
-    <section>
-      <h2><span class="sec-num">4</span> Multi-LLM Reasoning Engine & Load Balancing</h2>
-      <p>
-        The platform utilizes an enterprise Multi-LLM routing architecture designed for uninterrupted high-throughput reasoning:
-      </p>
+        <div class="anatomy-item">
+          <div class="preview-card">
+            <span class="preview-tag" style="color: #64748b;">Symptom Profile:</span>
+            <div class="preview-headline">Abdominal Pain</div>
+            <div class="preview-caption">Duration: 2 days • Moderate to severe</div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">4. Caller Primary Condition / Symptom Presentation</div>
+            <div class="anatomy-details-desc">Reports the symptom presentation strictly using descriptive clinical terminology grounded in what the caller actually reported (e.g., "Abdominal Pain" or "Persistent Cough with Fever").</div>
+            <div class="reason-box">
+              <strong>Reason Behind This (Non-Doctor Protocol):</strong> Tele-triage operators are clinical navigators, not diagnosing physicians. Mentioning diseases like "Kidney Stone" or "Appendicitis" before lab tests creates false alarms, legal liability, and misguides hospital intake.
+            </div>
+          </div>
+        </div>
 
-      <div class="flow-card accent-primary" style="margin: 14px 0;">
-        <div class="card-title">⚡ High-Availability LLM Architecture Highlights</div>
-        <div class="card-desc" style="font-size: 12px; color: #1e293b; margin-top: 6px;">
-          • <strong>Continuous High Throughput:</strong> Distributed multi-channel request routing designed to handle peak call volumes without degradation.<br>
-          • <strong>Instant Dynamic Failover:</strong> Zero-delay routing switches requests automatically if rate limits or latency thresholds are encountered.<br>
-          • <strong>Multi-Tier Redundancy:</strong> Primary LLM clusters are backed by secondary LLM models and a deterministic algorithmic fallback engine.<br>
-          • <strong>Deterministic Reliability:</strong> Guaranteed valid clinical assessments and structured outputs even during unexpected external network disruptions.
+        <div class="anatomy-item">
+          <div class="preview-card" style="border-left: 3.5px solid #059669; background: #f0fdf4;">
+            <span class="preview-tag" style="color: #059669;">DIRECT GOVERNMENT FACILITY</span>
+            <div class="preview-headline" style="color: #065f46;">ESIC Hospital Beltola</div>
+            <div class="preview-caption" style="color: #047857;">📍 Distance: 7.4 km (Within 15 km Radius)<br>Beltola, Guwahati • 24x7 Emergency Casualty</div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">5. Recommended Health Facility (Primary & Secondary Referral)</div>
+            <div class="anatomy-details-desc">Details the exact destination healthcare center with its designation (ESIC Hospital Casualty, ESIS Dispensary, or Empanelled Tie-Up Hospital), precise distance in kilometers, operating hours, and full address.</div>
+            <div class="reason-box">
+              <strong>Reason Behind This (15 KM Rule):</strong> Direct government ESIC/ESIS centers are prioritized whenever located within 15 km. Private empanelled tie-up hospitals are only unlocked when direct government centers are farther than 15 km, optimizing resource utilization and preventing unnecessary out-of-pocket costs.
+            </div>
+          </div>
+        </div>
+
+        <div class="anatomy-item">
+          <div class="preview-card" style="border-left: 3.5px solid #2563eb;">
+            <span class="preview-tag" style="color: #2563eb;">Dispatch Rationale:</span>
+            <div style="font-size: 10.5px; color: #334155; line-height: 1.4;">
+              Evaluated as Urgent based on symptom intensity and duration. ESIC Hospital (7.4 km) is within the 15 km radius and provides full casualty coverage.
+            </div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">6. Clinical Reasoning & Dispatch Rationale</div>
+            <div class="anatomy-details-desc">A transparent breakdown explaining why this acuity tier was assigned, why this specific facility was chosen over others, and what transport mode is suitable (Ambulance vs Private Vehicle).</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Equips the helpline operator with complete clinical context and empathetic talking points to clearly explain the care plan to an anxious caller or family member.
+            </div>
+          </div>
+        </div>
+
+        <div class="anatomy-item">
+          <div class="preview-card">
+            <span class="preview-tag" style="color: #64748b;">Immediate Patient Instructions:</span>
+            <div style="font-size: 10.5px; color: #334155; line-height: 1.4;">
+              • Rest in a comfortable position<br>
+              • Keep hydrated with small sips<br>
+              • Avoid solid food until doctor review
+            </div>
+          </div>
+          <div>
+            <div class="anatomy-details-title">7. First-Aid & Supportive Care Instructions</div>
+            <div class="anatomy-details-desc">Actionable non-pharmacological supportive advice that the operator reads to the caller for stabilization while traveling or awaiting assistance.</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Keeps the caller calm and safe without dispensing unprescribed medications or contraindicated home remedies.
+            </div>
+          </div>
         </div>
       </div>
-    </section>
 
-    <div class="page-break"></div>
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
 
-    <!-- 5. Facility Proximity & Geodesic Routing -->
-    <section>
-      <h2><span class="sec-num">5</span> Facility Proximity & Geodesic Routing</h2>
-      <p>
-        Distances are computed in real-time from the caller's resolved location to all 98 healthcare facilities in Assam using the <strong>Haversine Geodesic Distance Formula</strong>:
-      </p>
 
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 18px; font-family: monospace; font-size: 12px; margin: 12px 0;">
-        d = 2 · R · arcsin( √( sin²(Δlat / 2) + cos(lat1) · cos(lat2) · sin²(Δlon / 2) ) )<br>
-        <span style="color: #64748b;">(where R = 6371.0088 km, Earth's mean radius)</span>
+    <!-- ================= PAGE 6 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 6 of 7</span>
+        </div>
+
+        <div class="anatomy-item" style="border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 16px;">
+          <div class="preview-card" style="background: #fffbeb; border: 1px solid #fde68a;">
+            <div style="display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 800; color: #b45309; margin-bottom: 6px;">
+              <span>AI Self-Learning</span>
+              <span style="color: #d97706;">UNDER DEVELOPMENT</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <div style="background: white; border: 1px solid #fcd34d; padding: 4px 8px; border-radius: 4px; font-size: 9.5px; font-weight: 700; color: #b45309;">👍 Accurate</div>
+              <div style="background: white; border: 1px solid #fcd34d; padding: 4px 8px; border-radius: 4px; font-size: 9.5px; font-weight: 700; color: #b45309;">👎 Correct</div>
+            </div>
+            <div style="font-size: 8.5px; color: #92400e; margin-top: 6px;">* Note: Feedback feature under continuous improvement.</div>
+          </div>
+          <div>
+            <div class="anatomy-details-title" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>8. Agent Feedback & AI Self-Learning Control</span>
+              <span style="font-size: 9px; font-weight: 800; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px;">FEATURE UNDER DEVELOPMENT</span>
+            </div>
+            <div class="anatomy-details-desc">Allows the helpline agent to confirm the outcome or teach the AI the correct urgency/facility in 1 click if they notice an anomaly.</div>
+            <div class="reason-box">
+              <strong>Reason Behind This:</strong> Closes the human-in-the-loop adaptation cycle. Corrections instantly adapt subsequent calls without touching code. The <em>Under Development</em> indicator informs agents that the learning engine is undergoing active supervised calibration.
+            </div>
+          </div>
+        </div>
+
+        <div class="sec-heading">
+          <span class="sec-bar"></span>
+          <span>5. Geospatial Routing Logic & The 15 KM Rule</span>
+        </div>
+
+        <p>The platform enforces an operational policy designed to prioritize direct government healthcare resources:</p>
+
+        <div class="decision-tree-container">
+          <div class="tree-box">
+            Caller Location Resolved<br>
+            <span style="font-size: 9.5px; font-weight: 400; color: #64748b;">Calculates Haversine Distances</span>
+          </div>
+          <div style="font-size: 16px; color: #94a3b8;">➔</div>
+          <div class="tree-box-diamond">
+            Is ESIC / ESIS<br>within 15 km?
+          </div>
+          <div style="font-size: 16px; color: #94a3b8;">➔</div>
+          <div class="tree-branch-group">
+            <div class="branch-card-green">
+              <div style="font-weight: 800; color: #047857; margin-bottom: 2px;">YES (Within 15 km) ➔ DIRECT GOVERNMENT FACILITY</div>
+              <div style="color: #065f46; font-size: 9.5px;">Route to ESIC Hospital (Casualty/OPD) or ESIS Dispensary.<br><strong>STRICTLY PROHIBITS ROUTING TO TIE-UP</strong></div>
+            </div>
+            <div class="branch-card-amber">
+              <div style="font-weight: 800; color: #b45309; margin-bottom: 2px;">NO (Beyond 15 km) ➔ EMPANELLED TIE-UP FACILITY ALLOWED</div>
+              <div style="color: #78350f; font-size: 9.5px;">Route to Nearest Empanelled Hospital for cashless care.<br>Valid only when direct government facilities are &gt; 15 km away.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="formula-card">
+          <div class="formula-math">d = 2 · R · arcsin( √( sin²(Δlat / 2) + cos(lat₁) · cos(lat₂) · sin²(Δlon / 2) ) )</div>
+          <div class="formula-sub">Haversine Great-Circle Metric (where R = 6371.0088 km, Earth's mean radius)</div>
+        </div>
+
+        <p style="font-weight: 700; color: #0f172a; margin-top: 10px; margin-bottom: 6px;">Key Rules Summary:</p>
+        <ul style="margin-left: 18px; font-size: 11.5px; color: #334155; line-height: 1.55;">
+          <li><strong>Government Priority:</strong> If an ESIC Hospital or ESIS Dispensary is within 15 km of the caller's location, the system will never assign a private facility.</li>
+          <li><strong>After-Hours Coverage:</strong> On weekends and after 3:00 PM (when dispensaries are closed), patients within 15 km are directed to the 24x7 ESIC Hospital casualty, backed by 104 Tele-Doctor phone triage.</li>
+          <li><strong>Remote Workers Protection:</strong> Tie-Up hospitals act as a critical safety net exclusively for workers located in distant industrial hubs where government facilities are beyond 15 km.</li>
+        </ul>
       </div>
 
-      <h3>Location Resolution Fallback Hierarchy</h3>
-      <ol style="margin-left: 20px; color: #334155; font-size: 12.5px; line-height: 1.8;">
-        <li><strong>Direct GPS Coordinates:</strong> Highest precision matching (accurate to within meters).</li>
-        <li><strong>Caller Pincode Match:</strong> Centroid resolved across 74 Assam postal zones.</li>
-        <li><strong>District Headquarters Match:</strong> Centroid mapped to district headquarters.</li>
-        <li><strong>Statewide Centroid:</strong> Kamrup Metropolitan / Guwahati <code>(26.1215° N, 91.8085° E)</code>.</li>
-      </ol>
-    </section>
-
-    <!-- 6. Operator Roles & Auditable Case Codes -->
-    <section>
-      <h2><span class="sec-num">6</span> Operator Roles & Auditable Case Reference Structure</h2>
-      <p>Every case generated by the platform includes an auditable reference code connecting the record directly to the operating agent:</p>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Role Identifier</th>
-            <th>Display Title</th>
-            <th>Case Reference Format</th>
-            <th>Primary Responsibilities</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>AD1</code></td>
-            <td><strong>Admin 1</strong></td>
-            <td><code>CAD1[A-Z]{2}[0-9]{5}[E|U|R|S]</code></td>
-            <td>Full system administration, directory management, clinical protocol supervision.</td>
-          </tr>
-          <tr>
-            <td><code>AD2</code></td>
-            <td><strong>Admin 2</strong></td>
-            <td><code>CAD2[A-Z]{2}[0-9]{5}[E|U|R|S]</code></td>
-            <td>Facility directory maintenance, case auditing, operational reporting.</td>
-          </tr>
-          <tr>
-            <td><code>A1</code></td>
-            <td><strong>Agent 1</strong></td>
-            <td><code>CA1[A-Z]{2}[0-9]{5}[E|U|R|S]</code></td>
-            <td>Live call intake, adaptive clinical questioning, facility routing.</td>
-          </tr>
-          <tr>
-            <td><code>A2</code></td>
-            <td><strong>Agent 2</strong></td>
-            <td><code>CA2[A-Z]{2}[0-9]{5}[E|U|R|S]</code></td>
-            <td>Live call intake, speech transcription verification, facility routing.</td>
-          </tr>
-          <tr>
-            <td><code>A3</code></td>
-            <td><strong>Agent 3</strong></td>
-            <td><code>CA3[A-Z]{2}[0-9]{5}[E|U|R|S]</code></td>
-            <td>Live call intake, emergency ambulance dispatch mobilization.</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- 7. Facility Directory & Excel Export / Import -->
-    <section>
-      <h2><span class="sec-num">7</span> Facility Directory Management & Excel Export / Import</h2>
-      <p>
-        The Facility Management module provides bi-directional synchronization with standard spreadsheet software:
-      </p>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px;">
-        <div class="flow-card accent-primary">
-          <div class="card-title">📥 Template</div>
-          <div class="card-desc">Download standard Excel (<code>.xlsx</code>) or CSV import templates with verified schema fields.</div>
-        </div>
-        <div class="flow-card accent-blue">
-          <div class="card-title">📤 Import</div>
-          <div class="card-desc">Bulk upload facility data from Excel or CSV with automatic validation and cloud database sync.</div>
-        </div>
-        <div class="flow-card accent-urgent">
-          <div class="card-title">📊 Export</div>
-          <div class="card-desc">One-click export of all live facility records into a formatted Excel (<code>.xlsx</code>) spreadsheet.</div>
-        </div>
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
       </div>
-    </section>
+    </div>
 
-    <!-- 8. REST API Quick Reference -->
-    <section>
-      <h2><span class="sec-num">8</span> REST API Quick Reference</h2>
-      
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 12%;">Method</th>
-            <th style="width: 28%;">Endpoint</th>
-            <th style="width: 60%;">Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>POST</code></td>
-            <td><code>/api/triage</code></td>
-            <td>Evaluates intake symptoms, assigns clinical urgency, ranks top 6 nearest facilities, and saves case.</td>
-          </tr>
-          <tr>
-            <td><code>GET</code></td>
-            <td><code>/api/facilities</code></td>
-            <td>Queries 98 facilities with search keyword, district, and facility type filters.</td>
-          </tr>
-          <tr>
-            <td><code>GET</code></td>
-            <td><code>/api/facilities/export</code></td>
-            <td>Generates and downloads full facility registry in formatted Excel (<code>.xlsx</code>) or CSV format.</td>
-          </tr>
-          <tr>
-            <td><code>POST</code></td>
-            <td><code>/api/facilities/import</code></td>
-            <td>Bulk imports and validates facilities from uploaded Excel spreadsheet or CSV file.</td>
-          </tr>
-          <tr>
-            <td><code>GET</code></td>
-            <td><code>/api/cases</code></td>
-            <td>Fetches archived triage cases with filtering by urgency tier and search keywords.</td>
-          </tr>
-          <tr>
-            <td><code>GET</code></td>
-            <td><code>/api/caller/lookup</code></td>
-            <td>Returns past triage encounter history and previous facility routings for a specific phone number.</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
 
-    <!-- Footer -->
-    <footer style="margin-top: 40px; padding-top: 20px; border-top: 1.5px solid #e2e8f0; font-size: 11.5px; color: #64748b; display: flex; justify-content: space-between;">
-      <div>EKMS Triage Platform · ESIC / ESIS Healthcare Operations</div>
-      <div>Confidential — For Authorized Project Stakeholders & External Review</div>
-    </footer>
+    <!-- ================= PAGE 7 ================= -->
+    <div class="doc-page">
+      <div>
+        <div class="page-header-meta">
+          <span>EKMS Triage — System Architecture & Workflow Document</span>
+          <span>Page 7 of 7</span>
+        </div>
+
+        <div class="sec-heading">
+          <span class="sec-bar"></span>
+          <span>6. Continuous AI Learning & Feedback Portal</span>
+        </div>
+
+        <p>
+          The platform features an active human-in-the-loop learning system that allows operational supervisors and medical officers to fine-tune AI decisions without technical downtime.
+        </p>
+
+        <div class="orange-callout">
+          <div class="orange-callout-title">⚠️ DEVELOPMENT STATUS NOTE</div>
+          <div class="orange-callout-text">
+            The AI Self-Learning and Agent Feedback subsystem is currently an <strong>active development feature under continuous improvement</strong>. Rules created by agents are logged in Cloud Database and can be audited, fine-tuned, or unlearned at any time.
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 22%;">Action</th>
+              <th style="width: 38%;">Mechanism</th>
+              <th style="width: 40%;">Resulting Behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight: 700; color: #d97706;">👍 Accurate Outcome</td>
+              <td>Single click by agent on triage outcome card</td>
+              <td>Reinforces the decision pattern in server memory and database.</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 700; color: #d97706;">👎 Needs Correction</td>
+              <td>Inline modal: urgency, referral, and clinical rationale</td>
+              <td>Saves a correction rule that dynamically instructs the AI and algorithm to apply the human-specified destination on similar future calls.</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 700; color: #0f172a;">Manage & Unlearn</td>
+              <td>Accessible via Menu Drawer ➔ <em>AI Learning & Feedback</em></td>
+              <td>Supervisors can review all active rules with pagination (30 per page) and click "Unlearn" to delete rules immediately.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="page-footer">
+        <span>EKMS Triage Platform | Operational Architecture & Workflow Document</span>
+        <span>Confidential — Internal Team Document</span>
+      </div>
+    </div>
 
   </div>
 

@@ -4,21 +4,28 @@ import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   Send,
-  PhoneForwarded,
-  MapPin,
-  User,
-  Phone,
-  AlertTriangle,
   CheckCircle2,
   X,
   Edit3,
-  Copy,
-  Clock,
-  Building2,
-  ShieldAlert,
   Ambulance,
-  PhoneCall,
+  Stethoscope,
+  Copy,
+  Check,
+  User,
+  Phone,
+  Calendar,
+  MapPin,
+  Activity,
+  Clock,
+  ShieldAlert,
+  Pill,
+  FileText,
+  AlertTriangle,
+  HeartPulse,
+  ClipboardCheck,
   Sparkles,
+  Loader2,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -114,6 +121,241 @@ export function getTeamButtonClass(teamId) {
   }
 }
 
+function formatTriageDate(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const valid = !isNaN(d.getTime()) ? d : new Date();
+  return valid.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function cleanShortChiefComplaints(result, callerIntake, t) {
+  const mainComplaint =
+    callerIntake?.complaint ||
+    result?.intake?.complaint ||
+    t?.primary_complaint ||
+    result?.ekms_ai_context?.triageState?.suspectedCondition ||
+    result?.ekms_ai_context?.triageState?.condition ||
+    result?.ekms_ai_context?.condition ||
+    "";
+
+  let raw = `${mainComplaint || callerIntake?.symptom_notes || result?.intake?.symptom_notes || ""}`.trim();
+
+  // Strip boilerplate text
+  let cleaned = raw
+    .replace(/\[\s*clinical findings:?\s*/gi, "")
+    .replace(/reported symptoms:?\s*/gi, "")
+    .replace(/caller reports?\s*/gi, "")
+    .replace(/patient reports?\s*/gi, "")
+    .replace(/patient presents with\s*/gi, "")
+    .replace(/no associated symptoms[\s\S]*/gi, "")
+    .replace(/no fever[\s\S]*/gi, "")
+    .replace(/condition appears[\s\S]*/gi, "")
+    .replace(/suitable for standard[\s\S]*/gi, "")
+    .replace(/\[|\]/g, "")
+    .trim();
+
+  // Protect anything inside parentheses (...) from being split!
+  // e.g. "Headache (Constant Pressure, Forehead)" must stay intact as a single complaint
+  const hasUnclosedParen = (s) => (s.match(/\(/g) || []).length !== (s.match(/\)/g) || []).length;
+
+  // Split only on explicit newlines, semicolons, or bullet marks
+  let parts = cleaned
+    .split(/\n|;|^•\s*/m)
+    .map((s) => s.trim().replace(/^•\s*/, ""))
+    .filter((s) => s.length > 2);
+
+  // If still 1 part and has NO parentheses, check for two distinct comma/and-separated complaints
+  if (parts.length === 1 && !cleaned.includes("(") && !cleaned.includes(")")) {
+    const commaParts = cleaned
+      .split(/,\s+|\band\b/i)
+      .map((s) => s.trim())
+      .filter(
+        (s) =>
+          s.length > 2 &&
+          !/^(for|since|the|past|days?|hours?|weeks?|reported|stable|findings)$/i.test(s)
+      );
+    if (commaParts.length >= 2) {
+      parts = commaParts;
+    }
+  }
+
+  // If any part has unclosed parentheses, treat whole string as single unified complaint
+  if (hasUnclosedParen(parts[0]) || (parts[1] && hasUnclosedParen(parts[1]))) {
+    return {
+      firstReason: cleaned,
+      secondReason: "",
+    };
+  }
+
+  if (parts.length >= 2) {
+    return {
+      firstReason: parts[0],
+      secondReason: parts[1],
+    };
+  } else if (parts.length === 1) {
+    return {
+      firstReason: parts[0],
+      secondReason: "",
+    };
+  }
+
+  return {
+    firstReason: mainComplaint || "Health Symptom Assessment",
+    secondReason: "",
+  };
+}
+
+function extractClinicalDetails(result, callerIntake, t, allRedFlags) {
+  const allText = `${callerIntake?.symptom_notes || ""} ${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""} ${result?.triage?.summary_en || ""} ${result?.triage?.reasoning || ""}`.toLowerCase();
+
+  // 1. Duration / Onset
+  let duration = result?.ekms_ai_context?.duration || result?.ekms_ai_context?.triageState?.duration || "";
+  if (!duration) {
+    const durMatch = allText.match(/\b(since\s+[\w\s]+|\d+\s*(?:days?|hours?|weeks?|months?|dino?|ghante?)|aaj\s*se|kal\s*se|today|yesterday|morning|subah\s*se|raat\s*se)\b/i);
+    if (durMatch) duration = durMatch[0];
+  }
+  if (!duration) duration = "";
+
+  // 2. Clinical Red Flags (Directly from outcome page)
+  let redFlags = [];
+  if (Array.isArray(allRedFlags) && allRedFlags.length > 0) {
+    redFlags = [...allRedFlags];
+  } else if (Array.isArray(t?.red_flags) && t.red_flags.length > 0) {
+    redFlags = [...t.red_flags];
+  } else if (Array.isArray(result?.ekms_ai_context?.triageState?.redFlagsDetected)) {
+    redFlags = [...result.ekms_ai_context.triageState.redFlagsDetected];
+  }
+
+  // 3. Short clean chief complaint
+  const { firstReason, secondReason } = cleanShortChiefComplaints(result, callerIntake, t);
+  const primaryLower = (firstReason || "").toLowerCase();
+
+  // 4. Associated Symptoms: Keep separate from Red Flags and separate from Chief Complaint
+  let associated = "";
+  const ctxAssociated = result?.ekms_ai_context?.triageState?.associated;
+  if (Array.isArray(ctxAssociated) && ctxAssociated.length > 0) {
+    const filtered = ctxAssociated.filter(
+      (a) =>
+        !redFlags.some((rf) => rf.toLowerCase().includes(a.toLowerCase())) &&
+        !primaryLower.includes(a.toLowerCase())
+    );
+    associated = (filtered.length > 0 ? filtered : []).join(", ");
+  }
+  if (!associated) {
+    const potentialSecondary = [
+      "inability to retain fluids",
+      "cannot keep fluids down",
+      "nausea",
+      "vomiting",
+      "weakness",
+      "dizziness",
+      "body ache",
+      "fever",
+      "headache",
+      "sweating",
+      "chills",
+    ];
+    for (const sym of potentialSecondary) {
+      if (
+        !primaryLower.includes(sym) &&
+        !redFlags.some((rf) => rf.toLowerCase().includes(sym)) &&
+        allText.includes(sym)
+      ) {
+        associated = sym.charAt(0).toUpperCase() + sym.slice(1);
+        break;
+      }
+    }
+  }
+
+  // 4. Allergy: Keep blank if not reported by caller
+  let allergy = "";
+  const callerAllergyWords = `${callerIntake?.symptom_notes || ""} ${result?.intake?.symptom_notes || ""} ${result?.caller_spoken_text || ""}`.toLowerCase();
+  const allergyMatch = callerAllergyWords.match(/\ballerg(?:y|ic)\s*(?:to|from)?\s*([a-zA-Z\s]+)/i);
+  if (allergyMatch) allergy = cleanField(allergyMatch[0]);
+
+  // 5. Medication: ONLY if caller explicitly reported taking/using a medicine
+  let medication = "";
+  const callerWords = `${callerIntake?.symptom_notes || ""} ${callerIntake?.complaint || ""} ${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.caller_spoken_text || ""}`.toLowerCase();
+  const takingMedMatch = callerWords.match(/\b(?:taking|take|taken|on\s+meds?|on\s+medication|dawai\s+le|medicine\s+le)\s+([a-zA-Z0-9\s]{2,25})/i);
+  const directMedsMatch = callerWords.match(/\b(insulin|paracetamol|metformin|amlodipine|pantoprazole|aspirin|inhaler|cetirizine|atorvastatin|crocin|dolo)\b/i);
+
+  if (takingMedMatch && takingMedMatch[0]) {
+    medication = cleanField(takingMedMatch[0]);
+  } else if (directMedsMatch && directMedsMatch[0]) {
+    medication = cleanField(directMedsMatch[0]);
+  }
+
+  // 6. Diagnostic tests / Vitals (BP, Sugar, Temp, SpO2)
+  const vitals = [];
+  const bpMatch = allText.match(/\b(?:bp|blood pressure)[:\s]*(\d{2,3}\s*\/\s*\d{2,3})/i);
+  if (bpMatch) vitals.push(`BP: ${bpMatch[1]} mmHg`);
+
+  const sugarMatch = allText.match(/\b(?:sugar|glucose|rbs|fbs)[:\s]*(\d{2,3}\s*(?:mg\/dl)?)/i);
+  if (sugarMatch) vitals.push(`Sugar: ${sugarMatch[1]}`);
+
+  const tempMatch = allText.match(/\b(?:temp|temperature|fever)[:\s]*(\d{2,3}(?:\.\d)?\s*(?:°?[fc]|degrees?)?)/i);
+  if (tempMatch) vitals.push(`Temp: ${tempMatch[1]}`);
+
+  const spo2Match = allText.match(/\b(?:spo2|oxygen|o2)[:\s]*(\d{2,3}\s*%?)/i);
+  if (spo2Match) vitals.push(`SpO2: ${spo2Match[1]}`);
+
+  const diagnosticTests = vitals.length > 0 ? vitals.join(" · ") : "";
+
+  // 7. Chief complaints already extracted above
+
+  return {
+    duration: cleanField(duration),
+    associated: cleanField(associated),
+    allergy: cleanField(allergy),
+    medication: cleanField(medication),
+    diagnosticTests: diagnosticTests,
+    firstReason: cleanField(firstReason),
+    secondReason: cleanField(secondReason),
+    redFlags: redFlags,
+  };
+}
+
+function cleanField(val) {
+  if (!val) return "";
+  const trimmed = String(val).trim();
+  if (
+    trimmed === "-" ||
+    trimmed === "--" ||
+    trimmed === "---" ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed === "..." ||
+    trimmed === "," ||
+    trimmed === ";" ||
+    trimmed.toLowerCase() === "n/a" ||
+    trimmed.toLowerCase() === "na" ||
+    trimmed.toLowerCase() === "none" ||
+    trimmed.toLowerCase() === "nil" ||
+    trimmed.toLowerCase() === "null" ||
+    trimmed.toLowerCase() === "undefined" ||
+    trimmed.toLowerCase() === "unknown" ||
+    trimmed.toLowerCase() === "need to be find" ||
+    trimmed.toLowerCase() === "need to identify"
+  ) {
+    return "";
+  }
+  return trimmed;
+}
+
+function cleanPhone(val) {
+  const cleaned = cleanField(val);
+  if (!cleaned) return "";
+  const digits = cleaned.replace(/^\+91\s*/, "").replace(/[^\d]/g, "");
+  if (!digits || digits.length < 5) return "";
+  return digits;
+}
+
 export function CaseHandoverForwarding({
   result,
   activeDirective,
@@ -124,142 +366,193 @@ export function CaseHandoverForwarding({
   const [isSending, setIsSending] = useState(false);
   const [sentStatus, setSentStatus] = useState(null);
   const [mounted, setMounted] = useState(false);
+  const [copiedDossier, setCopiedDossier] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const t = result?.triage || {};
-  const caseRef = result?.case_ref || `CASE-${Date.now().toString(36).toUpperCase()}`;
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && modalOpen) {
+        setModalOpen(false);
+      }
+    };
+    if (modalOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [modalOpen]);
 
-  // Automatically determine target forwarded team based on active directive / decision switcher
+  const t = result?.triage || {};
+  const caseRef = result?.case_ref || result?.case_id || "CA0001AB01";
+
+  const triageTimestamp = useMemo(() => {
+    return formatTriageDate(result?.created_at || result?.timestamp || result?.intake?.timestamp);
+  }, [result]);
+
   const targetTeamId = useMemo(() => {
     return mapDirectiveToTeamId(activeDirective?.id, t);
   }, [activeDirective?.id, t]);
 
-  const [selectedTeamId, setSelectedTeamId] = useState(targetTeamId);
+  const selectedTeam =
+    FORWARDING_TEAMS.find((team) => team.id === targetTeamId) ||
+    FORWARDING_TEAMS[0];
 
-  // Synchronize immediately whenever activeDirective changes from Decision Switcher
-  useEffect(() => {
-    setSelectedTeamId(targetTeamId);
-  }, [targetTeamId]);
+  const isTarget108 = selectedTeam.id === "108_AMBULANCE";
 
-  // Extract caller details from live caller intake form, falling back to result.intake or defaults
   const intakeData = useMemo(() => {
     const src = callerIntake || result?.intake || {};
-    const name = src.caller_name || result?.intake?.caller_name || "Akash Gupta";
-    const phone = src.phone || result?.intake?.phone || "9876543210";
-    const age =
-      src.age != null && src.age !== ""
-        ? String(src.age)
-        : result?.intake?.age != null && result?.intake?.age !== ""
-        ? String(result?.intake?.age)
-        : "45";
-    const sex = src.sex || result?.intake?.sex || "Male";
-    const city = src.city || result?.intake?.city || "";
-    const district = src.district || result?.intake?.district || "";
-    const pincode = src.pincode || result?.intake?.pincode || "";
-    const landmark = src.landmark || result?.intake?.landmark || "";
+    const name = cleanField(src.caller_name || result?.intake?.caller_name);
+    const phone = cleanPhone(src.phone || result?.intake?.phone);
+    const rawAge = src.age != null && src.age !== "" ? src.age : result?.intake?.age;
+    const age = cleanField(rawAge);
+    const sex = cleanField(src.sex || result?.intake?.sex);
 
-    // Build human-readable patient location
+    const landmark = cleanField(src.landmark || result?.intake?.landmark);
+    const city = cleanField(src.city || result?.intake?.city);
+    const district = cleanField(src.district || result?.intake?.district);
+    const pincode = cleanField(src.pincode || result?.intake?.pincode);
+
     const locParts = [];
-    if (landmark.trim()) locParts.push(landmark.trim());
-    if (city.trim()) locParts.push(city.trim());
-    if (
-      district.trim() &&
-      district.trim().toLowerCase() !== city.trim().toLowerCase()
-    ) {
-      locParts.push(district.trim());
-    }
-    if (pincode.trim()) locParts.push(`PIN: ${pincode.trim()}`);
+    if (landmark) locParts.push(landmark);
+    if (city) locParts.push(city);
+    if (district && district.toLowerCase() !== city.toLowerCase()) locParts.push(district);
+    if (pincode) locParts.push(`PIN: ${pincode}`);
 
-    let formattedLocation = "";
-    let isDefault = false;
-    if (locParts.length > 0) {
-      formattedLocation = locParts.join(", ");
-    } else if (result?.resolved_location?.matched) {
-      formattedLocation = `${result.resolved_location.matched}, Assam - PIN: 781005`;
-    } else {
-      formattedLocation = "Guwahati, Kamrup Metro, Assam - PIN: 781005 (Default Area)";
-      isDefault = true;
-    }
+    const formattedLocation = locParts.join(", ");
 
     return {
       callerName: name,
       phone,
       age,
       sex,
-      city: city || "Guwahati",
-      district: district || "Kamrup Metro",
-      pincode: pincode || "781005",
-      landmark,
-      locationDisplay: formattedLocation,
-      isDefault,
+      landmark: formattedLocation,
     };
   }, [callerIntake, result]);
 
-  // Editable form state for the verification popup
+  const extractedDetails = useMemo(() => {
+    return extractClinicalDetails(result, callerIntake, t, allRedFlags);
+  }, [result, callerIntake, t, allRedFlags]);
+
+  // Clean Document State (No heavy container boxes, editable inline)
   const [editData, setEditData] = useState({
     callerName: intakeData.callerName,
     phone: intakeData.phone,
     age: intakeData.age,
     sex: intakeData.sex,
-    landmark: intakeData.locationDisplay,
-    chiefComplaint:
-      t.primary_complaint ||
-      callerIntake?.symptom_notes ||
-      result?.intake?.symptom_notes ||
-      "Primary Clinical Assessment",
-    redFlagsText:
-      allRedFlags.length > 0
-        ? allRedFlags.join("; ")
-        : "No acute red-flag signs detected",
-    agentNote: "",
+    landmark: intakeData.landmark,
+
+    firstReason: extractedDetails.firstReason,
+    secondReason: extractedDetails.secondReason,
+    redFlags: extractedDetails.redFlags || [],
+    hpiDuration: extractedDetails.duration,
+    associatedSymptoms: extractedDetails.associated,
+    allergies: extractedDetails.allergy,
+    medications: extractedDetails.medication,
+
+    primaryDiagnosis: "",
+    secondaryDiagnosis: "",
+
+    diagnosticTests: extractedDetails.diagnosticTests || "",
+    keyFindings: "",
+    proceduresCompleted: "",
+
+    newMedications: "",
+    changesToMedications: "",
+    careInstructions: "",
+
+    scheduledAppointments: "",
+    referrals: "",
+    warningSigns: "",
   });
 
-  const displayRedFlags = useMemo(() => {
-    if (Array.isArray(allRedFlags) && allRedFlags.length > 0) {
-      return allRedFlags;
-    }
-    if (
-      editData.redFlagsText &&
-      editData.redFlagsText !== "No acute red-flag signs detected"
-    ) {
-      return editData.redFlagsText
-        .split(/[;\n]/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    return [];
-  }, [allRedFlags, editData.redFlagsText]);
-
-  const selectedTeam =
-    FORWARDING_TEAMS.find((team) => team.id === selectedTeamId) ||
-    FORWARDING_TEAMS[0];
-
-  const isTarget108 = selectedTeam.id === "108_AMBULANCE";
-
   const handleOpenModal = () => {
-    // Refresh with latest caller intake values
-    setSelectedTeamId(targetTeamId);
+    const refreshed = extractClinicalDetails(result, callerIntake, t, allRedFlags);
     setEditData({
       callerName: intakeData.callerName,
       phone: intakeData.phone,
       age: intakeData.age,
       sex: intakeData.sex,
-      landmark: intakeData.locationDisplay,
-      chiefComplaint:
-        t.primary_complaint ||
-        callerIntake?.symptom_notes ||
-        result?.intake?.symptom_notes ||
-        "Primary Clinical Assessment",
-      redFlagsText:
-        allRedFlags.length > 0
-          ? allRedFlags.join("; ")
-          : "No acute red-flag signs detected",
-      agentNote: "",
+      landmark: intakeData.landmark,
+
+      firstReason: refreshed.firstReason,
+      secondReason: refreshed.secondReason,
+      redFlags: refreshed.redFlags || [],
+      hpiDuration: refreshed.duration,
+      associatedSymptoms: refreshed.associated,
+      allergies: refreshed.allergy,
+      medications: refreshed.medication,
+
+      primaryDiagnosis: "",
+      secondaryDiagnosis: "",
+
+      diagnosticTests: refreshed.diagnosticTests || "",
+      keyFindings: "",
+      proceduresCompleted: "",
+
+      newMedications: "",
+      changesToMedications: "",
+      careInstructions: "",
+
+      scheduledAppointments: "",
+      referrals: "",
+      warningSigns: "",
     });
     setModalOpen(true);
+  };
+
+  const buildDossierText = (data) => {
+    const chiefComplaintText = data.secondReason
+      ? `  • ${data.firstReason}\n  • ${data.secondReason}`
+      : `  • ${data.firstReason}`;
+
+    const redFlagsText = Array.isArray(data.redFlags) && data.redFlags.length > 0
+      ? data.redFlags.map((f) => `  • ${f}`).join("\n")
+      : "  • None reported";
+
+    const formattedPhone = data.phone
+      ? (data.phone.startsWith("+91") ? data.phone : `+91 ${data.phone}`)
+      : "";
+
+    return `1. Caller Details                                         Case ID: ${caseRef}
+• Name: ${data.callerName || ""}
+• Phone Number: ${formattedPhone}
+• Age: ${data.age ? data.age : ""}
+• Gender: ${data.sex || ""}
+• Case Date: ${triageTimestamp}
+• Address: ${data.landmark || ""}
+
+2. Clinical Overview
+• Chief Complaint:
+${chiefComplaintText}
+• Clinical Red Flags:
+${redFlagsText}
+• History of Present Illness(from how long it happening): ${data.hpiDuration || ""}
+• Associated Symptoms: ${data.associatedSymptoms || ""}
+• Any allergy: ${data.allergies || ""}
+• Any medication: ${data.medications || ""}
+
+( from 3 to 6 will be find out by the doctor )
+
+3. Diagnoses By the Doctor
+• Primary Diagnosis: ${data.primaryDiagnosis || ""}
+• Secondary Diagnoses: ${data.secondaryDiagnosis || ""}
+
+4. Results & Procedures
+• Diagnostic Tests Performed: ${data.diagnosticTests || ""}
+• Key Findings: ${data.keyFindings || ""}
+• Procedures Completed: ${data.proceduresCompleted || ""}
+
+5. Treatment Plan & Medications
+• New Medications: ${data.newMedications || ""}
+• Changes to Existing Medications: ${data.changesToMedications || ""}
+• Care Instructions & Lifestyle Modifications: ${data.careInstructions || ""}
+
+6. Follow-Up & Continuity of Care
+• Scheduled Appointments: ${data.scheduledAppointments || ""}
+• Referrals: ${data.referrals || ""}
+• Warning Signs / Emergency Instructions: ${data.warningSigns || ""}`;
   };
 
   const handleConfirmSend = () => {
@@ -271,27 +564,12 @@ export function CaseHandoverForwarding({
       minute: "2-digit",
     });
 
-    const dispatchDossier = `[CASE DISPATCH HANDOVER]
-Ref: ${caseRef} | Dispatch ID: ${dispatchId}
-Forwarded Team: ${selectedTeam.name}
-Time: ${timestamp}
+    const dispatchDossier = buildDossierText(editData);
 
-[PATIENT DETAILS]
-Name: ${editData.callerName} (${editData.age ? editData.age + "y" : "Age N/A"}, ${editData.sex || "N/A"})
-Contact Phone: +91 ${editData.phone}
-Exact Location / Landmark: ${editData.landmark || "Not specified"}
-
-[CLINICAL ASSESSMENT]
-Chief Complaint: ${editData.chiefComplaint}
-Urgency Level: ${t.urgency_level || "Urgent"} (${t.urgency_score || 7}/10)
-Red Flags: ${displayRedFlags.length > 0 ? displayRedFlags.join("; ") : "No acute red-flag signs detected"}
-Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
-
-    // Simulate instant transmission
     setTimeout(() => {
       try {
         navigator.clipboard?.writeText?.(dispatchDossier);
-      } catch (e) {}
+      } catch (e) { }
 
       setSentStatus({
         teamName: selectedTeam.name,
@@ -304,14 +582,33 @@ Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
       setIsSending(false);
       setModalOpen(false);
       toast.success(
-        `Case details transmitted to ${selectedTeam.shortName}! (Ref: ${dispatchId})`
+        `Clinical summary sent to ${selectedTeam.shortName}! (Ref: ${dispatchId})`
       );
     }, 600);
   };
 
+  const handleCopyDossier = () => {
+    const text = buildDossierText(editData);
+    try {
+      navigator.clipboard?.writeText?.(text);
+      setCopiedDossier(true);
+      toast.success("Clinical summary copied to clipboard!");
+      setTimeout(() => setCopiedDossier(false), 2000);
+    } catch (e) {
+      toast.error("Failed to copy summary to clipboard");
+    }
+  };
+
+  const handleAutoResize = (e) => {
+    if (e?.target) {
+      e.target.style.height = "auto";
+      e.target.style.height = `${e.target.scrollHeight}px`;
+    }
+  };
+
   return (
     <>
-      {/* Referral Forwarding Dispatch & Confirmation (rendered cleanly right below Action Steps for Agent) */}
+      {/* Referral Forwarding Dispatch & Confirmation */}
       <div className="pt-3 border-t border-current/15 space-y-3">
         {sentStatus && (
           <div className="rounded-xl border border-emerald-500/60 bg-emerald-50 dark:bg-emerald-950/40 p-3 sm:p-3.5 text-xs font-bold text-emerald-950 dark:text-emerald-200 shadow-2xs flex flex-wrap items-center justify-between gap-2.5">
@@ -319,11 +616,10 @@ Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
               <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-400 shrink-0" />
               <div>
                 <p className="font-extrabold text-emerald-950 dark:text-emerald-100 text-xs sm:text-sm">
-                  Transmitted to {sentStatus.shortName} at {sentStatus.timestamp}
+                  Clinical summary sent to {sentStatus.shortName} at {sentStatus.timestamp}
                 </p>
                 <p className="text-[11px] font-mono text-emerald-800 dark:text-emerald-300">
-                  Handover Ref: {sentStatus.dispatchId} · Location:{" "}
-                  {sentStatus.location || "Default Location (Beltola, Guwahati), Assam - PIN: 781005"}
+                  Handover Ref: {sentStatus.dispatchId} {sentStatus.location ? `· Location: ${sentStatus.location}` : ""}
                 </p>
               </div>
             </div>
@@ -339,7 +635,7 @@ Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground font-medium hidden sm:block">
-            Transmit verified caller intake, location landmark &amp; clinical findings.
+            Transmit verified clinical summary, caller address &amp; findings.
           </p>
 
           <button
@@ -350,273 +646,461 @@ Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
             )}`}
           >
             <Send className="h-4 w-4" />
-            <span>Verify &amp; Send Details to {selectedTeam.shortName}</span>
+            <span>Send clinical summary to {selectedTeam.shortName}</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Verification & Edit Pop-up Modal rendered across the FULL WEBSITE via React Portal */}
+      {/* Clean Document Window Modal */}
       {modalOpen &&
         mounted &&
         createPortal(
           <div
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150"
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-150"
             onClick={(e) => {
               if (e.target === e.currentTarget) setModalOpen(false);
             }}
           >
             <div
-              className="w-full max-w-2xl bg-card rounded-2xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
+              className="w-full max-w-3xl bg-card rounded-2xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="border-b border-border/80 bg-secondary/40 px-5 py-4 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold shadow-2xs">
-                    <Send className="h-4.5 w-4.5" />
+              <div className="border-b border-border/80 bg-secondary/30 px-5 sm:px-6 py-3.5 flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 shrink-0">
+                    <FileText className="h-4.5 w-4.5" />
                   </div>
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-foreground">
-                      Verify &amp; Forward Case Details
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      Review, verify, and edit patient intake information before transmission
-                    </p>
-                  </div>
+                  <span className="text-sm sm:text-base font-bold text-foreground truncate">
+                    Verify &amp; send clinical summary
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition cursor-pointer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-xs sm:text-sm font-bold text-foreground bg-blue-500/10 dark:bg-blue-400/10 border border-blue-500/20 px-2.5 py-1 rounded-md">
+                    Case ID: <span className="font-mono text-blue-700 dark:text-blue-400">{caseRef}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setModalOpen(false)}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition cursor-pointer"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
-              {/* Modal Body (Scrollable) */}
-              <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs">
-                {/* Target Team Selector */}
-                <div>
-                  <label className="field-label mb-1.5 block font-bold text-foreground">
-                    Target Forwarded Referral Team
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {FORWARDING_TEAMS.map((team) => (
-                      <button
-                        key={team.id}
-                        type="button"
-                        onClick={() => setSelectedTeamId(team.id)}
-                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition text-left cursor-pointer ${
-                          selectedTeamId === team.id
-                            ? "border-primary bg-primary text-primary-foreground shadow-2xs"
-                            : "border-border/80 bg-card text-foreground hover:bg-secondary/70"
-                        }`}
-                      >
-                        <span className="text-base">{team.icon}</span>
-                        <span className="truncate">{team.shortName}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {/* Clean Document Content Area (Clean flowing document with delicate colors) */}
+              <div className="p-6 sm:p-8 overflow-y-auto font-sans text-sm leading-relaxed text-foreground space-y-6 select-text">
 
-                {/* Crucial Ambulance / 108 Callout if applicable */}
+                {/* 108 Alert if ambulance */}
                 {isTarget108 && (
-                  <div className="rounded-xl border border-rose-400 bg-rose-50 dark:bg-rose-950/40 p-3.5 text-xs text-rose-950 dark:text-rose-200 font-bold space-y-1 shadow-2xs">
+                  <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-3 text-xs text-rose-950 dark:text-rose-200 font-semibold space-y-1 shadow-2xs">
                     <div className="flex items-center gap-2 text-rose-800 dark:text-rose-300">
-                      <Ambulance className="h-5 w-5 shrink-0 text-rose-700 dark:text-rose-400 animate-pulse" />
-                      <span className="uppercase tracking-wider font-black text-xs">
+                      <Ambulance className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400 animate-pulse" />
+                      <span className="uppercase tracking-wider font-extrabold text-[11px]">
                         108 Ambulance Dispatch Alert
                       </span>
                     </div>
-                    <p className="font-medium text-rose-900 dark:text-rose-200 leading-relaxed text-xs">
-                      Ask the IP: <strong>&ldquo;What is your exact current house number, street, or nearby landmark?&rdquo;</strong> so the ambulance crew can navigate immediately without delay.
+                    <p className="text-rose-900 dark:text-rose-200 leading-relaxed text-xs pl-6">
+                      Verify exact caller house number, street, or landmark so the ambulance crew can navigate immediately without delay.
                     </p>
                   </div>
                 )}
 
-                {/* Editable Caller Fields (pre-filled from Caller Intake) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="field-label mb-1 block font-semibold text-foreground">
-                      Caller Name (from Caller Intake)
-                    </label>
-                    <input
-                      type="text"
-                      value={editData.callerName}
-                      onChange={(e) =>
-                        setEditData((d) => ({ ...d, callerName: e.target.value }))
-                      }
-                      className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-foreground font-semibold outline-none focus:border-primary transition"
-                      placeholder="e.g. Akash Gupta"
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label mb-1 block font-semibold text-foreground">
-                      Contact Phone (from Caller Intake)
-                    </label>
-                    <input
-                      type="text"
-                      value={editData.phone}
-                      onChange={(e) =>
-                        setEditData((d) => ({ ...d, phone: e.target.value }))
-                      }
-                      className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-foreground font-mono font-semibold outline-none focus:border-primary transition"
-                      placeholder="e.g. 9876543210"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="field-label mb-1 block font-semibold text-foreground">
-                      Age
-                    </label>
-                    <input
-                      type="text"
-                      value={editData.age}
-                      onChange={(e) =>
-                        setEditData((d) => ({ ...d, age: e.target.value }))
-                      }
-                      className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-foreground font-semibold outline-none focus:border-primary transition"
-                      placeholder="e.g. 45"
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label mb-1 block font-semibold text-foreground">
-                      Sex / Gender
-                    </label>
-                    <input
-                      type="text"
-                      value={editData.sex}
-                      onChange={(e) =>
-                        setEditData((d) => ({ ...d, sex: e.target.value }))
-                      }
-                      className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-foreground font-semibold outline-none focus:border-primary transition"
-                      placeholder="e.g. Male"
-                    />
-                  </div>
-                </div>
-
-                {/* Exact Location & Landmark (HIGH VISIBILITY) */}
-                <div>
-                  <label className="field-label mb-1 block flex items-center justify-between font-semibold text-foreground">
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-rose-600" />
-                      Exact Pickup Landmark &amp; Current Location{" "}
-                      <span className="text-red-500 font-bold">*</span>
-                    </span>
-                    <span className="text-[10px] text-primary font-bold">
-                      Crucial for navigation &amp; ambulance
-                    </span>
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={editData.landmark}
-                    onChange={(e) =>
-                      setEditData((d) => ({ ...d, landmark: e.target.value }))
-                    }
-                    placeholder="e.g. Near Beltola Tiniali, Opposite SBI ATM, House No 14, Guwahati 781005"
-                    className="w-full rounded-lg border border-border/80 bg-background p-2.5 text-xs text-foreground font-medium outline-none focus:border-primary transition"
-                  />
-                </div>
-
-                {/* Chief Complaint */}
-                <div>
-                  <label className="field-label mb-1 block font-semibold text-foreground">
-                    Chief Complaint / Primary Clinical Reason
-                  </label>
-                  <input
-                    type="text"
-                    value={editData.chiefComplaint}
-                    onChange={(e) =>
-                      setEditData((d) => ({ ...d, chiefComplaint: e.target.value }))
-                    }
-                    className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-xs text-foreground font-semibold outline-none focus:border-primary transition"
-                  />
-                </div>
-
-                {/* Red Flags & Clinical Findings Box - Same design as Triage Outcome */}
-                <div
-                  className={`rounded-xl border p-3.5 shadow-2xs ${
-                    displayRedFlags.length > 0
-                      ? "border-red-300 bg-rose-50/90 dark:bg-rose-950/40"
-                      : "border-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/30"
-                  }`}
-                  data-testid="modal-red-flags-box"
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <p
-                      className={`flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider ${
-                        displayRedFlags.length > 0
-                          ? "text-red-700 dark:text-red-400"
-                          : "text-emerald-800 dark:text-emerald-300"
-                      }`}
-                    >
-                      {displayRedFlags.length > 0 ? (
-                        <>
-                          <ShieldAlert className="h-4 w-4 text-red-600" />
-                          Clinical Red Flags Detected ({displayRedFlags.length} points)
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                          Clinical Red Flags Assessment
-                        </>
-                      )}
-                    </p>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${
-                        displayRedFlags.length > 0
-                          ? "bg-red-600 text-white"
-                          : "bg-emerald-600 text-white"
-                      }`}
-                    >
-                      {displayRedFlags.length > 0 ? "High Alert" : "Stable"}
-                    </span>
+                {/* 1. CALLER DETAILS */}
+                <div className="space-y-2.5">
+                  <div className="pb-1 border-b border-blue-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-blue-700 dark:text-blue-400 tracking-tight">
+                      1. Caller Details
+                    </h3>
                   </div>
 
-                  {displayRedFlags.length > 0 ? (
-                    <ul
-                      className="space-y-1.5 text-xs text-red-950 dark:text-red-200"
-                      data-testid="modal-red-flags-list"
-                    >
-                      {displayRedFlags.map((flag, idx) => (
-                        <li
-                          key={idx}
-                          className="flex items-start gap-2 py-0.5 text-red-950 dark:text-red-200"
-                        >
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-600" />
-                          <span className="font-semibold leading-snug">{flag}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="flex items-center gap-2 py-1 text-xs font-semibold text-emerald-900 dark:text-emerald-200">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                      <span>No acute red-flag hemodynamic signs detected from caller inquiry.</span>
-                    </div>
-                  )}
+                  <ul className="space-y-2 pl-1">
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Name:</span>
+                      <input
+                        type="text"
+                        value={editData.callerName}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, callerName: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Phone Number:</span>
+                      <input
+                        type="text"
+                        value={editData.phone ? (editData.phone.startsWith("+91") ? editData.phone : `+91 ${editData.phone}`) : ""}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/^\+91\s*/, "").trim();
+                          setEditData((d) => ({ ...d, phone: raw }));
+                        }}
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium font-mono rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Age:</span>
+                      <input
+                        type="text"
+                        value={editData.age}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, age: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Gender:</span>
+                      <input
+                        type="text"
+                        value={editData.sex}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, sex: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Case Date:</span>
+                      <span className="px-1.5 py-0.5 font-medium text-foreground">
+                        {triageTimestamp}
+                      </span>
+                    </li>
+
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold shrink-0 mt-0.5 text-foreground">• Address:</span>
+                      <textarea
+                        rows={1}
+                        value={editData.landmark}
+                        onChange={(e) => {
+                          setEditData((d) => ({ ...d, landmark: e.target.value }));
+                          handleAutoResize(e);
+                        }}
+                        onFocus={handleAutoResize}
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition resize-none overflow-hidden leading-relaxed"
+                        placeholder=""
+                      />
+                    </li>
+                  </ul>
                 </div>
 
-                {/* Agent Handover Note */}
-                <div>
-                  <label className="field-label mb-1 block font-semibold text-foreground">
-                    Agent Dispatch Notes &amp; Handover Instructions
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={editData.agentNote}
-                    onChange={(e) =>
-                      setEditData((d) => ({ ...d, agentNote: e.target.value }))
-                    }
-                    placeholder="e.g. Patient advised to stay seated and resting. Alert but anxious. Call line kept open."
-                    className="w-full rounded-lg border border-border/80 bg-background p-2.5 text-xs text-foreground font-medium outline-none focus:border-primary transition"
-                  />
+                {/* 2. CLINICAL OVERVIEW */}
+                <div className="space-y-2.5">
+                  <div className="pb-1 border-b border-emerald-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 tracking-tight">
+                      2. Clinical Overview
+                    </h3>
+                  </div>
+
+                  <ul className="space-y-2 pl-1">
+                    <li className="space-y-1.5">
+                      <span className="font-bold block text-foreground">• Chief Complaint:</span>
+                      <div className="pl-5 space-y-1.5">
+                        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition shadow-2xs">
+                          <span className="h-2 w-2 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0 ring-2 ring-emerald-500/20" />
+                          <input
+                            type="text"
+                            value={editData.firstReason}
+                            onChange={(e) =>
+                              setEditData((d) => ({ ...d, firstReason: e.target.value }))
+                            }
+                            className="w-full bg-transparent outline-none font-semibold text-emerald-950 dark:text-emerald-100 text-xs sm:text-sm"
+                            placeholder="Primary Complaint"
+                          />
+                        </div>
+                        {editData.secondReason !== undefined && editData.secondReason !== "" && (
+                          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition shadow-2xs">
+                            <span className="h-2 w-2 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0 ring-2 ring-emerald-500/20" />
+                            <input
+                              type="text"
+                              value={editData.secondReason}
+                              onChange={(e) =>
+                                setEditData((d) => ({ ...d, secondReason: e.target.value }))
+                              }
+                              className="w-full bg-transparent outline-none font-semibold text-emerald-950 dark:text-emerald-100 text-xs sm:text-sm"
+                              placeholder="Secondary Complaint"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </li>
+
+                    {/* Clinical Red Flags point directly under Chief Complaint */}
+                    <li className="space-y-1.5">
+                      <span className="font-bold block text-rose-700 dark:text-rose-400">• Clinical Red Flags:</span>
+                      <div className="pl-5 space-y-1.5">
+                        {Array.isArray(editData.redFlags) && editData.redFlags.length > 0 ? (
+                          editData.redFlags.map((flag, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/70 dark:border-rose-800/50 focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-500/20 transition shadow-2xs"
+                            >
+                              <span className="h-2 w-2 rounded-full bg-rose-600 dark:bg-rose-400 shrink-0 ring-2 ring-rose-500/20" />
+                              <input
+                                type="text"
+                                value={flag}
+                                onChange={(e) => {
+                                  const updated = [...editData.redFlags];
+                                  updated[idx] = e.target.value;
+                                  setEditData((d) => ({ ...d, redFlags: updated }));
+                                }}
+                                className="w-full bg-transparent outline-none font-semibold text-rose-950 dark:text-rose-100 text-xs sm:text-sm"
+                                placeholder="Clinical Red Flag"
+                              />
+                            </div>
+                          ))
+                        ) : (
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50 text-xs font-semibold text-emerald-800 dark:text-emerald-300 shadow-2xs">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span>None reported (No acute hemodynamic danger signs)</span>
+                          </div>
+                        )}
+                      </div>
+                    </li>
+
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold shrink-0 mt-0.5 text-foreground">• History of Present Illness(from how long it happening):</span>
+                      <textarea
+                        rows={1}
+                        value={editData.hpiDuration}
+                        onChange={(e) => {
+                          setEditData((d) => ({ ...d, hpiDuration: e.target.value }));
+                          handleAutoResize(e);
+                        }}
+                        onFocus={handleAutoResize}
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition resize-none overflow-hidden"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold shrink-0 mt-0.5 text-foreground">• Associated Symptoms:</span>
+                      <textarea
+                        rows={1}
+                        value={editData.associatedSymptoms}
+                        onChange={(e) => {
+                          setEditData((d) => ({ ...d, associatedSymptoms: e.target.value }));
+                          handleAutoResize(e);
+                        }}
+                        onFocus={handleAutoResize}
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition resize-none overflow-hidden"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Any allergy:</span>
+                      <input
+                        type="text"
+                        value={editData.allergies}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, allergies: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Any medication:</span>
+                      <input
+                        type="text"
+                        value={editData.medications}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, medications: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium rounded transition"
+                        placeholder=""
+                      />
+                    </li>
+                  </ul>
                 </div>
+
+                {/* NOTICE BANNER */}
+                <div className="py-2.5 px-3 rounded-lg bg-purple-50/60 dark:bg-purple-950/20 text-purple-700 dark:text-purple-300 font-semibold text-center italic border border-purple-200/60 dark:border-purple-900/40 text-xs sm:text-sm">
+                  ( from 3 to 6 will be find out by the doctor )
+                </div>
+
+                {/* 3. DIAGNOSES BY THE DOCTOR */}
+                <div className="space-y-2">
+                  <div className="pb-1 border-b border-purple-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-purple-700 dark:text-purple-400 tracking-tight">
+                      3. Diagnoses By the Doctor
+                    </h3>
+                  </div>
+                  <ul className="space-y-1.5 pl-1">
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Primary Diagnosis:</span>
+                      <input
+                        type="text"
+                        value={editData.primaryDiagnosis}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, primaryDiagnosis: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Secondary Diagnoses:</span>
+                      <input
+                        type="text"
+                        value={editData.secondaryDiagnosis}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, secondaryDiagnosis: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                  </ul>
+                </div>
+
+                {/* 4. RESULTS & PROCEDURES */}
+                <div className="space-y-2">
+                  <div className="pb-1 border-b border-sky-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-sky-700 dark:text-sky-400 tracking-tight">
+                      4. Results &amp; Procedures
+                    </h3>
+                  </div>
+                  <ul className="space-y-1.5 pl-1">
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Diagnostic Tests Performed:</span>
+                      <input
+                        type="text"
+                        value={editData.diagnosticTests}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, diagnosticTests: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Key Findings:</span>
+                      <input
+                        type="text"
+                        value={editData.keyFindings}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, keyFindings: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Procedures Completed:</span>
+                      <input
+                        type="text"
+                        value={editData.proceduresCompleted}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, proceduresCompleted: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                  </ul>
+                </div>
+
+                {/* 5. TREATMENT PLAN & MEDICATIONS */}
+                <div className="space-y-2">
+                  <div className="pb-1 border-b border-amber-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-amber-700 dark:text-amber-400 tracking-tight">
+                      5. Treatment Plan &amp; Medications
+                    </h3>
+                  </div>
+                  <ul className="space-y-1.5 pl-1">
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• New Medications:</span>
+                      <input
+                        type="text"
+                        value={editData.newMedications}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, newMedications: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Changes to Existing Medications:</span>
+                      <input
+                        type="text"
+                        value={editData.changesToMedications}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, changesToMedications: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Care Instructions &amp; Lifestyle Modifications:</span>
+                      <input
+                        type="text"
+                        value={editData.careInstructions}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, careInstructions: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                  </ul>
+                </div>
+
+                {/* 6. FOLLOW-UP & CONTINUITY OF CARE */}
+                <div className="space-y-2">
+                  <div className="pb-1 border-b border-teal-500/25">
+                    <h3 className="text-base sm:text-lg font-bold text-teal-700 dark:text-teal-400 tracking-tight">
+                      6. Follow-Up &amp; Continuity of Care
+                    </h3>
+                  </div>
+                  <ul className="space-y-1.5 pl-1">
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Scheduled Appointments:</span>
+                      <input
+                        type="text"
+                        value={editData.scheduledAppointments}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, scheduledAppointments: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Referrals:</span>
+                      <input
+                        type="text"
+                        value={editData.referrals}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, referrals: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                    <li className="flex items-baseline gap-2">
+                      <span className="font-bold shrink-0 text-foreground">• Warning Signs / Emergency Instructions:</span>
+                      <input
+                        type="text"
+                        value={editData.warningSigns}
+                        onChange={(e) =>
+                          setEditData((d) => ({ ...d, warningSigns: e.target.value }))
+                        }
+                        className="w-full bg-transparent hover:bg-muted/30 focus:bg-primary/5 focus:ring-1 focus:ring-primary/20 px-1.5 py-0.5 outline-none font-medium text-foreground rounded transition"
+                      />
+                    </li>
+                  </ul>
+                </div>
+
               </div>
 
               {/* Modal Footer */}
-              <div className="border-t border-border/80 bg-secondary/30 px-5 py-3.5 flex items-center justify-between gap-3 shrink-0">
+              <div className="border-t border-border/80 bg-secondary/30 px-5 sm:px-6 py-3.5 flex items-center justify-between gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
@@ -633,11 +1117,15 @@ Agent Instructions: ${editData.agentNote || "Standard clinical handover."}`;
                     selectedTeam.id
                   )}`}
                 >
-                  <Send className="h-4 w-4" />
+                  {isSending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                   <span>
                     {isSending
                       ? "Transmitting..."
-                      : `Confirm & Transmit to ${selectedTeam.shortName}`}
+                      : `Confirm & Send to ${selectedTeam.shortName}`}
                   </span>
                 </button>
               </div>

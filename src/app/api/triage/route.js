@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getFacilities, saveCase } from "@/lib/db";
+import { getFacilities, saveCase, getCases } from "@/lib/db";
+import { generateNextCaseRef } from "@/lib/caseId";
 import {
   resolveCallerLocation,
   rankNearestFacilities,
@@ -9,7 +10,7 @@ import {
   isEsicHospital,
   isGovtDistrictHospital,
 } from "@/lib/geo";
-import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus } from "@/lib/triageEngine";
+import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase } from "@/lib/triageEngine";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,18 +24,6 @@ function getAgentCode(rawAgent) {
   if (str.includes("2") || str === "A2") return "A2";
   if (str.includes("1") || str === "A1") return "A1";
   return "A1";
-}
-
-function generateCaseRef(agentId, urgencyLevel) {
-  const agentCode = getAgentCode(agentId);
-  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const l1 = letters.charAt(Math.floor(Math.random() * letters.length));
-  const l2 = letters.charAt(Math.floor(Math.random() * letters.length));
-  const num = Math.floor(Math.random() * 10000) + 1;
-  const numStr = String(num).padStart(5, "0");
-  const urgStr = String(urgencyLevel || "Routine").trim().toUpperCase();
-  const urgLetter = urgStr.charAt(0) || "R";
-  return `C${agentCode}${l1}${l2}${numStr}${urgLetter}`;
 }
 
 export async function POST(request) {
@@ -181,14 +170,40 @@ export async function POST(request) {
     const nearestTieUp = nearest_facilities.find((f) => isTieUp(f));
     const isEsicWithin25Km = Boolean(nearestEsic && nearestEsic.distance_km != null && nearestEsic.distance_km <= 25);
 
-    if (triage.call_108 || explicitReferral.includes("108") || triage.referral_destination === "108 Ambulance") {
+    const ambulanceEval = isLifeThreateningAmbulanceCase(
+      notes,
+      triage.urgency_score || intake.severity_reported,
+      intake,
+      tState
+    );
+
+    const chatChoseHospital =
+      explicitReferral.includes("hospital") ||
+      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
+      (triage.referral_destination || "").toLowerCase().includes("hospital");
+
+    if (chatChoseHospital && !ambulanceEval.is108) {
+      triage.call_108 = false;
+      triage.referral_destination = "ESIC Hospital";
+      triage.call_referral_primary = "ESIC Hospital";
+      triage.call_referral_secondary = "104 Health Helpline";
+      triage.recommended_facility_type = nearestEsic
+        ? `${nearestEsic.name} (ESIC Hospital · 24x7 Casualty)`
+        : "ESIC Hospital (24x7 Casualty)";
+      triage.recommended_action = nearestEsic
+        ? `Direct patient immediately to ${nearestEsic.name} (${nearestEsic.pincode ? `PIN: ${nearestEsic.pincode}, ` : ""}${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 25km"}) casualty for acute medical evaluation.`
+        : "Direct patient immediately to nearest ESIC Hospital casualty.";
+    } else if (ambulanceEval.is108) {
+      triage.call_108 = true;
       triage.recommended_facility_type = nearestHospital
         ? `108 Emergency Ambulance / ${nearestHospital.name}`
         : "108 Emergency Ambulance / Nearest Hospital Casualty";
       triage.referral_destination = "108 Ambulance";
       triage.call_referral_primary = "108 Ambulance";
       triage.call_referral_secondary = nearestHospital?.name || "ESIC Hospital";
+      triage.recommended_action = ambulanceEval.reason || "Dispatch 108 Emergency Ambulance immediately. Instruct caller to stay calm and not exert.";
     } else if (isPsychCase || isNacoHIV) {
+      triage.call_108 = false;
       triage.referral_destination = "104 Health Helpline";
       triage.call_referral_primary = "104 Health Helpline";
       triage.call_referral_secondary = "ESIC Hospital";
@@ -229,15 +244,32 @@ export async function POST(request) {
       }
     } else {
       // -------------------------------------------------------------
-      // NON-EMERGENCY / NORMAL CASES (No major issue, mild to moderate):
-      // 1. Always give priority to ESIS Dispensary if dispensary is available / open!
-      // 2. If no dispensary available / open:
-      //    - Refer to ESIC Hospital if within 25 KM
-      //    - If no ESIC Hospital within 25 KM, refer to District Hospital or Tie-Up Hospital
+      // NON-EMERGENCY / NORMAL CASES (No major emergency, mild to moderate):
+      // 1. After 4:00 PM (and weekends / closed OPD hours):
+      //    Always prefer 104 Health Helpline (24x7 Doctor on Call) as Primary Immediate Destination!
+      //    Secondary Destination: ESIC Hospital (for escalation / in-person checkup).
+      // 2. Before 4:00 PM (regular Daytime OPD):
+      //    - Priority 1: ESIS Dispensary (if open / nearby)
+      //    - Priority 2: ESIC Hospital (if within 25 KM)
+      //    - Priority 3: District Hospital / Tie-Up Hospital
       // -------------------------------------------------------------
+      const istOffset = 5.5 * 60 * 60 * 1000;
+      const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+      const istMinutes = istDate.getHours() * 60 + istDate.getMinutes();
+      const isAfter4pmOrOffHours = istMinutes >= 960 || istMinutes < 600 || istDate.getDay() === 0 || istDate.getDay() === 6;
+
       if (!hasExplicitSpecialReferral) {
-        if (nearestDispensary || explicitReferral.includes("dispensary") || !nearest_facilities.length) {
-          // Priority 1: ESIS Dispensary (Synchronizes with EKMS AI chatbox outcome)
+        if (isAfter4pmOrOffHours) {
+          // After 4:00 PM: Always route non-emergency callers to 104 Health Helpline
+          triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
+          triage.recommended_action = "After 4:00 PM (regular OPD closed), advise caller to connect with 104 Health Helpline for 24x7 confidential doctor tele-consultation over the phone, or visit ESIC Hospital if symptoms escalate.";
+          triage.referral_destination = "104 Health Helpline";
+          triage.call_referral_primary = "104 Health Helpline";
+          triage.call_referral_primary_reason = "After 4:00 PM (regular OPD closed), connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+          triage.call_referral_secondary = "ESIC Hospital";
+          triage.call_referral_secondary_reason = "Guide to ESIC Hospital for in-person doctor checkup if symptoms persist or escalate.";
+        } else if (nearestDispensary || explicitReferral.includes("dispensary") || !nearest_facilities.length) {
+          // Priority 1: ESIS Dispensary during regular daytime OPD hours
           const disp = nearestDispensary;
           triage.recommended_facility_type = disp
             ? `${disp.name} (ESIS Dispensary · Primary Care OPD)`
@@ -253,7 +285,7 @@ export async function POST(request) {
           triage.call_referral_secondary = "104 Health Helpline";
           triage.call_referral_secondary_reason = "104 Health Helpline for 24x7 tele-doctor consultation over the phone.";
         } else if (isEsicWithin25Km) {
-          // Priority 2: ESIC Hospital within 25 KM
+          // Priority 2: ESIC Hospital within 25 KM during regular daytime OPD
           triage.recommended_facility_type = nearestEsic
             ? `${nearestEsic.name} (ESIC Hospital · Secondary Care)`
             : "ESIC Hospital";
@@ -303,6 +335,7 @@ export async function POST(request) {
 
 
 
+
     if (!triage.referral_destination) {
       triage.referral_destination = isSevere ? (nearestHospital?.name || "ESIC Hospital") : (nearestDispensary?.name || "ESIS Dispensary");
       triage.referral_reason = triage.referral_reason || triage.recommended_action || "Guided to nearest healthcare facility.";
@@ -325,8 +358,17 @@ export async function POST(request) {
 
     const latency_ms = Date.now() - startTime;
     const rawAgent = intake.agent_id || intake.agent || "A1";
-    const case_ref = generateCaseRef(rawAgent, triage.urgency_level);
     const agentCode = getAgentCode(rawAgent);
+
+    // Retrieve existing cases to enforce serial Case ID or same-number caller Case ID retention
+    let existingCases = [];
+    try {
+      existingCases = (await getCases().catch(() => [])) || [];
+    } catch {
+      existingCases = [];
+    }
+
+    const case_ref = generateNextCaseRef(existingCases, intake.phone);
 
     const casePayload = {
       case_ref,
@@ -382,7 +424,13 @@ export async function POST(request) {
   } catch (err) {
     console.error("Triage error fallback:", err);
     const safeIntake = intake || {};
-    const fallbackCaseRef = `CA1${Date.now().toString().slice(-6)}U`;
+    let fallbackCases = [];
+    try {
+      fallbackCases = (await getCases().catch(() => [])) || [];
+    } catch {
+      fallbackCases = [];
+    }
+    const fallbackCaseRef = generateNextCaseRef(fallbackCases, safeIntake.phone);
     let fallbackFacilities = [];
     try {
       fallbackFacilities = (await getFacilities().catch(() => [])) || [];

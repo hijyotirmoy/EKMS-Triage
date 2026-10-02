@@ -21,6 +21,15 @@ import { CallManager } from "@/components/CallManager";
 import { getFirestoreDb } from "@/lib/firebase";
 import { doc, onSnapshot, deleteDoc, updateDoc } from "firebase/firestore";
 import { resolveClientIpAndGeo } from "@/lib/geoIpResolver";
+import {
+  getCachedStats,
+  setCachedStats,
+  getCachedMeta,
+  setCachedMeta,
+  getCachedCases,
+} from "@/lib/clientCache";
+import { subscribeToSync } from "@/lib/broadcastSync";
+
 
 const NAV_ITEMS = [
   { id: "home", href: "/", label: "Live Intake & Triage", icon: PhoneCall },
@@ -32,8 +41,8 @@ const NAV_ITEMS = [
 export function AppShell({ activePage = "home", children }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [meta, setMeta] = useState(null);
-  const [stats, setStats] = useState(null);
+  const [meta, setMeta] = useState(() => getCachedMeta());
+  const [stats, setStats] = useState(() => getCachedStats());
   const [refreshKey, setRefreshKey] = useState(0);
   const [incomingCallerInfo, setIncomingCallerInfo] = useState(null);
   const [callSession, setCallSession] = useState(null);
@@ -115,7 +124,10 @@ export function AppShell({ activePage = "home", children }) {
   const loadMeta = useCallback(() => {
     api
       .get("/meta")
-      .then(({ data }) => setMeta(data))
+      .then(({ data }) => {
+        setMeta(data);
+        setCachedMeta(data);
+      })
       .catch(() => {});
   }, []);
 
@@ -125,8 +137,11 @@ export function AppShell({ activePage = "home", children }) {
 
   const loadStats = useCallback(() => {
     api
-      .get(`/cases/stats?_t=${Date.now()}`)
-      .then(({ data }) => setStats(data))
+      .get("/cases/stats")
+      .then(({ data }) => {
+        setStats(data);
+        setCachedStats(data);
+      })
       .catch(() => {});
   }, []);
 
@@ -135,14 +150,62 @@ export function AppShell({ activePage = "home", children }) {
     loadStats();
   }, [loadStats]);
 
-  // Cache-enabled stats refresher (served from server memory cache with 0 Firestore reads)
+  // Real-time cross-tab sync for stats without making any server/database reads
+  useEffect(() => {
+    const unsub = subscribeToSync((msg) => {
+      const event = msg?.type;
+      const data = msg?.payload;
+      if (event === "NEW_CASE") {
+        setStats((prev) => {
+          const currentTotal = prev?.total || 0;
+          const urgency = data?.triage?.urgency_level || "Routine";
+          const newStats = {
+            ...prev,
+            total: currentTotal + 1,
+            by_urgency: {
+              ...(prev?.by_urgency || {}),
+              [urgency]: ((prev?.by_urgency?.[urgency]) || 0) + 1,
+            },
+          };
+          setCachedStats(newStats);
+          return newStats;
+        });
+      } else if (event === "DELETE_CASE") {
+        setStats((prev) => {
+          const currentTotal = Math.max(0, (prev?.total || 1) - 1);
+          const newStats = {
+            ...prev,
+            total: currentTotal,
+          };
+          setCachedStats(newStats);
+          return newStats;
+        });
+      } else if (event === "SYNC_STATS_TOTAL") {
+        if (typeof data?.total === "number") {
+          setStats((prev) => {
+            const newStats = {
+              ...(prev || {}),
+              total: data.total,
+            };
+            setCachedStats(newStats);
+            return newStats;
+          });
+        }
+      } else if (event === "FACILITIES_UPDATED") {
+        loadMeta();
+      }
+    });
+    return unsub;
+  }, [loadMeta]);
+
+  // Initial stats load from memory/cache
   useEffect(() => {
     loadStats();
-    const interval = setInterval(() => {
-      loadStats();
-    }, 45000); // 45 seconds polling
-    return () => clearInterval(interval);
   }, [loadStats, refreshKey]);
+
+  const totalCaseCount = stats?.total != null ? stats.total : (getCachedCases()?.length ?? 0);
+
+
 
   const handleCallerConnected = useCallback((info) => {
     setIncomingCallerInfo(info ? { ...info, _ts: Date.now() } : null);
@@ -244,7 +307,7 @@ export function AppShell({ activePage = "home", children }) {
             <Link
               href="/cases"
               data-testid="header-case-count"
-              className={`hidden sm:flex mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
+              className={`hidden sm:flex rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "cases"
                   ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
                   : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
@@ -252,13 +315,13 @@ export function AppShell({ activePage = "home", children }) {
               title="Open Triage Case logs page"
             >
               <span>Triage Case</span>
-              <span className="font-mono text-emerald-800">({stats?.total ?? "—"})</span>
+              <span className="font-bold text-emerald-800">({totalCaseCount})</span>
             </Link>
 
             {/* Facilities count link -> opens /facilities */}
             <Link
               href="/facilities"
-              className={`hidden sm:flex mono rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
+              className={`hidden sm:flex rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "facilities"
                   ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
                   : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
@@ -266,7 +329,7 @@ export function AppShell({ activePage = "home", children }) {
               title="Open Triage Facility directory page"
             >
               <span>Triage Facility</span>
-              <span className="font-mono text-emerald-800">({meta?.facility_count ?? "—"})</span>
+              <span className="font-bold text-emerald-800">({meta?.facility_count ?? "—"})</span>
             </Link>
 
             {/* Logged in Agent Badge */}
@@ -347,19 +410,20 @@ export function AppShell({ activePage = "home", children }) {
                 <Link
                   href="/cases"
                   onClick={() => setMenuOpen(false)}
-                  className="mono rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
+                  className="rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
                 >
-                  Cases: <span className="text-emerald-800">{stats?.total ?? "—"}</span>
+                  Cases: <span className="font-bold text-emerald-800">{totalCaseCount}</span>
                 </Link>
                 <Link
                   href="/facilities"
                   onClick={() => setMenuOpen(false)}
-                  className="mono rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
+                  className="rounded-md bg-secondary/80 px-2 py-0.5 border border-border/60 text-foreground hover:bg-secondary"
                 >
-                  Fac: <span className="text-emerald-800">{meta?.facility_count ?? "—"}</span>
+                  Fac: <span className="font-bold text-emerald-800">{meta?.facility_count ?? "—"}</span>
                 </Link>
               </div>
             </div>
+
 
             <div className="mt-4 flex-1 space-y-1.5">
               {NAV_ITEMS.map(({ id, href, label, icon: Icon }) => {

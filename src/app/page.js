@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { TriageConsole } from "@/components/TriageConsole";
+import { UnderDevModal } from "@/components/UnderDevModal";
 
 export default function Home() {
   useEffect(() => {
@@ -10,16 +11,20 @@ export default function Home() {
   }, []);
 
   return (
-    <AppShell activePage="home">
-      {({ meta, bump, incomingCallerInfo, currentAgent, callSession }) => (
-        <TriageConsole
-          meta={meta}
-          onCaseCreated={bump}
-          incomingCaller={incomingCallerInfo}
-          currentAgent={currentAgent}
-          callSession={callSession}
-        />
-      )}
-    </AppShell>
+    <>
+      <UnderDevModal />
+      <AppShell activePage="home">
+        {({ meta, bump, incomingCallerInfo, currentAgent, callSession }) => (
+          <TriageConsole
+            meta={meta}
+            onCaseCreated={bump}
+            incomingCaller={incomingCallerInfo}
+            currentAgent={currentAgent}
+            callSession={callSession}
+          />
+        )}
+      </AppShell>
+    </>
   );
 }
+

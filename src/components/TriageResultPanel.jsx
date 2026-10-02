@@ -169,16 +169,31 @@ export function resolveDirectiveIds(t, result) {
   const currentMinutes = istDate.getHours() * 60 + istDate.getMinutes();
   const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM
 
+  const chatRef = result?.ekms_ai_context?.triageState?.referralDestination || result?.ekms_ai_context?.referralDestination;
   const isEmergency =
-    t?.call_108 ||
-    (t?.urgency_score != null && Number(t.urgency_score) >= 8) ||
-    /\b(108|ambulance|severe trauma|cardiac arrest|massive bleed)\b/i.test(intakeText);
+    Boolean(t?.call_108) ||
+    (/\b(108|ambulance)\b/i.test(t?.referral_destination || "") && !/\b(hospital|dispensary)\b/i.test(chatRef || ""));
 
   let primaryDest =
-    t?.referral_destination ||
     t?.call_referral_primary ||
-    result?.ekms_ai_context?.triageState?.referralDestination ||
-    result?.ekms_ai_context?.referralDestination;
+    t?.referral_destination ||
+    chatRef;
+
+  if (chatRef && chatRef.toLowerCase().includes("hospital") && !t?.call_108) {
+    primaryDest = "ESIC Hospital";
+  }
+
+  if (!isEmergency && isOffHours) {
+    if (
+      !primaryDest ||
+      (!isNacoHIV &&
+        !isPsych &&
+        !t?.call_108 &&
+        (primaryDest.toLowerCase().includes("hospital") || primaryDest.toLowerCase().includes("dispensary")))
+    ) {
+      primaryDest = "104 Health Helpline";
+    }
+  }
 
   if (!primaryDest) {
     if (isEmergency) {
@@ -194,6 +209,10 @@ export function resolveDirectiveIds(t, result) {
     t?.call_referral_secondary ||
     t?.secondary_referral_destination ||
     (isOffHours ? "ESIC Hospital" : "104 Health Helpline");
+
+  if (!isEmergency && isOffHours && primaryDest.includes("104") && (!secondaryDest || secondaryDest.includes("104"))) {
+    secondaryDest = "ESIC Hospital";
+  }
 
   const primaryId = mapDestinationToDirectiveId(primaryDest);
   let secondaryId = mapDestinationToDirectiveId(secondaryDest);
@@ -476,7 +495,7 @@ export const TriageResultPanel = ({
           .map((m) => m.text || m.content || "")
           .join(" ")
       : "";
-    const callerText = `${result?.intake?.symptom_notes || ""} ${callerChat}`.toLowerCase().trim();
+    const callerText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.caller_spoken_text || ""} ${t?.primary_complaint || ""} ${result?.ekms_ai_context?.triageState?.condition || ""} ${result?.ekms_ai_context?.triageState?.suspectedCondition || ""} ${callerChat}`.toLowerCase().trim();
     const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(callerText);
 
     return summarizeRedFlags(raw, callerText, isSafe);

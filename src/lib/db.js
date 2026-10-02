@@ -1,13 +1,16 @@
-// Firebase & Unified Database Layer
+// Firebase & Unified Database Layer with Ultra-Low Read Architecture
 import defaultFacilities from "../data/facilities.json";
 
-// In-memory local cache/fallback for instant zero-config launch
+// In-memory local cache/fallback for instant zero-config launch and 0-read execution
 let memoryFacilities = [...defaultFacilities];
+let isFacilitiesLoadedFromFirestore = false;
 let deletedFacilityIds = new Set();
+let facilitiesVersion = Date.now();
+
 let memoryCases = [
   {
     id: "case-seed-1",
-    case_ref: "CASE-260923-M341",
+    case_ref: "CA0001AB01",
     intake: {
       caller_name: "Ramesh Kalita",
       phone: "9876543210",
@@ -74,9 +77,13 @@ let memoryCases = [
   },
 ];
 
+let isCasesLoadedFromFirestore = false;
+let cachedStats = null;
+let cachedStatsTimestamp = 0;
+
 // Helper to check if Firebase is configured
 export function isFirebaseConfigured() {
-  return true; // Configured via default Firebase credentials in @/lib/firebase
+  return true;
 }
 
 let firestoreInstance = null;
@@ -100,11 +107,11 @@ async function getFirestoreContext() {
       }
       firestoreInstance = admin.firestore();
       firestoreType = "admin";
-      return { db: firestoreInstance, type: firestoreType };
+      return { db: firestoreInstance, type: "admin" };
     }
 
-    // 2. Client Web SDK via centralized Firebase instance
-    const { getFirestoreDb } = await import("@/lib/firebase");
+    // 2. Client SDK fallback
+    const { getFirestoreDb } = await import("./firebase");
     firestoreInstance = getFirestoreDb();
     firestoreType = "web";
     return { db: firestoreInstance, type: firestoreType };
@@ -114,20 +121,7 @@ async function getFirestoreContext() {
   return null;
 }
 
-// Master In-Memory Caches & Timestamps to drastically eliminate repetitive Firestore reads
-let facilitiesCache = null;
-let facilitiesCacheTimestamp = 0;
-const FACILITIES_CACHE_TTL_MS = 5000; // 5 seconds TTL
-
-let casesCache = null;
-let casesCacheTimestamp = 0;
-const CASES_CACHE_TTL_MS = 2000; // 2 seconds TTL
-
-let cachedStats = null;
-let cachedStatsTimestamp = 0;
-const STATS_CACHE_TTL_MS = 3000; // 3 seconds TTL
-
-// Helper to get facilities metadata state (to know if DB is initialized/seeded and tracking deleted items)
+// Helper to get facilities metadata state
 async function getFacilitiesMeta(ctx) {
   if (!ctx) return { seeded: false, deleted_ids: [] };
   try {
@@ -159,89 +153,78 @@ async function saveFacilitiesMeta(ctx, data) {
   }
 }
 
-// Facilities operations directly connected with Firestore
+/**
+ * High-Efficiency Facilities Fetch:
+ * Returns from server memory in 0ms with 0 Firestore reads.
+ * Only reads from Firestore once on cold boot.
+ */
 export async function getFacilities(filters = {}) {
   const { q, district, facility_type } = filters;
 
-  let list = [];
-  const ctx = await getFirestoreContext();
-  let meta = { seeded: false, deleted_ids: [] };
+  if (!isFacilitiesLoadedFromFirestore) {
+    const ctx = await getFirestoreContext();
+    if (ctx) {
+      try {
+        const meta = await getFacilitiesMeta(ctx);
+        const deletedSet = new Set([
+          ...(meta.deleted_ids || []).map(String),
+          ...Array.from(deletedFacilityIds).map(String),
+        ]);
 
-  if (ctx) {
-    try {
-      meta = await getFacilitiesMeta(ctx);
-      const deletedSet = new Set([
-        ...(meta.deleted_ids || []).map(String),
-        ...Array.from(deletedFacilityIds).map(String),
-      ]);
-
-      let firestoreList = [];
-      if (ctx.type === "admin") {
-        const snap = await ctx.db.collection("facilities").get();
-        if (!snap.empty) {
-          firestoreList = snap.docs.map((d) => {
-            const data = d.data();
-            return { id: d.id, ...data, _doc_id: d.id };
-          });
-        }
-      } else {
-        const { collection, getDocs } = await import("firebase/firestore");
-        const snap = await getDocs(collection(ctx.db, "facilities"));
-        if (!snap.empty) {
-          firestoreList = snap.docs.map((d) => {
-            const data = d.data();
-            return { id: d.id, ...data, _doc_id: d.id };
-          });
-        }
-      }
-
-      if (firestoreList.length > 0) {
-        // Filter out any explicitly deleted facilities
-        list = firestoreList.filter((f) => {
-          if (deletedSet.has(String(f.id))) return false;
-          if (f._doc_id && deletedSet.has(String(f._doc_id))) return false;
-          if (f.site_code && deletedSet.has(String(f.site_code))) return false;
-          return true;
-        });
-        memoryFacilities = list;
-      } else if (!meta.seeded && defaultFacilities && defaultFacilities.length > 0) {
-        // Only seed ONE TIME on fresh new database (never resurrect after user deletions)
-        list = defaultFacilities.filter((f) => !deletedSet.has(String(f.id)));
-        memoryFacilities = list;
-        setTimeout(async () => {
-          try {
-            await saveFacilitiesMeta(ctx, { seeded: true, deleted_ids: [] });
-            if (ctx.type === "admin") {
-              const batch = ctx.db.batch();
-              for (const fac of defaultFacilities) {
-                const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
-                const docRef = ctx.db.collection("facilities").doc(docId);
-                batch.set(docRef, fac);
-              }
-              await batch.commit();
-            } else {
-              const { doc, setDoc } = await import("firebase/firestore");
-              for (const fac of defaultFacilities) {
-                const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
-                await setDoc(doc(ctx.db, "facilities", docId), fac).catch(() => {});
-              }
-            }
-          } catch (seedErr) {
-            console.warn("Auto-seeding facilities notice:", seedErr.message);
+        let firestoreList = [];
+        if (ctx.type === "admin") {
+          const snap = await ctx.db.collection("facilities").get();
+          if (!snap.empty) {
+            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data(), _doc_id: d.id }));
           }
-        }, 100);
-      } else {
-        // Database was seeded before and user deleted facilities
-        list = [];
-        memoryFacilities = [];
+        } else {
+          const { collection, getDocs } = await import("firebase/firestore");
+          const snap = await getDocs(collection(ctx.db, "facilities"));
+          if (!snap.empty) {
+            firestoreList = snap.docs.map((d) => ({ id: d.id, ...d.data(), _doc_id: d.id }));
+          }
+        }
+
+        if (firestoreList.length > 0) {
+          memoryFacilities = firestoreList.filter((f) => {
+            if (deletedSet.has(String(f.id))) return false;
+            if (f._doc_id && deletedSet.has(String(f._doc_id))) return false;
+            if (f.site_code && deletedSet.has(String(f.site_code))) return false;
+            return true;
+          });
+        } else if (!meta.seeded && defaultFacilities && defaultFacilities.length > 0) {
+          memoryFacilities = defaultFacilities.filter((f) => !deletedSet.has(String(f.id)));
+          setTimeout(async () => {
+            try {
+              await saveFacilitiesMeta(ctx, { seeded: true, deleted_ids: [] });
+              if (ctx.type === "admin") {
+                const batch = ctx.db.batch();
+                for (const fac of defaultFacilities) {
+                  const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
+                  const docRef = ctx.db.collection("facilities").doc(docId);
+                  batch.set(docRef, fac);
+                }
+                await batch.commit();
+              } else {
+                const { doc, setDoc } = await import("firebase/firestore");
+                for (const fac of defaultFacilities) {
+                  const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
+                  await setDoc(doc(ctx.db, "facilities", docId), fac).catch(() => {});
+                }
+              }
+            } catch (seedErr) {
+              console.warn("Auto-seeding facilities notice:", seedErr.message);
+            }
+          }, 100);
+        }
+      } catch (e) {
+        console.warn("Firestore facilities cold-boot error:", e.message);
       }
-    } catch (e) {
-      console.warn("Firestore facilities fetch error:", e.message);
-      list = memoryFacilities.filter((f) => !deletedFacilityIds.has(String(f.id)));
     }
-  } else {
-    list = memoryFacilities.filter((f) => !deletedFacilityIds.has(String(f.id)));
+    isFacilitiesLoadedFromFirestore = true;
   }
+
+  const list = memoryFacilities.filter((f) => !deletedFacilityIds.has(String(f.id)));
 
   return list.filter((f) => {
     if (district && district !== "all") {
@@ -296,10 +279,13 @@ export async function addFacilities(newItems) {
   const ctx = await getFirestoreContext();
   const addedIds = new Set(newItems.map((item) => String(item.id || item.site_code || "")));
 
-  // Clear newly added IDs from deleted tracking
   for (const id of addedIds) {
     if (id) deletedFacilityIds.delete(id);
   }
+
+  // Update in-memory cache immediately
+  memoryFacilities = [...newItems, ...memoryFacilities.filter((f) => !addedIds.has(String(f.id)))];
+  facilitiesVersion = Date.now();
 
   if (ctx) {
     try {
@@ -321,85 +307,111 @@ export async function addFacilities(newItems) {
         for (const item of newItems) {
           const docId = String(item.id || item.site_code || `fac-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
           item.id = item.id || docId;
-          await setDoc(doc(ctx.db, "facilities", docId), item);
+          await setDoc(doc(ctx.db, "facilities", docId), item).catch(() => {});
         }
       }
     } catch (e) {
-      console.warn("Could not batch write facilities to Firestore:", e.message);
+      console.warn("Could not save new facilities to Firestore:", e.message);
     }
   }
 
-  // Update in-memory cache
-  memoryFacilities = [...newItems, ...memoryFacilities];
-  facilitiesCache = memoryFacilities;
-  facilitiesCacheTimestamp = Date.now();
-  return newItems.length;
+  return newItems;
 }
 
-export async function deleteFacilities(ids) {
-  if (!ids || !ids.length) return 0;
-  const idSet = new Set(ids.map((id) => String(id)));
+export async function addFacility(facility) {
+  const res = await addFacilities([facility]);
+  return res[0];
+}
 
-  // 1. Immediately record in-memory blacklist & remove from memory
-  for (const id of idSet) {
-    deletedFacilityIds.add(id);
-  }
-  const beforeCount = memoryFacilities.length;
-  memoryFacilities = memoryFacilities.filter((f) => {
-    if (idSet.has(String(f.id))) return false;
-    if (f._doc_id && idSet.has(String(f._doc_id))) return false;
-    if (f.site_code && idSet.has(String(f.site_code))) return false;
-    return true;
+export async function updateFacility(id, updates) {
+  const strId = String(id);
+  let updatedItem = null;
+
+  // In-memory write-through
+  memoryFacilities = memoryFacilities.map((f) => {
+    if (String(f.id) === strId || String(f.site_code) === strId || String(f._doc_id) === strId) {
+      updatedItem = { ...f, ...updates };
+      return updatedItem;
+    }
+    return f;
   });
-  facilitiesCache = memoryFacilities;
-  facilitiesCacheTimestamp = Date.now();
+  facilitiesVersion = Date.now();
 
   const ctx = await getFirestoreContext();
-  let deletedFromFirestoreCount = 0;
+  if (ctx && updatedItem) {
+    try {
+      if (ctx.type === "admin") {
+        await ctx.db.collection("facilities").doc(strId).set(updatedItem, { merge: true });
+      } else {
+        const { doc, setDoc } = await import("firebase/firestore");
+        await setDoc(doc(ctx.db, "facilities", strId), updatedItem, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Could not update facility in Firestore:", e.message);
+    }
+  }
 
+  return updatedItem;
+}
+
+export async function deleteFacility(id) {
+  const strId = String(id);
+  deletedFacilityIds.add(strId);
+  memoryFacilities = memoryFacilities.filter((f) => String(f.id) !== strId && String(f._doc_id) !== strId);
+  facilitiesVersion = Date.now();
+
+  const ctx = await getFirestoreContext();
   if (ctx) {
     try {
-      // 2. Persist to system metadata so deletions survive across all future restarts & queries
       const meta = await getFacilitiesMeta(ctx);
-      const combinedDeleted = Array.from(new Set([...(meta.deleted_ids || []), ...Array.from(idSet)]));
-      await saveFacilitiesMeta(ctx, { seeded: true, deleted_ids: combinedDeleted });
+      const currentDeleted = Array.from(new Set([...(meta.deleted_ids || []), strId]));
+      await saveFacilitiesMeta(ctx, { deleted_ids: currentDeleted });
 
-      // 3. Scan & remove all matching documents from Firestore
       if (ctx.type === "admin") {
-        const snap = await ctx.db.collection("facilities").get();
-        if (!snap.empty) {
-          const batch = ctx.db.batch();
-          snap.docs.forEach((d) => {
-            const data = d.data();
-            if (
-              idSet.has(String(d.id)) ||
-              idSet.has(String(data.id)) ||
-              (data.site_code && idSet.has(String(data.site_code)))
-            ) {
-              batch.delete(d.ref);
-              deletedFromFirestoreCount++;
-            }
-          });
-          await batch.commit();
-        }
+        await ctx.db.collection("facilities").doc(strId).delete().catch(() => {});
       } else {
-        const { collection, getDocs, deleteDoc, doc } = await import("firebase/firestore");
-        // Direct doc ID deletion
-        for (const id of idSet) {
-          await deleteDoc(doc(ctx.db, "facilities", id)).catch(() => {});
+        const { doc, deleteDoc } = await import("firebase/firestore");
+        await deleteDoc(doc(ctx.db, "facilities", strId)).catch(() => {});
+      }
+    } catch (e) {
+      console.warn("Could not delete facility from Firestore:", e.message);
+    }
+  }
+
+  return true;
+}
+
+export async function deleteFacilities(ids = []) {
+  if (!Array.isArray(ids) || !ids.length) return 0;
+  const strIds = ids.map(String);
+  const idSet = new Set(strIds);
+
+  for (const id of strIds) {
+    deletedFacilityIds.add(id);
+  }
+
+  const beforeCount = memoryFacilities.length;
+  memoryFacilities = memoryFacilities.filter((f) => !idSet.has(String(f.id)) && !idSet.has(String(f._doc_id)));
+  facilitiesVersion = Date.now();
+
+  const ctx = await getFirestoreContext();
+  if (ctx) {
+    try {
+      const meta = await getFacilitiesMeta(ctx);
+      const currentDeleted = Array.from(new Set([...(meta.deleted_ids || []), ...strIds]));
+      await saveFacilitiesMeta(ctx, { deleted_ids: currentDeleted });
+
+      if (ctx.type === "admin") {
+        const batch = ctx.db.batch();
+        for (const strId of strIds) {
+          const docRef = ctx.db.collection("facilities").doc(strId);
+          batch.delete(docRef);
         }
-        // Match by doc contents
-        const snap = await getDocs(collection(ctx.db, "facilities"));
-        for (const d of snap.docs) {
-          const data = d.data();
-          if (
-            idSet.has(String(d.id)) ||
-            idSet.has(String(data.id)) ||
-            (data.site_code && idSet.has(String(data.site_code)))
-          ) {
-            await deleteDoc(d.ref).catch(() => {});
-            deletedFromFirestoreCount++;
-          }
+        await batch.commit();
+      } else {
+        const { doc, deleteDoc } = await import("firebase/firestore");
+        for (const strId of strIds) {
+          await deleteDoc(doc(ctx.db, "facilities", strId)).catch(() => {});
         }
       }
     } catch (e) {
@@ -407,22 +419,24 @@ export async function deleteFacilities(ids) {
     }
   }
 
-  return Math.max(beforeCount - memoryFacilities.length, deletedFromFirestoreCount, ids.length);
+  return Math.max(beforeCount - memoryFacilities.length, ids.length);
 }
 
-// Cases operations with smart in-memory caching
+/**
+ * Ultra-Low-Read Cases Fetch:
+ * Only reads from Firestore once on cold boot.
+ * Subsequent requests (including page refreshes, searches, filters, pagination)
+ * are served directly from server memory with 0 Firestore reads!
+ */
 export async function getCases(filters = {}) {
-  const { urgency, q } = filters;
-  const now = Date.now();
+  const { urgency, q, since } = filters;
 
-  let list = casesCache;
-
-  // Only read from Firestore if cache is empty or older than 60s TTL
-  if (!list || now - casesCacheTimestamp > CASES_CACHE_TTL_MS) {
+  // Cold-boot load only once
+  if (!isCasesLoadedFromFirestore) {
     const ctx = await getFirestoreContext();
-    list = memoryCases;
     if (ctx) {
       try {
+        let list = [];
         if (ctx.type === "admin") {
           const snap = await ctx.db.collection("cases").get();
           list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -432,13 +446,25 @@ export async function getCases(filters = {}) {
           list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         }
         list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        if (list.length > 0) {
+          memoryCases = list;
+        }
       } catch (e) {
-        console.warn("Firestore fetch cases notice:", e.message);
+        console.warn("Firestore cold-boot cases fetch notice:", e.message);
       }
     }
-    casesCache = list;
-    casesCacheTimestamp = now;
-    memoryCases = list;
+    isCasesLoadedFromFirestore = true;
+    recomputeCachedStats(memoryCases);
+  }
+
+  let list = memoryCases;
+
+  // Incremental delta sync: return only new cases created after timestamp
+  if (since) {
+    const sinceTime = new Date(since).getTime();
+    if (!isNaN(sinceTime) && sinceTime > 0) {
+      list = list.filter((c) => new Date(c.created_at || 0).getTime() > sinceTime);
+    }
   }
 
   return list.filter((c) => {
@@ -459,9 +485,14 @@ export async function getCases(filters = {}) {
 
 export async function getCaseByRef(caseRef) {
   const all = await getCases();
-  return all.find((c) => c.case_ref === caseRef) || null;
+  return all.find((c) => c.case_ref === caseRef || c.id === caseRef) || null;
 }
 
+/**
+ * Save Case:
+ * Exactly 1 Firestore write, 0 Firestore reads.
+ * Immediately prepends to server memory cache.
+ */
 export async function saveCase(caseData) {
   const ctx = await getFirestoreContext();
   if (ctx) {
@@ -478,11 +509,10 @@ export async function saveCase(caseData) {
       console.warn("Could not save case to Firestore:", e.message);
     }
   }
-  // Write-through to cache immediately (0 Firestore reads needed for subsequent fetches!)
-  memoryCases = memoryCases.filter((c) => c.case_ref !== caseData.case_ref);
+
+  // Prepend directly to in-memory cache (0 reads needed!)
+  memoryCases = memoryCases.filter((c) => (c.case_ref !== caseData.case_ref) && (c.id !== caseData.id));
   memoryCases.unshift(caseData);
-  casesCache = memoryCases;
-  casesCacheTimestamp = Date.now();
   recomputeCachedStats(memoryCases);
   return caseData;
 }
@@ -503,6 +533,10 @@ function recomputeCachedStats(casesList) {
   return cachedStats;
 }
 
+/**
+ * Delete Case:
+ * Exactly 1 Firestore delete, 0 Firestore reads.
+ */
 export async function deleteCase(caseRef) {
   const ctx = await getFirestoreContext();
   if (ctx) {
@@ -540,9 +574,8 @@ export async function deleteCase(caseRef) {
       console.warn("Could not delete case from Firestore:", e.message);
     }
   }
+
   memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef && c.id !== caseRef);
-  casesCache = memoryCases;
-  casesCacheTimestamp = Date.now();
   recomputeCachedStats(memoryCases);
   return true;
 }
@@ -555,11 +588,16 @@ export async function deleteCases(caseRefs = []) {
   return caseRefs.length;
 }
 
+/**
+ * Stats:
+ * Calculated 100% in-memory from memoryCases.
+ * Initialized once from Firestore if not loaded yet.
+ * 0 Firestore reads on all subsequent calls!
+ */
 export async function getCaseStats() {
-  const now = Date.now();
-  if (cachedStats && now - cachedStatsTimestamp < STATS_CACHE_TTL_MS) {
-    return cachedStats;
+  if (!isCasesLoadedFromFirestore) {
+    await getCases();
   }
-  const all = await getCases();
-  return recomputeCachedStats(all);
+  return recomputeCachedStats(memoryCases);
 }
+

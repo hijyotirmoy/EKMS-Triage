@@ -22,6 +22,8 @@ import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { LiveScribeWindow } from "./LiveScribeWindow";
 import { extractClinicalEntities, processTranscriptionForAi } from "../lib/clinicalAdaptiveEngine";
+import { broadcastEvent } from "../lib/broadcastSync";
+import { appendCaseToLocalCache } from "../lib/clientCache";
 
 const EMPTY = {
   caller_name: "",
@@ -343,6 +345,22 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       const { data } = await api.post("/triage", payload);
       setResult(data);
       setActiveRightTab("triage");
+      
+      // Update local storage cache & broadcast to other tabs instantly without extra Firestore reads
+      const caseRecord = {
+        id: data.case_id || data.case_ref,
+        case_ref: data.case_ref,
+        agent_id: data.agent_id || agentCode,
+        intake: data.intake || payload,
+        triage: data.triage,
+        resolved_location: data.resolved_location,
+        nearest_facilities: data.nearest_facilities,
+        ekms_ai_context: data.ekms_ai_context || activeContext,
+        created_at: new Date().toISOString(),
+      };
+      appendCaseToLocalCache(caseRecord);
+      broadcastEvent("NEW_CASE", caseRecord);
+
       onCaseCreated?.();
       toast.success(`${data.triage.urgency_level} — ${data.case_ref}`);
       if (form.phone) {

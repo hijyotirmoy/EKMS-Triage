@@ -10,7 +10,7 @@ import {
   DOMAIN_LABELS,
   getDiseaseProbingProtocol,
 } from "./clinicalAdaptiveEngine.js";
-import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition } from "./triageEngine.js";
+import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
 import { executeCentralizedLlmProxy } from "./llmProxy.js";
 import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
@@ -31,11 +31,23 @@ CORE CLINICAL RULES:
 7. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
 8. EMPATHY & EMOTIONAL REASSURANCE:
    - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
-9. 6-TIER LOGICAL ROUTING HIERARCHY (Route user to the first category where conditions are met):
-   Tier 1. 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency): Accidents, severe bleeding, life-threatening cases, or any emergency ambulance requests.
+9. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
+   Tier 1. 108 Ambulance Services (CRITICAL LIFE-THREATENING EMERGENCY ONLY):
+      Dispatch 108 Ambulance ONLY for Severity 9 and 10 IF the patient has genuine life-threatening conditions:
+      - Severe Breathing Issues: Gasping for air, skin/lips turning blue, or inability to speak in full sentences. (If caller states they can speak normally, do NOT call ambulance!).
+      - Unconsciousness: The person is unresponsive and will not wake up.
+      - Uncontrollable Bleeding: Heavy bleeding that does not stop after 10 minutes of firm, direct pressure.
+      - Major Trauma: Serious car accidents, head/spinal injuries, falls from a significant height, or severe burns covering a large area.
+      - Prolonged Seizures: Seizure lasting > 5 minutes, or a person having their first-ever seizure.
+      - Anaphylaxis: Severe allergic reaction causing throat, lips, or tongue to swell, restricting airways.
+      - Cardiac arrest / crushing chest pain radiating to arm.
+      - Explicit caller request for ambulance.
+      CRITICAL RULE: Between 6:00 AM and 6:00 PM, if there are NO such life-threatening emergency signs (e.g. High fever with chills, severe pain, or breathless but can speak normally):
+      -> DO NOT refer to 108 Ambulance!
+      -> Refer to Hospital (ESIC Hospital)!
    Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling, or HIV/AIDS/STI confidential information over the phone.
    Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
-   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, or inpatient care within ESIC network (specialist consultations, inpatient admissions, surgeries, advanced diagnostics, institutional maternity).
+   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
    Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment (Inpatient IPD emergency, off-hours emergency, or direct referral).
    Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network (non-ESIC public admissions, general public specialist care, child immunization).
 10. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
@@ -1033,9 +1045,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       /psych|tele-manas|tele manas|14416|mental health/i.test(allContext)
   );
 
-  const isEmergency108 =
-    /\b(108|ambulance|heart attack|crushing chest|cardiac arrest|unconscious|behosh|massive bleed|bleeding profusely|road accident|accident casualty|machine accident|worker trapped|trapped|factory machine|accident.*haath|crushed limb|amputation)\b/i.test(cleanInput) ||
-    (raw.referralDestination === "108 Ambulance" && (raw.severity === "High" || prevState.severity === "High"));
+  const ambulanceCheck = isLifeThreateningAmbulanceCase(
+    allContext,
+    raw.severityScore || (raw.severity === "High" ? 9 : 5),
+    { symptom_notes: cleanInput },
+    prevState
+  );
+  const isEmergency108 = ambulanceCheck.is108;
 
   const directIntent = detectDirectCallerReferralIntent(cleanInput);
 
@@ -1506,6 +1522,35 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       return true;
     }
   );
+
+  // Augment with caller-reported clinical situations
+  const addDetectedFlag = (flag) => {
+    if (!filteredRedFlags.some((f) => f.toLowerCase() === flag.toLowerCase())) {
+      filteredRedFlags.push(flag);
+    }
+  };
+
+  if (/\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal bleeding|gi bleed)\b/i.test(userUtterances)) {
+    addDetectedFlag("Gastrointestinal bleeding / hematemesis (blood in vomit)");
+  }
+  if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(userUtterances)) {
+    addDetectedFlag("Inability to retain oral fluids");
+  }
+  if (!callerDeniesFever && /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi)\b/i.test(userUtterances)) {
+    addDetectedFlag("High fever with chills and shivering");
+  }
+  if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(userUtterances)) {
+    addDetectedFlag("Severe shortness of breath");
+  }
+  if (/\b(unconscious|behosh|fainted|blackout|syncope|unresponsive)\b/i.test(userUtterances)) {
+    addDetectedFlag("Loss of consciousness / fainting episode");
+  }
+  if (/\b(seizure|convulsions?|fits?|mirgi)\b/i.test(userUtterances)) {
+    addDetectedFlag("Seizure / convulsions");
+  }
+  if (/\b(heavy bleed|profuse bleed|khoon beh raha)\b/i.test(userUtterances)) {
+    addDetectedFlag("Heavy uncontrolled bleeding");
+  }
 
   return {
     probingQuestion,
@@ -1983,68 +2028,68 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     }
   } else if (/\b(breath|saans|wheezing|asthma|dum ghutna|shortness)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Respiratory Distress / Bronchospasm";
-    if (!hasAsked(["sitting", "resting", "baithe", "chalne"])) {
+    if (!hasAsked(["gasping", "full sentences", "blue", "haanf", "poori baat", "speak normally"])) {
       currentStep = {
-        title: "Respiratory Distress Assessment",
-        question: 'Ask the IP: "Are you having difficulty breathing while sitting still at rest right now?" (Hinglish: "Kya aapko is samay baithe-baithe aaram me bhi saans lene me takleef ho rahi hai?")',
+        title: "Severe Breathing Emergency Evaluation",
+        question: 'Ask the IP: "Is the difficulty in breathing so severe that you are gasping for air, skin or lips turning blue, or unable to speak in full sentences?" (Hinglish: "Kya saans lene me itni zyada takleef hai ki aap haanf rahe hain, honth/tvacha neeli pad rahi hai, ya poori baat ek baar me nahi bol pa rahe?")',
         options: [
-          "Severe breathlessness even while resting",
-          "Breathlessness only when walking or talking",
-          "Wheezing sound with tight chest feeling",
-          "Mild breathlessness manageable",
+          "No, I can speak normally but feel breathless",
+          "Yes, gasping for air and cannot speak in full sentences",
+          "Lips or skin look bluish / struggling for every breath",
+          "Manageable breathlessness with cough and congestion",
         ],
         severity: "High",
       };
     } else if (!hasAsked(["cough", "khansi", "fever", "bukhar", "phlegm"])) {
       currentStep = {
         title: "Respiratory Associated Signs",
-        question: 'Ask the IP: "Are you also having a cough, fever, or chest congestion?" (Hinglish: "Kya saath me khansi, bukhar ya seene me jakdan bhi hai?")',
+        question: 'Ask the IP: "Are you also having a high fever, chills, or chest congestion?" (Hinglish: "Kya saath me tez bukhar, thand ya seene me jakdan bhi hai?")',
         options: [
-          "Continuous dry hacking cough",
-          "Productive cough with yellow phlegm",
-          "Mild fever with throat irritation",
-          "No cough, purely breathing difficulty",
+          "High fever with chills and shivering",
+          "Continuous dry cough with throat pain",
+          "Productive cough with yellow/green phlegm",
+          "No fever, only chest tightness and wheezing",
         ],
-        severity: "Moderate",
+        severity: "High",
       };
     } else {
       currentStep = {
         title: "Inhaler & Asthma History",
-        question: 'Ask the IP: "Do you use an asthma inhaler or nebulizer at home?" (Hinglish: "Kya aap ghar par asthma ka inhaler ya dawai lete hain?")',
+        question: 'Ask the IP: "Do you use an asthma inhaler or have a history of lung conditions?" (Hinglish: "Kya aap ghar par asthma ka inhaler lete hain ya pehle se koi takleef hai?")',
         options: [
-          "Using inhaler, but getting no relief",
+          "Using inhaler, but getting limited relief",
           "Took inhaler and feeling slightly better",
           "Do not have asthma or inhaler",
-          "Prescribed regular asthma medications",
+          "First time having this severe breathlessness",
         ],
-        severity: "Moderate",
+        severity: "High",
       };
     }
   } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(effectiveInput)) {
-    conditionLabel = "Febrile Illness / Pyrexia under Investigation";
+    conditionLabel = "Febrile Symptoms with Chills";
     if (!hasKnownDuration && !hasAsked(["kitne din", "how many days", "duration", "since when", "kab se"])) {
       currentStep = {
         title: "Febrile Pattern & Onset",
         question: 'Ask the IP: "Since how many days have you been running this fever?" (Hinglish: "Aapko yeh bukhar kitne dino se aa raha hai?")',
         options: [
           "Started today (< 24 hours)",
-          "2 to 3 days (Recent)",
+          "For the past 1 to 2 days",
           "4 to 7 days (Ongoing)",
           "More than a week (Persistent)",
         ],
-        severity: "Moderate",
+        severity: "High",
       };
-    } else if (!hasAsked(["chills", "thand", "body ache", "dard", "ulti", "rash"])) {
+    } else if (!hasAsked(["gasping", "breath", "saans", "haanf", "full sentences", "chills"])) {
       currentStep = {
-        title: "Febrile Associated Symptoms & Warning Signs",
-        question: 'Ask the IP: "Are you having chills, severe body ache, rash, or vomiting along with the fever?" (Hinglish: "Kya bukhar ke saath thand lagna, jism me dard, daane ya ulti jaisi takleef bhi hai?")',
+        title: "Febrile Associated Symptoms & Airway Warning Signs",
+        question: 'Ask the IP: "Are you having chills with shivering, or any breathing difficulty like gasping for air or inability to speak in full sentences?" (Hinglish: "Kya bukhar ke saath thand/kampkampi hai, ya saans lene me takleef jaise haanfna ya poori baat na bol pana?")',
         options: [
-          "High fever with chills and shivering",
-          "Fever with severe body ache and headache",
-          "Mild fever, able to eat and drink fluids",
-          "Fever with nausea or vomiting",
+          "High fever with chills and shivering, breathing is manageable",
+          "No, I can speak normally but feel breathless",
+          "Severe breathing difficulty, gasping for air",
+          "High fever with severe body ache and headache",
         ],
-        severity: "Moderate",
+        severity: "High",
       };
     } else {
       currentStep = {
@@ -2342,9 +2387,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     isSevere ||
     /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(effectiveInput);
 
-  if (severity === "High" && /chest pain|heart|stroke|unconscious|poison|snake|bite|massive bleed|accident/i.test(effectiveInput)) {
+  const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(effectiveInput, isSevere ? 9 : 5, { symptom_notes: cleanInput }, prevState);
+  if (ambulanceFallbackCheck.is108) {
     referralDestination = "108 Ambulance";
-    referralReason = "Acute emergency requiring immediate ambulance dispatch.";
+    referralReason = ambulanceFallbackCheck.reason || "Acute emergency requiring immediate ambulance dispatch.";
     secondaryReferral = "ESIC Hospital";
     isDualProtocol = false;
   } else if (isPsychFallback) {

@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { getCachedFacilities, setCachedFacilities } from "../lib/clientCache";
+import { subscribeToSync, broadcastEvent } from "../lib/broadcastSync";
 
 const PAGE_SIZE = 30;
 
@@ -28,7 +30,10 @@ const inputCls =
   "rounded-md border border-border/80 bg-secondary/50 px-3 py-2 text-sm outline-none transition-colors duration-200 focus:border-primary/70";
 
 export const FacilityDirectory = ({ meta, onImported }) => {
-  const [facilities, setFacilities] = useState([]);
+  const [facilities, setFacilities] = useState(() => {
+    const cached = getCachedFacilities();
+    return Array.isArray(cached) ? cached : [];
+  });
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [district, setDistrict] = useState("all");
@@ -51,15 +56,28 @@ export const FacilityDirectory = ({ meta, onImported }) => {
           q: q?.trim() || undefined,
           district: district !== "all" ? district : undefined,
           facility_type: type !== "all" ? type : undefined,
-          _t: Date.now(),
         },
       })
       .then(({ data }) => {
-        setFacilities(data || []);
+        if (Array.isArray(data)) {
+          setFacilities(data);
+          if (!q && district === "all" && type === "all") {
+            setCachedFacilities(data);
+          }
+        }
       })
       .catch(() => setFacilities([]))
       .finally(() => setLoading(false));
   };
+
+  useEffect(() => {
+    const unsub = subscribeToSync((event) => {
+      if (event?.type === "FACILITIES_UPDATED") {
+        load();
+      }
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     load();
@@ -136,6 +154,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
         `Imported ${data.imported} facilities (${data.total_facilities} total)`,
         { id: toastId }
       );
+      broadcastEvent("FACILITIES_UPDATED", {});
       load();
       onImported?.();
     } catch (err) {
@@ -177,6 +196,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
       setShowDeleteModal(false);
       setItemToDelete(null);
 
+      broadcastEvent("FACILITIES_UPDATED", {});
       await load();
       onImported?.();
     } catch (err) {

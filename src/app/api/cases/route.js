@@ -8,13 +8,12 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const urgency = searchParams.get("urgency") || "all";
   const q = searchParams.get("q") || "";
+  const since = searchParams.get("since") || null;
 
-  const cases = await getCases({ urgency, q });
+  const cases = await getCases({ urgency, q, since });
   return NextResponse.json(cases, {
     headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-      Pragma: "no-cache",
-      Expires: "0",
+      "Cache-Control": "private, max-age=15, stale-while-revalidate=60",
     },
   });
 }

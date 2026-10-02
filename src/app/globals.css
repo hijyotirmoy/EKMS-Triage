@@ -72,12 +72,15 @@
   code,
   pre,
   .mono {
-    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-feature-settings: "zero" 0;
+    font-variant-numeric: tabular-nums;
   }
   ::selection {
     background: hsl(224 72% 46% / 0.18);
   }
 }
+
 
 @layer components {
   .panel {

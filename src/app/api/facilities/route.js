@@ -13,9 +13,7 @@ export async function GET(request) {
   const list = await getFacilities({ q, district, facility_type });
   return NextResponse.json(list, {
     headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-      Pragma: "no-cache",
-      Expires: "0",
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
     },
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Search,
   Inbox,
@@ -16,10 +16,27 @@ import {
   Building2,
   MapPin,
   Clock,
+  PhoneCall,
+  Navigation,
+  ArrowRight,
+  User,
+  Activity,
+  History,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
+import { normalizePhone } from "../lib/caseId";
+import {
+  getCachedCases,
+  setCachedCases,
+  removeCaseFromLocalCache,
+  appendCaseToLocalCache,
+  getCachedStats,
+  setCachedStats,
+} from "../lib/clientCache";
+import { subscribeToSync, broadcastEvent } from "../lib/broadcastSync";
+
 
 const inputCls =
   "rounded-md border border-border/80 bg-secondary/50 px-3 py-2 text-sm outline-none transition-colors duration-200 focus:border-primary/70";
@@ -34,8 +51,6 @@ export function getReferralBadge(c) {
     t.recommended_facility_type ||
     ""
   ).toLowerCase();
-
-  const notes = `${c?.intake?.symptom_notes || ""} ${dest}`.toLowerCase();
 
   if (t.call_108 || dest.includes("108") || dest.includes("ambulance")) {
     return {
@@ -99,6 +114,42 @@ export function getReferralBadge(c) {
   };
 }
 
+export function getSecondaryReferralBadge(c) {
+  const t = c?.triage || {};
+  const dest = (
+    t.call_referral_secondary ||
+    t.secondary_referral_destination ||
+    "104 Health Helpline"
+  ).toLowerCase();
+
+  if (dest.includes("108") || dest.includes("ambulance")) {
+    return {
+      label: "108 Ambulance",
+      icon: "🚨",
+      color: "bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-200 dark:border-rose-800",
+    };
+  }
+  if (dest.includes("hospital") || dest.includes("casualty")) {
+    return {
+      label: "ESIC Hospital Casualty (24x7)",
+      icon: "🏥",
+      color: "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800",
+    };
+  }
+  if (dest.includes("tie") || dest.includes("empanelled")) {
+    return {
+      label: "Empanelled Tie-Up Hospital",
+      icon: "🏥",
+      color: "bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950/60 dark:text-cyan-200 dark:border-cyan-800",
+    };
+  }
+  return {
+    label: "104 Health Helpline (Doctor on Call)",
+    icon: "📞",
+    color: "bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950/60 dark:text-blue-200 dark:border-blue-800",
+  };
+}
+
 export function getAgentCode(c) {
   const explicit = c?.agent_id || c?.intake?.agent_id || c?.agent || c?.intake?.agent;
   if (explicit) {
@@ -114,7 +165,6 @@ export function getAgentCode(c) {
   if (mAdmin) return mAdmin[1].toUpperCase();
   const m = ref.match(/^C(A[1-3])/i);
   if (m) return m[1].toUpperCase();
-  // Stable fallback for legacy cases
   let hash = 0;
   for (let i = 0; i < ref.length; i++) hash = (hash + ref.charCodeAt(i)) % 2;
   return `A${hash + 1}`;
@@ -130,15 +180,27 @@ export function getAgentFullLabel(agentCode) {
   return agentCode ? `Agent ${agentCode}` : "Agent";
 }
 
+// Generate unique row identifier even if multiple rows share the same case_ref
+export function getCaseUniqueKey(c, idx = 0) {
+  if (c?.id) return String(c.id);
+  const ref = c?.case_ref || "CASE";
+  const ts = c?.created_at || idx;
+  return `${ref}_${ts}`;
+}
+
 export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
-  const [cases, setCases] = useState([]);
+  const [cases, setCases] = useState(() => {
+    // 1. Instant 0ms initial load from browser storage
+    const cached = getCachedCases();
+    return Array.isArray(cached) ? cached : [];
+  });
   const [urgency, setUrgency] = useState("all");
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState(null);
+  const [openRowKey, setOpenRowKey] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [caseToDelete, setCaseToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [selectedRefs, setSelectedRefs] = useState(new Set());
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [selectedCaseForConvo, setSelectedCaseForConvo] = useState(null);
@@ -147,25 +209,112 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
     setCurrentPage(1);
   }, [urgency, q]);
 
+  // 2. Fetch and sync with server in background (served from server memory cache with 0 Firestore reads)
   useEffect(() => {
     api
-      .get("/cases", { params: { urgency, q: q || undefined, _t: Date.now() } })
-      .then(({ data }) => setCases(data))
-      .catch(() => setCases([]));
+      .get("/cases", { params: { urgency, q: q || undefined } })
+      .then(({ data }) => {
+        if (Array.isArray(data)) {
+          setCases(data);
+          if (urgency === "all" && !q) {
+            setCachedCases(data);
+            const currentStats = getCachedStats() || {};
+            const updatedStats = { ...currentStats, total: data.length };
+            setCachedStats(updatedStats);
+            broadcastEvent("SYNC_STATS_TOTAL", { total: data.length });
+          }
+        }
+      })
+      .catch(() => {});
   }, [urgency, q, refreshKey]);
 
+  // 3. Real-time tab-to-tab sync listener (0 network requests & 0 Firestore reads)
+  useEffect(() => {
+    const unsub = subscribeToSync((event) => {
+      if (event?.type === "NEW_CASE" && event?.payload) {
+        const newCase = event.payload;
+        setCases((prev) => {
+          const exists = prev.some(
+            (c) => (c.id && c.id === newCase.id) || (c.case_ref && c.case_ref === newCase.case_ref)
+          );
+          if (exists) return prev;
+          const updated = [newCase, ...prev];
+          setCachedCases(updated);
+          return updated;
+        });
+      } else if (event?.type === "DELETE_CASE" && event?.payload) {
+        const { caseRef, id } = event.payload;
+        setCases((prev) => {
+          const updated = prev.filter((c) => c.case_ref !== caseRef && c.id !== id);
+          setCachedCases(updated);
+          return updated;
+        });
+      }
+    });
+    return unsub;
+  }, []);
+
+
+  const totalPages = Math.ceil(cases.length / PAGE_SIZE) || 1;
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const paginatedCases = cases.slice(startIndex, startIndex + PAGE_SIZE);
+
+  const isPageAllSelected =
+    paginatedCases.length > 0 &&
+    paginatedCases.every((c, idx) => selectedKeys.has(getCaseUniqueKey(c, startIndex + idx)));
+
+  const toggleSelectAllPage = () => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (isPageAllSelected) {
+        paginatedCases.forEach((c, idx) => next.delete(getCaseUniqueKey(c, startIndex + idx)));
+      } else {
+        paginatedCases.forEach((c, idx) => next.add(getCaseUniqueKey(c, startIndex + idx)));
+      }
+      return next;
+    });
+  };
+
+  const selectAllMatching = () => {
+    setSelectedKeys(new Set(cases.map((c, idx) => getCaseUniqueKey(c, idx))));
+  };
+
+  const clearSelection = () => {
+    setSelectedKeys(new Set());
+  };
+
+  const toggleSelectOne = (rowKey, e) => {
+    e?.stopPropagation();
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+  };
+
   const handleConfirmDelete = async () => {
-    if (!caseToDelete?.case_ref) return;
+    if (!caseToDelete) return;
     setIsDeleting(true);
+    const targetRef = caseToDelete.case_ref;
+    const targetKey = getCaseUniqueKey(caseToDelete);
     try {
-      await api.delete(`/cases/${caseToDelete.case_ref}`);
-      setCases((prev) => prev.filter((c) => c.case_ref !== caseToDelete.case_ref));
-      setSelectedRefs((prev) => {
+      if (targetRef) {
+        await api.delete(`/cases/${targetRef}`);
+      }
+      removeCaseFromLocalCache(targetRef || caseToDelete.id);
+      broadcastEvent("DELETE_CASE", { caseRef: targetRef, id: caseToDelete.id });
+      setCases((prev) => {
+        const updated = prev.filter((c, idx) => getCaseUniqueKey(c, idx) !== targetKey);
+        setCachedCases(updated);
+        return updated;
+      });
+      setSelectedKeys((prev) => {
         const next = new Set(prev);
-        next.delete(caseToDelete.case_ref);
+        next.delete(targetKey);
         return next;
       });
-      toast.success(`Case ${caseToDelete.case_ref} deleted successfully`);
+      toast.success(`Case ${targetRef || "entry"} deleted successfully`);
       setCaseToDelete(null);
       onCaseDeleted?.();
     } catch (err) {
@@ -176,51 +325,29 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
     }
   };
 
-  const totalPages = Math.ceil(cases.length / PAGE_SIZE) || 1;
-  const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const paginatedCases = cases.slice(startIndex, startIndex + PAGE_SIZE);
-
-  const isPageAllSelected =
-    paginatedCases.length > 0 && paginatedCases.every((c) => selectedRefs.has(c.case_ref));
-
-  const toggleSelectAllPage = () => {
-    setSelectedRefs((prev) => {
-      const next = new Set(prev);
-      if (isPageAllSelected) {
-        paginatedCases.forEach((c) => next.delete(c.case_ref));
-      } else {
-        paginatedCases.forEach((c) => next.add(c.case_ref));
-      }
-      return next;
-    });
-  };
-
-  const selectAllMatching = () => {
-    setSelectedRefs(new Set(cases.map((c) => c.case_ref)));
-  };
-
-  const clearSelection = () => {
-    setSelectedRefs(new Set());
-  };
-
-  const toggleSelectOne = (caseRef, e) => {
-    e?.stopPropagation();
-    setSelectedRefs((prev) => {
-      const next = new Set(prev);
-      if (next.has(caseRef)) next.delete(caseRef);
-      else next.add(caseRef);
-      return next;
-    });
-  };
-
   const handleConfirmBulkDelete = async () => {
-    if (selectedRefs.size === 0) return;
+    if (selectedKeys.size === 0) return;
     setIsBulkDeleting(true);
+
+    // Collect all case references from selected items
+    const selectedCasesList = cases.filter((c, idx) => selectedKeys.has(getCaseUniqueKey(c, idx)));
+    const targetRefs = Array.from(new Set(selectedCasesList.map((c) => c.case_ref).filter(Boolean)));
+
     try {
-      await api.delete("/cases", { data: { case_refs: Array.from(selectedRefs) } });
-      setCases((prev) => prev.filter((c) => !selectedRefs.has(c.case_ref)));
-      toast.success(`Successfully deleted ${selectedRefs.size} cases`);
-      setSelectedRefs(new Set());
+      if (targetRefs.length > 0) {
+        await api.delete("/cases", { data: { case_refs: targetRefs } });
+        for (const ref of targetRefs) {
+          removeCaseFromLocalCache(ref);
+          broadcastEvent("DELETE_CASE", { caseRef: ref });
+        }
+      }
+      setCases((prev) => {
+        const updated = prev.filter((c, idx) => !selectedKeys.has(getCaseUniqueKey(c, idx)));
+        setCachedCases(updated);
+        return updated;
+      });
+      toast.success(`Successfully deleted ${selectedKeys.size} cases`);
+      setSelectedKeys(new Set());
       setShowBulkDeleteModal(false);
       onCaseDeleted?.();
     } catch (err) {
@@ -230,6 +357,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
       setIsBulkDeleting(false);
     }
   };
+
 
   return (
     <div className="panel p-5 sm:p-6">
@@ -266,16 +394,16 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
       </div>
 
       {/* Bulk Action & Selection Bar */}
-      {selectedRefs.size > 0 && (
+      {selectedKeys.size > 0 && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs animate-in fade-in duration-150">
           <div className="flex items-center gap-2">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[11px] font-bold text-white">
-              {selectedRefs.size}
+              {selectedKeys.size}
             </span>
             <span className="font-semibold text-foreground">
-              {selectedRefs.size} case{selectedRefs.size > 1 ? "s" : ""} selected
+              {selectedKeys.size} case{selectedKeys.size > 1 ? "s" : ""} selected
             </span>
-            {selectedRefs.size < cases.length && (
+            {selectedKeys.size < cases.length && (
               <button
                 type="button"
                 onClick={selectAllMatching}
@@ -301,7 +429,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
               className="flex items-center gap-1.5 rounded bg-destructive px-3 py-1 font-bold text-destructive-foreground shadow hover:brightness-110 active:scale-[0.98]"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              <span>Delete Selected ({selectedRefs.size})</span>
+              <span>Delete Selected ({selectedKeys.size})</span>
             </button>
           </div>
         </div>
@@ -337,114 +465,130 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
               </tr>
             </thead>
             <tbody>
-              {paginatedCases.map((c) => (
-                <tr
-                  key={c.case_ref}
-                  data-testid="case-log-row"
-                  onClick={() => setOpen(open === c.case_ref ? null : c.case_ref)}
-                  className={`cursor-pointer border-b border-border/40 transition-colors duration-200 hover:bg-secondary/30 ${
-                    selectedRefs.has(c.case_ref) ? "bg-primary/5 dark:bg-primary/10" : ""
-                  }`}
-                >
-                  <td className="w-8 py-3 pr-2 text-center" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selectedRefs.has(c.case_ref)}
-                      onChange={(e) => toggleSelectOne(c.case_ref, e)}
-                      className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
-                    />
-                  </td>
-                  <td className="mono py-3 pr-3 text-xs text-primary/90">{c.case_ref}</td>
-                  <td className="py-3 pr-3">
-                    <span className="inline-flex items-center justify-center rounded bg-secondary/80 px-2 py-0.5 font-mono text-xs font-bold text-foreground border border-border/60">
-                      {getAgentCode(c)}
-                    </span>
-                  </td>
-                  <td className="py-3 pr-3">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="font-medium text-foreground">{c.intake?.caller_name || "—"}</p>
-                      {(c.intake?.age || c.intake?.sex) && (
-                        <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
-                          {[c.intake?.age ? `${c.intake.age}y` : null, c.intake?.sex].filter(Boolean).join(" · ")}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mono text-[11px] text-muted-foreground">{c.intake?.phone || "—"}</p>
-                  </td>
-                  <td className="max-w-[280px] py-3 pr-3">
-                    <p className={open === c.case_ref ? "text-foreground font-medium text-xs leading-relaxed" : "truncate text-muted-foreground"}>
-                      {open === c.case_ref ? c.intake?.symptom_notes : c.triage?.summary_en}
-                    </p>
-                    {open === c.case_ref && c.triage?.reasoning && (
-                      <div className="mt-2 text-xs leading-relaxed text-foreground/80 border-t border-border/40 pt-1.5">
-                        <p>{c.triage?.reasoning}</p>
+              {paginatedCases.map((c, idx) => {
+                const rowKey = getCaseUniqueKey(c, startIndex + idx);
+                const isOpen = openRowKey === rowKey;
+                const isSelected = selectedKeys.has(rowKey);
+
+                return (
+                  <tr
+                    key={rowKey}
+                    data-testid="case-log-row"
+                    onClick={() => setOpenRowKey(isOpen ? null : rowKey)}
+                    className={`cursor-pointer border-b border-border/40 transition-colors duration-200 hover:bg-secondary/30 ${
+                      isSelected ? "bg-primary/5 dark:bg-primary/10" : ""
+                    }`}
+                  >
+                    <td className="w-8 py-3 pr-2 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => toggleSelectOne(rowKey, e)}
+                        className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                      />
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span className="inline-flex items-center rounded-md bg-blue-50 border border-blue-200/80 px-2 py-1 text-xs font-bold text-blue-700 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 tracking-wider">
+                        {c.case_ref}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span className="inline-flex items-center justify-center rounded bg-secondary/80 px-2 py-0.5 text-xs font-bold text-foreground border border-border/60">
+                        {getAgentCode(c)}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-semibold text-foreground">{c.intake?.caller_name || "—"}</p>
+                        {(c.intake?.age || c.intake?.sex) && (
+                          <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
+                            {[c.intake?.age ? `${c.intake.age}y` : null, c.intake?.sex].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </td>
-                  <td className="py-3 pr-3">
-                    <UrgencyBadge
-                      level={c.triage?.urgency_level}
-                      size="sm"
-                      testId="case-log-urgency-badge"
-                    />
-                  </td>
-                  <td className="py-3 pr-3">
-                    {(() => {
-                      const badge = getReferralBadge(c);
-                      return (
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
+                      <p className="text-[11px] font-medium text-muted-foreground tracking-wide mt-0.5">{c.intake?.phone || "—"}</p>
+                    </td>
+                    <td className="max-w-[280px] py-3 pr-3">
+                      <p className={isOpen ? "text-foreground font-medium text-xs leading-relaxed" : "truncate text-muted-foreground"}>
+                        {isOpen ? (c.intake?.symptom_notes || c.triage?.summary_en) : (c.intake?.symptom_notes || c.triage?.summary_en)}
+                      </p>
+                      {isOpen && c.triage?.summary_en && c.intake?.symptom_notes && (
+                        <p className="mt-1.5 text-xs text-muted-foreground italic leading-relaxed">
+                          {c.triage.summary_en}
+                        </p>
+                      )}
+                      {isOpen && c.triage?.reasoning && (
+                        <div className="mt-2 text-xs leading-relaxed text-foreground/80 border-t border-border/40 pt-1.5">
+                          <p><strong className="text-foreground">Clinical Reason:</strong> {c.triage.reasoning}</p>
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 pr-3">
+                      <UrgencyBadge
+                        level={c.triage?.urgency_level}
+                        size="sm"
+                        testId="case-log-urgency-badge"
+                      />
+                    </td>
+                    <td className="py-3 pr-3">
+                      {(() => {
+                        const badge = getReferralBadge(c);
+                        return (
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
+                          >
+                            <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
+                            <span className="truncate">{badge.label}</span>
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="py-3 pr-3 text-[11px] text-muted-foreground whitespace-nowrap font-medium">
+                      {new Date(c.created_at || Date.now()).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          data-testid={`view-convo-${c.case_ref}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCaseForConvo(c);
+                          }}
+                          title={`View AI & Agent Consultation for ${c.case_ref}`}
+                          className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100 hover:text-blue-800 active:scale-95 shadow-2xs dark:border-blue-900 dark:bg-blue-950/60 dark:text-blue-300 cursor-pointer"
+                          aria-label={`View conversation for case ${c.case_ref}`}
                         >
-                          <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
-                          <span className="truncate">{badge.label}</span>
-                        </span>
-                      );
-                    })()}
-                  </td>
-                  <td className="mono py-3 pr-3 text-[11px] text-muted-foreground whitespace-nowrap">
-                    {new Date(c.created_at).toLocaleString("en-IN", {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </td>
-                  <td className="py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <div className="inline-flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        data-testid={`view-convo-${c.case_ref}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCaseForConvo(c);
-                        }}
-                        title={`View AI & Agent Consultation for ${c.case_ref}`}
-                        className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100 hover:text-blue-800 active:scale-95 shadow-2xs dark:border-blue-900 dark:bg-blue-950/60 dark:text-blue-300 cursor-pointer"
-                        aria-label={`View conversation for case ${c.case_ref}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        data-testid={`delete-case-${c.case_ref}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCaseToDelete(c);
-                        }}
-                        title={`Delete case ${c.case_ref}`}
-                        className="inline-flex items-center justify-center rounded-lg border border-rose-300 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800 active:scale-95 shadow-2xs dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-300 cursor-pointer"
-                        aria-label={`Delete case ${c.case_ref}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`delete-case-${c.case_ref}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCaseToDelete(c);
+                          }}
+                          title={`Delete case ${c.case_ref}`}
+                          className="inline-flex items-center justify-center rounded-lg border border-rose-300 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800 active:scale-95 shadow-2xs dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-300 cursor-pointer"
+                          aria-label={`Delete case ${c.case_ref}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
-          {/* Pagination Controls after 50 cases */}
+          {/* Pagination Controls */}
           {cases.length > PAGE_SIZE && (
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4 text-xs">
               <div className="text-muted-foreground">
@@ -455,25 +599,25 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                 of <span className="font-semibold text-foreground">{cases.length}</span> cases
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="flex items-center gap-1 rounded-md border border-border/80 bg-secondary/50 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 rounded border border-border bg-secondary/50 px-2.5 py-1 font-medium text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-secondary transition-colors"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" /> Previous
                 </button>
 
-                <span className="font-mono text-xs text-muted-foreground px-1">
-                  Page {currentPage} of {totalPages}
+                <span className="px-2 font-mono font-bold text-foreground">
+                  {currentPage} / {totalPages}
                 </span>
 
                 <button
                   type="button"
+                  disabled={currentPage >= totalPages}
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="flex items-center gap-1 rounded-md border border-border/80 bg-secondary/50 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1 rounded border border-border bg-secondary/50 px-2.5 py-1 font-medium text-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:bg-secondary transition-colors"
                 >
                   Next <ChevronRight className="h-3.5 w-3.5" />
                 </button>
@@ -483,170 +627,97 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
         </div>
       )}
 
-      {/* Modern Confirmation Modal for Delete */}
+      {/* Delete Single Case Modal */}
       {caseToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop with blur */}
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
-            onClick={() => {
-              if (!isDeleting) setCaseToDelete(null);
-            }}
-          />
-
-          {/* Modal Dialog Card */}
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            {/* Close icon button */}
-            <button
-              type="button"
-              onClick={() => {
-                if (!isDeleting) setCaseToDelete(null);
-              }}
-              disabled={isDeleting}
-              className="absolute right-4 top-4 rounded-lg p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground disabled:opacity-40"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            {/* Danger Warning Icon */}
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs">
-              <Trash2 className="h-6 w-6" />
-            </div>
-
-            <div className="mt-4 text-center">
-              <h3 className="text-lg font-bold text-foreground">
-                Delete Case?
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Are you sure you want to permanently delete case{" "}
-                <span className="font-mono font-semibold text-foreground">
-                  {caseToDelete.case_ref}
-                </span>
-                {caseToDelete.intake?.caller_name ? (
-                  <>
-                    {" "}
-                    for{" "}
-                    <span className="font-semibold text-foreground">
-                      {caseToDelete.intake.caller_name}
-                    </span>
-                  </>
-                ) : null}
-                ? This action cannot be undone.
-              </p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="mt-6 flex items-center gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-destructive font-bold text-base">
+                <Trash2 className="h-5 w-5" />
+                <span>Delete Case Entry</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setCaseToDelete(null)}
-                disabled={isDeleting}
-                className="w-1/2 rounded-xl border border-border/80 bg-secondary/50 py-2.5 text-xs font-semibold text-foreground transition hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Are you sure you want to permanently delete case{" "}
+              <strong className="text-foreground font-mono">{caseToDelete.case_ref}</strong> for{" "}
+              <strong className="text-foreground">{caseToDelete.intake?.caller_name || "caller"}</strong>?
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setCaseToDelete(null)}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-secondary"
               >
                 Cancel
               </button>
-
               <button
                 type="button"
-                onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="w-1/2 flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.98] disabled:opacity-50"
+                onClick={handleConfirmDelete}
+                className="rounded-lg bg-destructive px-3.5 py-1.5 text-xs font-bold text-white hover:brightness-110 disabled:opacity-50"
               >
-                {isDeleting ? (
-                  <>
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span>Delete Case</span>
-                  </>
-                )}
+                {isDeleting ? "Deleting..." : "Confirm Delete"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Confirmation Modal for Bulk Deletion */}
+      {/* Bulk Delete Modal */}
       {showBulkDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
-            onClick={() => {
-              if (!isBulkDeleting) setShowBulkDeleteModal(false);
-            }}
-          />
-
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <button
-              type="button"
-              onClick={() => {
-                if (!isBulkDeleting) setShowBulkDeleteModal(false);
-              }}
-              disabled={isBulkDeleting}
-              className="absolute right-4 top-4 rounded-lg p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground disabled:opacity-40"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs">
-              <Trash2 className="h-6 w-6" />
-            </div>
-
-            <div className="mt-4 text-center">
-              <h3 className="text-lg font-bold text-foreground">
-                Delete {selectedRefs.size} Selected Case{selectedRefs.size > 1 ? "s" : ""}?
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Are you sure you want to permanently delete{" "}
-                <strong className="text-foreground font-semibold">
-                  {selectedRefs.size} case{selectedRefs.size > 1 ? "s" : ""}
-                </strong>
-                ? This action cannot be undone and will permanently remove all associated audit records.
-              </p>
-            </div>
-
-            <div className="mt-6 flex items-center gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-background p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-destructive font-bold text-base">
+                <Trash2 className="h-5 w-5" />
+                <span>Bulk Delete Cases</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowBulkDeleteModal(false)}
-                disabled={isBulkDeleting}
-                className="w-1/2 rounded-xl border border-border/80 bg-secondary/50 py-2.5 text-xs font-semibold text-foreground transition hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              You are about to permanently delete{" "}
+              <strong className="text-destructive font-bold">{selectedKeys.size}</strong> selected case
+              records. This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-secondary"
               >
                 Cancel
               </button>
-
               <button
                 type="button"
-                onClick={handleConfirmBulkDelete}
                 disabled={isBulkDeleting}
-                className="w-1/2 flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.98] disabled:opacity-50"
+                onClick={handleConfirmBulkDelete}
+                className="rounded-lg bg-destructive px-3.5 py-1.5 text-xs font-bold text-white hover:brightness-110 disabled:opacity-50"
               >
-                {isBulkDeleting ? (
-                  <>
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span>Delete ({selectedRefs.size})</span>
-                  </>
-                )}
+                {isBulkDeleting ? "Deleting Cases..." : `Delete ${selectedKeys.size} Cases`}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Case Conversation Modal (Eye Icon Pop-up) */}
+      {/* Consultation Transcript & Triage Referral View Modal */}
       {selectedCaseForConvo && (
         <CaseConversationModal
           caseItem={selectedCaseForConvo}
+          allCases={cases}
           onClose={() => setSelectedCaseForConvo(null)}
         />
       )}
@@ -654,23 +725,84 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   );
 };
 
-function CaseConversationModal({ caseItem, onClose }) {
+function CaseConversationModal({ caseItem, allCases = [], onClose }) {
   if (!caseItem) return null;
 
-  const agentCode = getAgentCode(caseItem);
-  const triage = caseItem.triage || {};
-  const intake = caseItem.intake || {};
-  const nearest = caseItem.nearest_facilities?.[0];
-  const refBadge = getReferralBadge(caseItem);
+  const phoneQuery = normalizePhone(caseItem.intake?.phone || caseItem.phone);
 
-  // Extract explicit chat history if present
-  const rawHistory =
-    caseItem.ekms_ai_context?.chatHistory ||
-    caseItem.chatHistory ||
-    caseItem.chat_history ||
-    [];
+  // Find all encounters from this caller to support viewing full cumulative chat history
+  const callerEncounters = useMemo(() => {
+    if (!Array.isArray(allCases) || allCases.length === 0) return [caseItem];
+    const matched = allCases.filter((item) => {
+      const p = normalizePhone(item.intake?.phone || item.phone);
+      if (phoneQuery && p && p === phoneQuery) return true;
+      if (item.case_ref && item.case_ref === caseItem.case_ref) return true;
+      return false;
+    });
 
-  const hasRecordedChat = Array.isArray(rawHistory) && rawHistory.length > 0;
+    if (matched.length === 0) return [caseItem];
+    // Sort oldest first so conversation flows chronologically from the beginning
+    return matched.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  }, [allCases, caseItem, phoneQuery]);
+
+  // Selected encounter view tab: "all" or specific case item
+  const [activeEncounterId, setActiveEncounterId] = useState("all");
+
+  const currentViewingCase = useMemo(() => {
+    if (activeEncounterId === "all") return caseItem;
+    return callerEncounters.find((c, idx) => getCaseUniqueKey(c, idx) === activeEncounterId) || caseItem;
+  }, [activeEncounterId, callerEncounters, caseItem]);
+
+  const agentCode = getAgentCode(currentViewingCase);
+  const triage = currentViewingCase.triage || {};
+  const intake = currentViewingCase.intake || {};
+  const nearest = currentViewingCase.nearest_facilities?.[0];
+  const primaryBadge = getReferralBadge(currentViewingCase);
+  const secondaryBadge = getSecondaryReferralBadge(currentViewingCase);
+
+  // Compile full cumulative chat messages across all encounters or active selected encounter
+  const combinedTranscript = useMemo(() => {
+    if (activeEncounterId !== "all") {
+      const hist =
+        currentViewingCase.ekms_ai_context?.chatHistory ||
+        currentViewingCase.chatHistory ||
+        currentViewingCase.chat_history;
+      if (Array.isArray(hist) && hist.length > 0) return hist;
+      return null;
+    }
+
+    // Combine messages from all encounters from the beginning
+    const allMessages = [];
+    const seenMsgSignatures = new Set();
+
+    for (let i = 0; i < callerEncounters.length; i++) {
+      const enc = callerEncounters[i];
+      const hist =
+        enc.ekms_ai_context?.chatHistory ||
+        enc.chatHistory ||
+        enc.chat_history;
+
+      if (Array.isArray(hist) && hist.length > 0) {
+        for (const m of hist) {
+          const sig = `${m.sender || m.role}_${(m.text || m.content || "").trim().toLowerCase()}`;
+          if (!seenMsgSignatures.has(sig)) {
+            seenMsgSignatures.add(sig);
+            allMessages.push(m);
+          }
+        }
+      }
+    }
+
+    if (allMessages.length > 0) return allMessages;
+
+    // Fallback: check active case
+    const hist =
+      caseItem.ekms_ai_context?.chatHistory ||
+      caseItem.chatHistory ||
+      caseItem.chat_history;
+    if (Array.isArray(hist) && hist.length > 0) return hist;
+    return null;
+  }, [activeEncounterId, callerEncounters, currentViewingCase, caseItem]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -681,7 +813,7 @@ function CaseConversationModal({ caseItem, onClose }) {
       />
 
       {/* Modal Dialog Card */}
-      <div className="relative z-10 flex flex-col w-full max-w-3xl max-h-[90vh] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative z-10 flex flex-col w-full max-w-3xl max-h-[92vh] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="flex items-start justify-between border-b border-border/80 bg-linear-to-r from-blue-50/70 via-background to-secondary/40 dark:from-blue-950/30 dark:via-background dark:to-secondary/20 p-4 sm:p-5">
@@ -695,7 +827,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                   AI & Agent Consultation
                 </h3>
                 <span className="mono rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-xs font-bold">
-                  {caseItem.case_ref}
+                  {currentViewingCase.case_ref}
                 </span>
                 <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-bold text-foreground border border-border">
                   {getAgentFullLabel(agentCode)}
@@ -704,7 +836,7 @@ function CaseConversationModal({ caseItem, onClose }) {
               </div>
               <p className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="font-semibold text-foreground">
-                  Caller: {intake.caller_name || "Anonymous Caller"}
+                  Caller: {intake.caller_name || "Caller"}
                 </span>
                 {intake.phone && (
                   <span className="mono font-semibold">({intake.phone})</span>
@@ -714,8 +846,8 @@ function CaseConversationModal({ caseItem, onClose }) {
                     &bull; {[intake.age ? `${intake.age}y` : null, intake.sex].filter(Boolean).join(" ")}
                   </span>
                 )}
-                {intake.city && (
-                  <span>&bull; {intake.city}</span>
+                {(intake.city || intake.district) && (
+                  <span>&bull; {intake.city || intake.district}</span>
                 )}
               </p>
             </div>
@@ -731,25 +863,86 @@ function CaseConversationModal({ caseItem, onClose }) {
           </button>
         </div>
 
-        {/* Quick Metadata Ribbon */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-b border-border/60 bg-secondary/30 px-4 py-2.5 text-[11px]">
-          <div>
-            <span className="text-muted-foreground block text-[10px]">Acuity Score</span>
-            <span className="font-bold text-foreground">
-              {triage.urgency_score ? `${triage.urgency_score}/10` : "Assessed"} ({triage.urgency_level || "Standard"})
+        {/* Multi-Encounter Run Switcher (If caller has multiple triage runs) */}
+        {callerEncounters.length > 1 && (
+          <div className="flex items-center gap-2 overflow-x-auto border-b border-border/80 bg-slate-100/80 dark:bg-slate-900/60 px-4 py-2 text-xs">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase flex items-center gap-1 shrink-0">
+              <History className="h-3.5 w-3.5 text-primary" /> Caller Runs:
             </span>
+            <button
+              type="button"
+              onClick={() => setActiveEncounterId("all")}
+              className={`rounded-md px-2.5 py-1 font-bold text-xs shrink-0 transition-colors ${
+                activeEncounterId === "all"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
+              }`}
+            >
+              Full Session (From Beginning)
+            </button>
+            {callerEncounters.map((enc, idx) => {
+              const encKey = getCaseUniqueKey(enc, idx);
+              const isCurrent = activeEncounterId === encKey;
+              const timeStr = new Date(enc.created_at || Date.now()).toLocaleTimeString("en-IN", {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              return (
+                <button
+                  key={encKey}
+                  type="button"
+                  onClick={() => setActiveEncounterId(encKey)}
+                  className={`rounded-md px-2.5 py-1 text-xs shrink-0 font-medium transition-colors ${
+                    isCurrent
+                      ? "bg-primary text-primary-foreground font-bold shadow-xs"
+                      : "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
+                  }`}
+                >
+                  Run {idx + 1} ({timeStr}) • {enc.triage?.urgency_level || "Triage"}
+                </button>
+              );
+            })}
           </div>
-          <div>
-            <span className="text-muted-foreground block text-[10px]">Duration</span>
-            <span className="font-medium text-foreground">
-              {intake.duration || triage.duration || "Reported today"}
-            </span>
+        )}
+
+        {/* Primary & Secondary Forward Referral Banner */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 border-b border-border/60 bg-secondary/30 p-3 sm:px-4 text-xs">
+          {/* Primary Referral Box */}
+          <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 p-2.5 space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-emerald-600 inline-block" />
+                Primary Referral (Forward 1)
+              </span>
+              <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                {nearest?.distance_km != null ? `${nearest.distance_km} km` : "Top Priority"}
+              </span>
+            </div>
+            <div className="font-bold text-emerald-950 dark:text-emerald-100 text-[12.5px] truncate">
+              {primaryBadge.icon} {triage.call_referral_primary || triage.referral_destination || nearest?.name || primaryBadge.label}
+            </div>
+            <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-snug line-clamp-2">
+              {triage.referral_reason || triage.recommended_action || "Standard OPD / Casualty evaluation indicated."}
+            </p>
           </div>
-          <div className="col-span-2 sm:col-span-2">
-            <span className="text-muted-foreground block text-[10px]">Recommended Referral</span>
-            <span className="font-bold text-foreground truncate block">
-              {refBadge.icon} {refBadge.label} {nearest?.distance_km != null ? `(${nearest.distance_km} km)` : ""}
-            </span>
+
+          {/* Secondary Referral Box */}
+          <div className="rounded-xl border border-blue-300 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 p-2.5 space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-300 flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-blue-600 inline-block" />
+                Secondary Referral (Forward 2)
+              </span>
+              <span className="text-[10px] font-bold text-blue-800 dark:text-blue-300">
+                Backup Support
+              </span>
+            </div>
+            <div className="font-bold text-blue-950 dark:text-blue-100 text-[12.5px] truncate">
+              {secondaryBadge.icon} {triage.call_referral_secondary || triage.secondary_referral_destination || "104 Health Helpline"}
+            </div>
+            <p className="text-[11px] text-blue-800 dark:text-blue-300 leading-snug line-clamp-2">
+              {triage.secondary_referral_reason || "24x7 Doctor on Call telephone guidance & after-hours casualty coverage."}
+            </p>
           </div>
         </div>
 
@@ -757,13 +950,13 @@ function CaseConversationModal({ caseItem, onClose }) {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/50 dark:bg-background">
           <div className="flex items-center justify-center my-1">
             <span className="rounded-full bg-border/60 px-3 py-1 text-[10px] font-semibold text-muted-foreground tracking-wide uppercase">
-              Consultation Started &bull; {new Date(caseItem.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+              Consultation Started &bull; {new Date(callerEncounters[0]?.created_at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
             </span>
           </div>
 
-          {hasRecordedChat ? (
-            /* Render recorded live chatHistory */
-            rawHistory.map((m, idx) => {
+          {combinedTranscript ? (
+            /* Render recorded live chatHistory from the very beginning */
+            combinedTranscript.map((m, idx) => {
               const isAgent = m.sender === "user" || m.role === "user";
               return (
                 <div
@@ -903,7 +1096,7 @@ function CaseConversationModal({ caseItem, onClose }) {
                     <span>{getAgentFullLabel(agentCode)} (Probing Completed)</span>
                   </div>
                   <p className="text-xs leading-relaxed">
-                    Verified caller location ({intake.district || intake.city || "District"}, PIN: {intake.pincode || "Mapped"}) and confirmed symptom severity. Requesting final dispatch referral.
+                    Verified caller location ({intake.district || intake.city || "Assam District"}, PIN: {intake.pincode || "Mapped"}) and confirmed symptom severity. Requesting final dispatch referral.
                   </p>
                 </div>
               </div>
@@ -911,12 +1104,12 @@ function CaseConversationModal({ caseItem, onClose }) {
           )}
 
           {/* Final Outcome Card inside Transcript */}
-          <div className="mt-4 rounded-xl border border-emerald-300/80 bg-linear-to-b from-emerald-50/70 to-white dark:from-emerald-950/30 dark:to-card p-4 shadow-sm space-y-2.5">
+          <div className="mt-4 rounded-xl border border-emerald-300/80 bg-linear-to-b from-emerald-50/70 to-white dark:from-emerald-950/30 dark:to-card p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200/60 dark:border-emerald-900/40 pb-2">
               <div className="flex items-center gap-1.5">
                 <ShieldCheck className="h-4 w-4 text-emerald-600" />
                 <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
-                  Triage Decision & Facility Referral
+                  Triage Decision & Dual Referral Architecture
                 </span>
               </div>
               <UrgencyBadge level={triage.urgency_level} size="sm" />
@@ -928,29 +1121,41 @@ function CaseConversationModal({ caseItem, onClose }) {
               </p>
               {triage.reasoning && (
                 <p className="text-[11.5px] leading-relaxed text-muted-foreground pt-1">
-                  <span className="font-bold text-foreground">Clinical Rationale:</span> {triage.reasoning}
+                  <strong className="text-foreground">Clinical Rationale:</strong> {triage.reasoning}
                 </p>
               )}
             </div>
 
-            {nearest && (
-              <div className="rounded-lg bg-white dark:bg-card border border-border/80 p-2.5 text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-foreground flex items-center gap-1">
-                    <Building2 className="h-3.5 w-3.5 text-primary" /> {nearest.name}
-                  </span>
-                  <span className="rounded bg-emerald-100 text-emerald-900 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold">
-                    {nearest.distance_km != null ? `${nearest.distance_km} km` : "Nearest"}
-                  </span>
+            {/* Dual Forward Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <div className="rounded-lg border border-emerald-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
+                <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
+                  Primary Destination
                 </div>
-                {nearest.address && (
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="truncate">{nearest.address}</span>
+                <div className="font-bold text-foreground flex items-center gap-1 truncate">
+                  <Building2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  {triage.call_referral_primary || triage.referral_destination || nearest?.name || "ESIC Center"}
+                </div>
+                {nearest?.distance_km != null && (
+                  <p className="text-[10.5px] text-muted-foreground font-mono">
+                    📍 Distance: {nearest.distance_km} km
                   </p>
                 )}
               </div>
-            )}
+
+              <div className="rounded-lg border border-blue-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
+                <div className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">
+                  Secondary Destination
+                </div>
+                <div className="font-bold text-foreground flex items-center gap-1 truncate">
+                  <PhoneCall className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                  {triage.call_referral_secondary || triage.secondary_referral_destination || "104 Health Helpline"}
+                </div>
+                <p className="text-[10.5px] text-muted-foreground">
+                  📞 24x7 Doctor on Call Tele-Consultation
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -959,7 +1164,7 @@ function CaseConversationModal({ caseItem, onClose }) {
           <div className="flex items-center gap-2 text-muted-foreground text-[11px]">
             <Clock className="h-3.5 w-3.5 text-muted-foreground" />
             <span>
-              Logged {new Date(caseItem.created_at).toLocaleString("en-IN", {
+              Logged {new Date(currentViewingCase.created_at || Date.now()).toLocaleString("en-IN", {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",
@@ -972,7 +1177,7 @@ function CaseConversationModal({ caseItem, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-secondary px-3.5 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors shadow-2xs cursor-pointer"
+            className="rounded-lg bg-secondary px-4 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors shadow-2xs cursor-pointer"
           >
             Close
           </button>
