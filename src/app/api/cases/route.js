@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCases, deleteCases } from "@/lib/db";
+import { getCases, deleteCases, updateCase } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,6 +16,30 @@ export async function GET(request) {
       "Cache-Control": "private, max-age=15, stale-while-revalidate=60",
     },
   });
+}
+
+export async function PATCH(request) {
+  try {
+    const body = await request.json();
+    const caseRef = body?.case_ref || body?.id;
+    if (!caseRef) {
+      return NextResponse.json(
+        { detail: "No case reference or ID provided for update" },
+        { status: 400 }
+      );
+    }
+    const updates = body?.updates || body;
+    const updated = await updateCase(caseRef, updates);
+    return NextResponse.json({
+      success: true,
+      case: updated,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { detail: `Failed to update case: ${err.message}` },
+      { status: 500 }
+    );
+  }
 }
 
 export async function DELETE(request) {

@@ -61,6 +61,21 @@ export function removeCaseFromLocalCache(caseRefOrId) {
   } catch (e) {}
 }
 
+export function updateCaseInLocalCache(caseRefOrId, updates) {
+  if (typeof window === "undefined" || !caseRefOrId || !updates) return;
+  try {
+    const cases = getCachedCases();
+    const target = String(caseRefOrId);
+    const updated = cases.map((c) => {
+      if (String(c.case_ref) === target || String(c.id) === target) {
+        return { ...c, ...updates };
+      }
+      return c;
+    });
+    setCachedCases(updated);
+  } catch (e) {}
+}
+
 export function getCachedFacilities() {
   if (typeof window === "undefined") return [];
   try {

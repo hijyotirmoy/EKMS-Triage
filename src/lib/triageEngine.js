@@ -188,6 +188,51 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
  * - Never add synthetic red flags that were not told by the IP or that are unrelated.
  * - Never match helpline numbers (e.g. 104, 108, 1097, 14416) as medical temperatures or symptoms!
  */
+/**
+ * Removes negated medical clauses (e.g. "No, I do not have fever or body aches",
+ * "no chest pain", "fever nahi hai", "without bleeding") from conversational text
+ * so negative symptoms are never mistaken as active red flags or conditions.
+ */
+export function stripNegatedPhrases(text = "") {
+  if (!text || typeof text !== "string") return "";
+  let clean = text.toLowerCase();
+
+  // 1. "no, i do not have X or Y" / "don't have X and Y" / "does not have X" / "not having X"
+  clean = clean.replace(
+    /\b(?:no,?\s*(?:i\s*)?)?(?:do\s*not|don'?t|does\s*not|doesn'?t|did\s*not|didn'?t|have\s*no|has\s*no|haven'?t\s*got|am\s*not\s*having|not\s*having|without\s*any|without)\s+(?:have\s+|any\s+|a\s+)?([a-z\s,/]+?)(?=[.,;!?]|$|\b(?:but|however|except|only|and i have|aur mujhe)\b)/gi,
+    " "
+  );
+
+  // 2. Direct "no X, no Y" or "no X or Y"
+  clean = clean.replace(
+    /\bno\s+(?:fever|bukhar|body\s*aches?|badan\s*dard|pain|dard|chest\s*pain|chhati\s*me\s*dard|headache|sar\s*dard|dizziness|chakkar|vomit\w*|ulti\w*|bleeding|khoon|cough|khansi|cold|chills|shivering|kapkapi|shortness\s*of\s*breath|saans\s*me\s*takleef|rash|allerg\w*|seizure|daura|swelling|sujan)(?:\s*(?:or|nor|,|and)\s*(?:fever|bukhar|body\s*aches?|badan\s*dard|pain|dard|chest\s*pain|chhati\s*me\s*dard|headache|sar\s*dard|dizziness|chakkar|vomit\w*|ulti\w*|bleeding|khoon|cough|khansi|cold|chills|shivering|kapkapi|shortness\s*of\s*breath|saans\s*me\s*takleef|rash|allerg\w*|seizure|daura|swelling|sujan))*/gi,
+    " "
+  );
+
+  // 3. Hindi negations: "[symptom] nahi/nehi/nhi hai" / "[symptom] nahi"
+  clean = clean.replace(
+    /\b(?:fever|bukhar|badan\s*dard|body\s*ache|dard|pain|seene\s*me\s*dard|chhati\s*dard|sar\s*dard|headache|chakkar|dizziness|ulti|vomit|khoon|bleeding|khansi|cough|kapkapi|chills|thand|saans\s*takleef|sujan)\s*(?:bhi\s+)?(?:nahi|nehi|nhi|na)\s*(?:hai|h)?\b/gi,
+    " "
+  );
+
+  // 4. Hindi prefix negation: "nahi hai [symptom]" / "koi [symptom] nahi hai"
+  clean = clean.replace(
+    /\b(?:nahi|nehi|nhi|na)\s*(?:hai|h)?\s*(?:koi\s+)?(?:fever|bukhar|badan\s*dard|body\s*ache|dard|pain|seene\s*me\s*dard|chhati\s*dard|sar\s*dard|headache|chakkar|dizziness|ulti|vomit|khoon|bleeding|khansi|cough|kapkapi|chills|thand|saans\s*takleef|sujan)\b/gi,
+    " "
+  );
+
+  return clean.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Summarizes clinical red flags strictly based on what the IP explicitly reported.
+ * 
+ * Rules:
+ * - Only symptoms explicitly reported by the caller and NOT denied are valid red flags.
+ * - If the caller denies a symptom (e.g. "nehi", "no", "nahi", "no fever", "safe"), it must NEVER be listed as a red flag.
+ * - Never add synthetic red flags that were not told by the IP or that are unrelated.
+ * - Never match helpline numbers (e.g. 104, 108, 1097, 14416) as medical temperatures or symptoms!
+ */
 export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSafe = false) {
   const points = [];
   const seen = new Set();
@@ -203,16 +248,19 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   };
 
   const text = (textContext || "").toLowerCase();
+  const affirmativeText = stripNegatedPhrases(text);
 
   // Explicit caller negations
   const deniesFever =
-    /\b(no fever|nehi|nahi|not having fever|without fever|fever nahi|bukhar nahi|no chills|mild discomfort|just not feeling good)\b/i.test(text) &&
-    !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever)\b/i.test(text);
+    /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|do\s+not\s+have\s+fever|without\s+fever|fever\s+nahi|bukhar\s+nahi|no\s+chills|no\s+body\s*aches?|without\s+chills|nehi|nahi|not\s+having\s+fever)\b/i.test(text) &&
+    !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever|high grade fever)\b/i.test(text);
   const isSafe =
     callerSaidSafe ||
     /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(text);
-  const deniesChestPain = /\b(no chest pain|chhati me dard nahi|no pain in chest)\b/i.test(text);
-  const deniesBleeding = /\b(no bleed|khoon nahi|no cut)\b/i.test(text);
+  const deniesChestPain = /\b(no\s+chest\s*pain|not\s+have\s+chest|don'?t\s+have\s+chest|chhati\s*me\s*dard\s*nahi|no\s+pain\s*in\s*chest)\b/i.test(text);
+  const deniesBleeding = /\b(no\s+bleed|not\s+bleeding|don'?t\s+have\s+bleed|khoon\s*nahi|no\s+cut)\b/i.test(text);
+  const deniesBreathing = /\b(no\s+breath|no\s+shortness|saans\s*theek|able\s+to\s+breathe|speak\s+normally)\b/i.test(text);
+  const deniesVomiting = /\b(no\s+vomit|not\s+vomiting|don'?t\s+have\s+vomit|ulti\s*nahi)\b/i.test(text);
 
   // Check if a raw flag is genuinely supported by what the IP actually said
   const isFlagSupportedByCaller = (flagStr) => {
@@ -228,8 +276,8 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
       fLower.includes("melena") ||
       fLower.includes("stool")
     ) {
-      if (deniesBleeding && !/\b(blood|hematemesis|vomit.*blood|khoon)\b/i.test(text)) return false;
-      return /\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal|gi bleed|bleeding)\b/i.test(text);
+      if (deniesBleeding && !/\b(blood|hematemesis|vomit.*blood|khoon)\b/i.test(affirmativeText)) return false;
+      return /\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal|gi bleed|bleeding)\b/i.test(affirmativeText);
     }
 
     // Fever / Chills / Rigors / Shivering
@@ -242,7 +290,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
       fLower.includes("rigor")
     ) {
       if (deniesFever) return false;
-      return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|kapkapi|10[2-5]\s*(?:°|f|deg))\b/i.test(text);
+      return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|kapkapi|10[2-5]\s*(?:°|f|deg))\b/i.test(affirmativeText);
     }
 
     // Suicidal / Self-harm checks
@@ -265,7 +313,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
       fLower.includes("myocardial")
     ) {
       if (deniesChestPain) return false;
-      return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(text);
+      return /\b(chest|chhati|heart attack|dil ka dard|angina)\b/i.test(text);
     }
 
     // Bleeding / Cut checks
@@ -387,7 +435,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   if (
     !deniesFever &&
     /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi|thand lagna|10[2-6]\s*(?:°|f|deg))\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("High fever with chills and shivering");
@@ -395,8 +443,9 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
 
   // Severe respiratory distress / Breathing issues / Gasping
   if (
+    !deniesBreathing &&
     /\b(severe breathlessness|saans.*takleef|gasping|gasping for air|suffocat|wheez|inability to speak|speech.*sentence|cyanosis|blue.*lip)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Severe shortness of breath / gasping for air");
@@ -406,19 +455,19 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   if (
     !deniesChestPain &&
     /\b(crushing chest|dil ka dard|chhati me dard|severe chest pain|left arm pain|pressure on chest|chest.*radiat|chest.*sweat)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Severe chest pain / cardiac pressure with radiation");
   }
 
   // Loss of consciousness / Fainting / Blackout
-  if (/\b(unconscious|behosh|fainted|blackout|collapsed|syncope|unresponsive)\b/i.test(text)) {
+  if (/\b(unconscious|behosh|fainted|blackout|collapsed|syncope|unresponsive)\b/i.test(affirmativeText)) {
     addPoint("Loss of consciousness / fainting episode");
   }
 
   // Convulsions / Seizures / Fits
-  if (/\b(seizure|convulsions?|fits?|mirgi ka daura|daura)\b/i.test(text)) {
+  if (/\b(seizure|convulsions?|fits?|mirgi ka daura|daura)\b/i.test(affirmativeText)) {
     addPoint("Seizure / convulsive episode");
   }
 
@@ -426,7 +475,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   if (
     !deniesBleeding &&
     /\b(heavy bleed|khoon beh raha|profuse bleed|deep wound|arterial bleed|slit.*wrist|cut.*wrist)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Heavy uncontrollable bleeding / vascular injury");
@@ -435,7 +484,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Severe acute abdominal pain / rigid abdomen
   if (
     /\b(severe abdominal pain|pet me bahut tez dard|acute abdomen|rigid abdomen|intense stomach pain)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Severe acute abdominal pain");
@@ -444,7 +493,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Major trauma / fall from height / bone fracture / head injury
   if (
     /\b(fall from height|gir gaya|fracture|head injury|sir me chot|serious accident|car accident|severe burn)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Major trauma / suspected fracture or head injury");
@@ -453,7 +502,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Acute severe allergic reaction / anaphylaxis (throat/face swelling)
   if (
     /\b(anaphylaxis|throat.*swell|lip.*swell|tongue.*swell|gale.*sujan|severe allergic)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Acute severe allergic reaction / airway swelling (anaphylaxis)");
@@ -462,7 +511,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Poisoning / snakebite / pesticide exposure
   if (
     /\b(poison|zeher|snake\s*bite|saap kaat|pesticide|chemical ingestion)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Poisoning / toxic chemical exposure or snake envenomation");
@@ -471,7 +520,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Severe dehydration / circulatory signs
   if (
     /\b(severe dehydration|sunken eyes|dark urine|extreme weakness.*dizzy|chakkar.*gir)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Severe dehydration / signs of circulatory compromise");
@@ -480,7 +529,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Acute neurological deficit (slurred speech, facial asymmetry, weakness)
   if (
     /\b(slurred speech|facial droop|sudden weakness|paralysis|ek taraf kamzori)\b/i.test(
-      text
+      affirmativeText
     )
   ) {
     addPoint("Acute neurological deficit / suspected stroke signs");
@@ -489,7 +538,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Suicidal intent (ONLY if caller explicitly stated and is NOT safe)
   if (
     !isSafe &&
-    /\b(wanna die|want to die|kill myself|mar jaunga|jaan dena chahta)\b/i.test(text)
+    /\b(wanna die|want to die|kill myself|mar jaunga|jaan dena chahta)\b/i.test(affirmativeText)
   ) {
     addPoint("Explicit thoughts of ending life reported by IP");
   }
@@ -507,14 +556,50 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
 export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText = "") {
   if (!rawCondition || typeof rawCondition !== "string") return "Reported Symptoms";
 
-  const callerText = (callerSpokenText || "").toLowerCase();
+  let clean = rawCondition.trim();
+
+  // If rawCondition is a referral channel name or generic consultation text, extract the actual clinical complaint
+  const isChannelOnly =
+    /^(104|108|ambulance|104 health|104 tele-doctor|tele-doctor|tele doctor|medical consultation|general consultation|phone consultation|health helpline|dispensary|hospital|tie-up|referral|primary care)$/i.test(clean) ||
+    /\b(104 tele-doctor consultation|104 health helpline|108 ambulance dispatch|tele-doctor consultation|medical consultation)\b/i.test(clean);
+
+  if (isChannelOnly) {
+    const callerText = stripNegatedPhrases(callerSpokenText || "");
+    if (/\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|tanka|dressing)\b/i.test(callerText)) {
+      clean = "Laceration / Cut Injury";
+    } else if (/\b(chest|angina|heart|dil ka dard|chhati)\b/i.test(callerText)) {
+      clean = "Chest Discomfort / Pain";
+    } else if (/\b(fever|bukhar|temperature|chills|shiver|tap)\b/i.test(callerText)) {
+      clean = "Fever & Chills";
+    } else if (/\b(headache|sar dard|sir dard|migraine)\b/i.test(callerText)) {
+      clean = "Headache";
+    } else if (/\b(stomach|abdom|pet dard|gastric|vomit|nausea|ulti|loose motion|dast|diarrhea)\b/i.test(callerText)) {
+      clean = "Abdominal / Gastric Pain";
+    } else if (/\b(dizzy|chakkar|weakness|kamzori|faint)\b/i.test(callerText)) {
+      clean = "Weakness & Dizziness";
+    } else if (/\b(breath|saans|cough|khansi|asthma)\b/i.test(callerText)) {
+      clean = "Respiratory Symptoms / Cough";
+    } else if (/\b(burn|jal gaya|acid)\b/i.test(callerText)) {
+      clean = "Burn Injury";
+    } else if (/\b(fracture|haddi|bone|twist|sprain|moch)\b/i.test(callerText)) {
+      clean = "Orthopedic / Bone Injury";
+    } else if (/\b(rash|khujli|itching|skin|allergy|dana|foda)\b/i.test(callerText)) {
+      clean = "Skin Rash / Allergy";
+    } else if (/\b(suicid|depress|anxiety|stress|mental|udaas)\b/i.test(callerText)) {
+      clean = "Emotional Distress / Mental Health Support";
+    } else if (/\b(hiv|aids|std|sti|gupt rog)\b/i.test(callerText)) {
+      clean = "HIV / Sexual Health Consultation";
+    } else {
+      clean = "Reported Clinical Symptoms";
+    }
+  }
+
+  const callerText = stripNegatedPhrases(callerSpokenText || "");
 
   const hasKidneyStone = /\b(kidney stone|pathri|renal calculus|renal stone|gall stone)\b/i.test(callerText);
   const hasAppendicitis = /\b(appendicitis|appendix)\b/i.test(callerText);
   const hasUlcer = /\b(ulcer|peptic ulcer)\b/i.test(callerText);
   const hasCardiacDisease = /\b(heart attack|cardiac arrest|dil ka daura)\b/i.test(callerText);
-
-  let clean = rawCondition;
 
   // Replace fabricated medical diagnoses with non-physician symptom descriptions
   if (!hasKidneyStone) {
@@ -550,7 +635,50 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
 
   clean = clean.replace(/^[\s,;-]+|[\s,;-]+$/g, "").trim();
 
-  return clean || "Reported Symptoms";
+  return clean || "Reported Clinical Symptoms";
+}
+
+export function formatClinicalSummary(intake = {}, condition = "Reported Symptoms", severity = 5, duration = "Reported today", primaryReferral = "104 Health Helpline") {
+  const age = intake.age != null && intake.age !== "" ? Number(intake.age) : null;
+  const sex = intake.sex ? String(intake.sex).trim() : "";
+
+  let callerDemo = "Caller";
+  if (age && sex) {
+    callerDemo = `${age}-year-old ${sex.toLowerCase()} caller`;
+  } else if (age) {
+    callerDemo = `${age}-year-old caller`;
+  } else if (sex) {
+    callerDemo = `${sex} caller`;
+  }
+
+  let actionClause = "";
+  const refLower = (primaryReferral || "").toLowerCase();
+  if (refLower.includes("108") || refLower.includes("ambulance")) {
+    actionClause = "requiring immediate 108 Emergency Ambulance dispatch for acute emergency/trauma care.";
+  } else if (refLower.includes("104") || refLower.includes("helpline")) {
+    actionClause = "guided to 104 Health Helpline for 24x7 tele-doctor consultation and medical advice.";
+  } else if (refLower.includes("hospital") && (refLower.includes("esic") || !refLower.includes("district"))) {
+    actionClause = "referred to nearest ESIC Hospital for in-person medical evaluation and secondary care.";
+  } else if (refLower.includes("dispensary") || refLower.includes("esis")) {
+    actionClause = "guided to nearest ESIS Dispensary during OPD hours for primary doctor consultation and medicine dispensing.";
+  } else if (refLower.includes("tie")) {
+    actionClause = "referred to nearest Empanelled Tie-Up Facility for specialized clinical care under ESI empanelment.";
+  } else if (refLower.includes("district")) {
+    actionClause = "referred to nearest Govt District Hospital for casualty evaluation and acute medical care.";
+  } else {
+    actionClause = `guided to ${primaryReferral} for medical evaluation.`;
+  }
+
+  const cleanCond = sanitizeSymptomOrCondition(condition, `${intake.symptom_notes || ""} ${intake.complaint || ""}`);
+  const durText = duration && duration !== "Reported today" ? duration : "Reported today";
+
+  const summaryEn = `${callerDemo} reports ${cleanCond} with severity ${severity}/10 (${durText}); ${actionClause}`;
+
+  let hindiDemo = age ? `${age} वर्षीय ` : "";
+  hindiDemo += sex ? (sex.toLowerCase() === "female" ? "महिला कॉलर" : "पुरुष कॉलर") : "कॉलर";
+  const summaryHi = `${hindiDemo} को ${cleanCond} की शिकायत है (तीव्रता: ${severity}/10, अवधि: ${durText}); ${primaryReferral} द्वारा आवश्यक मार्गदर्शन दिया गया।`;
+
+  return { summaryEn, summaryHi, cleanCond };
 }
 
 async function evaluateRawTriage(intake) {
@@ -745,7 +873,16 @@ async function evaluateRawTriage(intake) {
       isDualProtocol = false;
       call108 = false;
     }
-    // Tier 6: Non-Emergency Cases After 4:00 PM or off-hours -> Prefer 104 Health Helpline
+    // Tier 4: Acute Severity (Severity >= 8 / Severity 9/10 / Acute Hospital Evaluation)
+    else if (effectiveSeverity >= 8) {
+      primaryReferral = "ESIC Hospital";
+      primaryReason = `Emergency clinical evaluation (Severity ${effectiveSeverity}/10). Direct patient to nearest Hospital 24x7 Casualty for doctor examination and stabilization.`;
+      secondaryReferral = "104 Health Helpline";
+      secondaryReason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
+      isDualProtocol = false;
+      call108 = false;
+    }
+    // Tier 6: Non-Emergency Cases After 4:00 PM or off-hours (Severity < 8) -> Prefer 104 Health Helpline
     else if (isOffHours || !dispensaryStatus.isOpen) {
       primaryReferral = "104 Health Helpline";
       primaryReason = "Dispensary and general hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
@@ -778,33 +915,6 @@ async function evaluateRawTriage(intake) {
       secondaryReferral = primaryReferral === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
     }
 
-    let summaryEn = "";
-    let summaryHi = "";
-
-    if (isNacoHIV) {
-      summaryEn = "Caller seeks consultation or guidance regarding HIV/AIDS or sexual health. Reassurance, confidential 104 tele-doctor counseling, and ICTC testing referral indicated.";
-      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; 104 गोपनीय परामर्श और आईसीटीसी केंद्र रेफरल आवश्यक है।";
-    } else if (isPsych && hasSelfHarmAction) {
-      summaryEn = `Caller in acute emotional crisis with ${selfHarmActionEn}, presenting a life safety risk requiring emergency 108 ambulance dispatch and medical intervention.`;
-      summaryHi = `कॉलर गंभीर मानसिक संकट में है और उसने ${selfHarmActionHi} की है; तुरंत 108 एम्बुलेंस और चिकित्सकीय सहायता आवश्यक है।`;
-    } else if (isPsych && callerHasSuicideWords) {
-      summaryEn = "Caller reports acute emotional distress with thoughts of ending their life, requiring urgent tele-doctor intervention and support via 104 Health Helpline.";
-      summaryHi = "कॉलर ने गंभीर मानसिक तनाव और आत्महत्या के विचारों की शिकायत की है, जिसके लिए 104 हेल्पलाइन द्वारा तत्काल परामर्श आवश्यक है।";
-    } else if (isPsych) {
-      summaryEn = "Caller reports emotional distress and psychological disturbance, requiring professional counseling and mental health support via 104 Health Helpline.";
-      summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; 104 हेल्पलाइन द्वारा परामर्श उपयुक्त है।";
-    } else if (primaryReferral === "104 Health Helpline" && (effectiveSeverity <= 4 || tState?.severity === "Mild" || needsDoctorAdvice)) {
-      const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "mild symptoms";
-      const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
-      summaryEn = `Caller inquires regarding ${cleanCond}; condition is non-serious and suitable for 104 Health Helpline tele-doctor consultation and general health advice.`;
-      summaryHi = `कॉलर को ${cleanCond} संबंधी चिकित्सकीय सलाह की आवश्यकता है; स्थिति गंभीर नहीं है और 104 टेली-डॉक्टर परामर्श उपयुक्त है।`;
-    } else {
-      const rawCond = tState?.condition || tState?.suspectedCondition || tState?.symptom || notes || "symptoms";
-      const cleanCond = sanitizeSymptomOrCondition(rawCond, callerSpokenText);
-      summaryEn = `Caller reports ${cleanCond} with reported severity ${severity}/10 (${duration}), requiring prompt medical evaluation.`;
-      summaryHi = `कॉलर को ${cleanCond} की शिकायत है (तीव्रता: ${severity}/10, अवधि: ${duration}), जिसके लिए उचित चिकित्सकीय परामर्श आवश्यक है।`;
-    }
-
     const rawComp = tState?.suspectedCondition || tState?.condition || tState?.symptom || notes || "Primary Clinical Assessment";
     const cleanPrimaryComplaint = sanitizeSymptomOrCondition(rawComp, callerSpokenText);
 
@@ -817,6 +927,31 @@ async function evaluateRawTriage(intake) {
           : (isNacoHIV
             ? "HIV / AIDS / STI Health Consultation"
             : cleanPrimaryComplaint)));
+
+    const clinicalSummaryObj = formatClinicalSummary(
+      intake,
+      primaryComplaint,
+      severity,
+      duration,
+      primaryReferral
+    );
+
+    let summaryEn = clinicalSummaryObj.summaryEn;
+    let summaryHi = clinicalSummaryObj.summaryHi;
+
+    if (isNacoHIV) {
+      summaryEn = formatClinicalSummary(intake, "HIV / AIDS / STI Consultation", severity, duration, "104 Health Helpline").summaryEn;
+      summaryHi = "कॉलर एचआईवी/एड्स या यौन स्वास्थ्य संबंधी मार्गदर्शन चाहता है; 104 गोपनीय परामर्श और आईसीटीसी केंद्र रेफरल आवश्यक है।";
+    } else if (isPsych && hasSelfHarmAction) {
+      summaryEn = formatClinicalSummary(intake, `Acute Emotional Crisis with ${selfHarmActionEn}`, 10, duration, "108 Ambulance").summaryEn;
+      summaryHi = `कॉलर गंभीर मानसिक संकट में है और उसने ${selfHarmActionHi} की है; तुरंत 108 एम्बुलेंस और चिकित्सकीय सहायता आवश्यक है।`;
+    } else if (isPsych && callerHasSuicideWords) {
+      summaryEn = formatClinicalSummary(intake, "Acute Emotional Distress with Suicidal Ideation", 9, duration, "104 Health Helpline").summaryEn;
+      summaryHi = "कॉलर ने गंभीर मानसिक तनाव और आत्महत्या के विचारों की शिकायत की है, जिसके लिए 104 हेल्पलाइन द्वारा तत्काल परामर्श आवश्यक है।";
+    } else if (isPsych) {
+      summaryEn = formatClinicalSummary(intake, "Emotional Distress and Psychological Disturbance", severity, duration, "104 Health Helpline").summaryEn;
+      summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; 104 हेल्पलाइन द्वारा परामर्श उपयुक्त है।";
+    }
 
     const triageUrgencyLevel = isPsych
       ? (hasSelfHarmAction || callerHasSuicideWords ? "Emergency" : "Urgent")

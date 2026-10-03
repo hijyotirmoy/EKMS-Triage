@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertOctagon,
   Building2,
@@ -20,13 +21,20 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Search,
+  Maximize2,
+  Minimize2,
+  Map as MapIcon,
+  Layers,
+  Crosshair,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
-import { AiFeedbackLearningCard } from "./AiFeedbackLearningCard";
+import { MapWrapper } from "./map/MapWrapper";
+import { ASSAM_DISTRICTS } from "../lib/districts";
 import {
   isHospital,
   isDispensary,
@@ -169,49 +177,37 @@ export function resolveDirectiveIds(t, result) {
   const currentMinutes = istDate.getHours() * 60 + istDate.getMinutes();
   const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM
 
-  const chatRef = result?.ekms_ai_context?.triageState?.referralDestination || result?.ekms_ai_context?.referralDestination;
-  const isEmergency =
+  const severityScore = Number(t?.urgency_score || result?.intake?.severity_reported || result?.ekms_ai_context?.triageState?.severityScore || 0);
+  const isSeverity9OrHigh = severityScore >= 8 || t?.urgency_level === "Emergency";
+
+  const is108Ambulance =
     Boolean(t?.call_108) ||
-    (/\b(108|ambulance)\b/i.test(t?.referral_destination || "") && !/\b(hospital|dispensary)\b/i.test(chatRef || ""));
+    /\b(108|ambulance)\b/i.test(t?.referral_destination || "") ||
+    /\b(108|ambulance)\b/i.test(t?.call_referral_primary || "") ||
+    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh)\b/i.test(intakeText);
 
-  let primaryDest =
-    t?.call_referral_primary ||
-    t?.referral_destination ||
-    chatRef;
+  let primaryDest = t?.call_referral_primary || t?.referral_destination || chatRef;
 
-  if (chatRef && chatRef.toLowerCase().includes("hospital") && !t?.call_108) {
-    primaryDest = "ESIC Hospital";
-  }
-
-  if (!isEmergency && isOffHours) {
-    if (
-      !primaryDest ||
-      (!isNacoHIV &&
-        !isPsych &&
-        !t?.call_108 &&
-        (primaryDest.toLowerCase().includes("hospital") || primaryDest.toLowerCase().includes("dispensary")))
-    ) {
-      primaryDest = "104 Health Helpline";
-    }
-  }
-
-  if (!primaryDest) {
-    if (isEmergency) {
-      primaryDest = "108 Ambulance";
-    } else if (isNacoHIV || isPsych || isOffHours) {
-      primaryDest = "104 Health Helpline";
-    } else {
-      primaryDest = "ESIS Dispensary";
-    }
+  if (is108Ambulance) {
+    primaryDest = "108 Ambulance";
+  } else if (isSeverity9OrHigh) {
+    // For severity 9 / 8-10 emergency, forward to hospital first (ESIC Hospital / Govt District Hospital)
+    primaryDest = (primaryDest && primaryDest.toLowerCase().includes("hospital")) ? primaryDest : "ESIC Hospital";
+  } else if (isNacoHIV || isPsych) {
+    primaryDest = "104 Health Helpline";
+  } else if (isOffHours) {
+    primaryDest = "104 Health Helpline";
+  } else if (!primaryDest) {
+    primaryDest = "ESIS Dispensary";
   }
 
   let secondaryDest =
     t?.call_referral_secondary ||
     t?.secondary_referral_destination ||
-    (isOffHours ? "ESIC Hospital" : "104 Health Helpline");
+    (isSeverity9OrHigh ? "104 Health Helpline" : (isOffHours ? "ESIC Hospital" : "104 Health Helpline"));
 
-  if (!isEmergency && isOffHours && primaryDest.includes("104") && (!secondaryDest || secondaryDest.includes("104"))) {
-    secondaryDest = "ESIC Hospital";
+  if (isSeverity9OrHigh && (!secondaryDest || secondaryDest.includes("Hospital"))) {
+    secondaryDest = "104 Health Helpline";
   }
 
   const primaryId = mapDestinationToDirectiveId(primaryDest);
@@ -335,6 +331,7 @@ export const TriageResultPanel = ({
   currentAgent,
   onUpdatePincode,
   onRunTriageWithPincode,
+  onDirectiveChange,
 }) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
@@ -346,6 +343,16 @@ export const TriageResultPanel = ({
   const [searchedFacilities, setSearchedFacilities] = useState(null);
   const [searchedLocation, setSearchedLocation] = useState(null);
   const [isSearchingFacilities, setIsSearchingFacilities] = useState(false);
+
+  // Assam Map States (from EKMS Map)
+  const mapRef = useRef(null);
+  const fullScreenMapRef = useRef(null);
+  const [mapLayer, setMapLayer] = useState("minimal");
+  const [isPinModeActive, setIsPinModeActive] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [selectedFacilityForMap, setSelectedFacilityForMap] = useState(null);
+  const [droppedPinLocation, setDroppedPinLocation] = useState(null);
+  const [selectedDistrictFilter, setSelectedDistrictFilter] = useState("all");
 
   const handleFacilitySearch = async (targetQuery) => {
     const query = String(targetQuery ?? searchPincode).trim();
@@ -386,6 +393,115 @@ export const TriageResultPanel = ({
   };
 
   const effectiveLoc = searchedLocation || loc;
+
+  // Compute effective target location for Assam Map
+  const effectiveTargetLocation = useMemo(() => {
+    if (droppedPinLocation && droppedPinLocation.lat != null && droppedPinLocation.lng != null) {
+      return {
+        lat: Number(droppedPinLocation.lat),
+        lng: Number(droppedPinLocation.lng),
+        radius: droppedPinLocation.radius || 15,
+        name: droppedPinLocation.name || "Dropped Pin",
+      };
+    }
+    if (
+      effectiveLoc &&
+      effectiveLoc.latitude != null &&
+      effectiveLoc.longitude != null &&
+      !effectiveLoc.isNoLocation
+    ) {
+      return {
+        lat: Number(effectiveLoc.latitude),
+        lng: Number(effectiveLoc.longitude),
+        radius: 15,
+        name:
+          effectiveLoc.matched?.replace(/\b(78\d{4})\b/g, "").replace(/\(\s*\)/g, "").trim() ||
+          effectiveLoc.pincode ||
+          "Caller Location",
+      };
+    }
+    return null;
+  }, [droppedPinLocation, effectiveLoc]);
+
+  // Handle Drop Pin on Assam Map
+  const handlePinDropped = async (pinLoc) => {
+    setDroppedPinLocation(pinLoc);
+    setIsPinModeActive(false);
+    setIsSearchingFacilities(true);
+    try {
+      const isSevere = t.urgency_level === "Emergency" || t.call_108;
+      const url = `/api/facilities/nearest?lat=${pinLoc.lat}&lon=${pinLoc.lng}&severe=${isSevere}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setSearchedFacilities(data.nearest_facilities || []);
+        setSearchedLocation(
+          data.resolved_location || {
+            latitude: pinLoc.lat,
+            longitude: pinLoc.lng,
+            matched: pinLoc.name,
+            pincode: null,
+            district: null,
+            method: "coordinates",
+            isNoLocation: false,
+          }
+        );
+        toast.success(`Dropped pin set to "${pinLoc.name}"! Found ${data.nearest_facilities?.length || 0} facilities.`);
+      }
+    } catch (err) {
+      console.error("Pin drop search error:", err);
+      toast.error("Could not fetch facilities for dropped pin.");
+    } finally {
+      setIsSearchingFacilities(false);
+    }
+  };
+
+  const handleDistrictSelect = (districtName) => {
+    setSelectedDistrictFilter(districtName);
+    setSearchPincode(districtName);
+    handleFacilitySearch(districtName);
+  };
+
+  const focusFacilityOnMap = (f) => {
+    setSelectedFacilityForMap(f);
+    if (mapRef.current) {
+      mapRef.current.focusFacility(f);
+    }
+    if (fullScreenMapRef.current) {
+      fullScreenMapRef.current.focusFacility(f);
+    }
+  };
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMapExpanded) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setIsMapExpanded(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMapExpanded]);
+
+  useEffect(() => {
+    if (isMapExpanded) {
+      const timer = setTimeout(() => {
+        fullScreenMapRef.current?.invalidateSize();
+      }, 250);
+      return () => clearTimeout(timer);
+    } else {
+      const timer = setTimeout(() => {
+        mapRef.current?.invalidateSize();
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [isMapExpanded]);
+
   const effectiveRawFacs =
     searchedFacilities !== null ? searchedFacilities : (Array.isArray(facs) ? facs : []);
 
@@ -398,6 +514,18 @@ export const TriageResultPanel = ({
     ACTION_DIRECTIVES[manualDirectiveId || directiveIds.primaryId] || ACTION_DIRECTIVES.ESIS_DISPENSARY;
   const secondaryDirective =
     ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
+
+  const [forwardedStatus, setForwardedStatus] = useState(null);
+
+  useEffect(() => {
+    setForwardedStatus(null);
+  }, [result]);
+
+  useEffect(() => {
+    if (activeDirective && onDirectiveChange) {
+      onDirectiveChange(activeDirective);
+    }
+  }, [activeDirective, onDirectiveChange]);
 
   const dispensaryStatus = useMemo(() => getDispensaryOperatingStatus(), []);
   const isWeekend = dispensaryStatus.isWeekend;
@@ -443,6 +571,9 @@ export const TriageResultPanel = ({
       return distA - distB;
     };
 
+    const isOpenFacility = (f) =>
+      isHospital(f) || isEsicHospital(f) || isGovtDistrictHospital(f) || isTieUp(f) || !isDispensary(f);
+
     let orderedFacs = [...effectiveFacs];
 
     if (manualDirectiveId === "TIE_UP_FACILITY" || activeDirective.id === "TIE_UP_FACILITY") {
@@ -458,11 +589,35 @@ export const TriageResultPanel = ({
       const others = effectiveFacs.filter((f) => !isEsicHospital(f)).sort(byDistance);
       orderedFacs = [...esicHosps, ...others].slice(0, 6);
     } else if (manualDirectiveId === "ESIS_DISPENSARY" || activeDirective.id === "ESIS_DISPENSARY") {
-      const dispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
-      const others = effectiveFacs.filter((f) => !isDispensary(f)).sort(byDistance);
-      orderedFacs = [...dispensaries, ...others].slice(0, 6);
+      if (isWeekend) {
+        // On weekends, dispensaries are closed. Prioritize at least 4 open facilities (hospitals / tie-ups) first
+        const openFacs = effectiveFacs.filter(isOpenFacility).sort(byDistance);
+        const closedDispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
+        const minOpen = Math.max(4, openFacs.length >= 4 ? 4 : openFacs.length);
+        orderedFacs = [
+          ...openFacs.slice(0, minOpen),
+          ...closedDispensaries,
+          ...openFacs.slice(minOpen),
+        ].slice(0, Math.max(6, minOpen + closedDispensaries.length));
+      } else {
+        const dispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
+        const others = effectiveFacs.filter((f) => !isDispensary(f)).sort(byDistance);
+        orderedFacs = [...dispensaries, ...others].slice(0, 6);
+      }
     } else {
-      orderedFacs = [...effectiveFacs].sort(byDistance);
+      if (isWeekend) {
+        // On weekends, prioritize at least 4 open facilities (hospitals & tie-up facilities) first
+        const openFacs = effectiveFacs.filter(isOpenFacility).sort(byDistance);
+        const closedDispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
+        const minOpen = Math.max(4, openFacs.length >= 4 ? 4 : openFacs.length);
+        orderedFacs = [
+          ...openFacs.slice(0, minOpen),
+          ...closedDispensaries,
+          ...openFacs.slice(minOpen),
+        ].slice(0, Math.max(6, minOpen + closedDispensaries.length));
+      } else {
+        orderedFacs = [...effectiveFacs].sort(byDistance);
+      }
     }
 
     return orderedFacs.map((f) => ({
@@ -470,7 +625,7 @@ export const TriageResultPanel = ({
       facility_tag: getTag(f),
       category_style: getCategoryStyle(f),
     }));
-  }, [effectiveRawFacs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen]);
+  }, [effectiveRawFacs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen, isWeekend]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -495,7 +650,7 @@ export const TriageResultPanel = ({
           .map((m) => m.text || m.content || "")
           .join(" ")
       : "";
-    const callerText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.caller_spoken_text || ""} ${t?.primary_complaint || ""} ${result?.ekms_ai_context?.triageState?.condition || ""} ${result?.ekms_ai_context?.triageState?.suspectedCondition || ""} ${callerChat}`.toLowerCase().trim();
+    const callerText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.caller_spoken_text || ""} ${callerChat}`.toLowerCase().trim();
     const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(callerText);
 
     return summarizeRedFlags(raw, callerText, isSafe);
@@ -568,7 +723,7 @@ export const TriageResultPanel = ({
               <p className="eyebrow">Triage outcome</p>
               <div className="mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3">
                 <UrgencyBadge level={t.urgency_level} score={t.urgency_score} />
-                {activeDirective.id === "CALL_108" || t.call_108 ? (
+                {activeDirective.id === "CALL_108" ? (
                   <span
                     data-testid="triage-call-108"
                     className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-2xs"
@@ -649,9 +804,16 @@ export const TriageResultPanel = ({
                   <span className="text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-400">
                     Recommended Call Referral 01 (Primary Immediate Destination)
                   </span>
-                  <span className="rounded bg-emerald-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
-                    Primary
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {Boolean(forwardedStatus && !String(forwardedStatus?.shortName || "").toLowerCase().includes(secondaryReferralDest.toLowerCase().split(" ")[0])) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
+                        <CheckCircle2 className="h-3 w-3" /> Forwarded
+                      </span>
+                    )}
+                    <span className="rounded bg-emerald-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
+                      Primary
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5 font-extrabold text-emerald-950 dark:text-emerald-200 text-sm">
                   <PhoneForwarded className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
@@ -671,9 +833,16 @@ export const TriageResultPanel = ({
                     <span className="text-[10px] uppercase font-bold text-blue-800 dark:text-blue-400">
                       Recommended Call Referral 02 (Co-Occurring / Secondary Referral)
                     </span>
-                    <span className="rounded bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
-                      Secondary
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {Boolean(forwardedStatus && String(forwardedStatus?.shortName || "").toLowerCase().includes(secondaryReferralDest.toLowerCase().split(" ")[0])) && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
+                          <CheckCircle2 className="h-3 w-3" /> Forwarded
+                        </span>
+                      )}
+                      <span className="rounded bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
+                        Secondary
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 font-extrabold text-blue-950 dark:text-blue-200 text-sm">
                     <PhoneForwarded className="h-4 w-4 text-blue-700 dark:text-blue-400 shrink-0" />
@@ -866,13 +1035,7 @@ export const TriageResultPanel = ({
               activeDirective={activeDirective}
               allRedFlags={allRedFlags}
               callerIntake={callerIntake}
-            />
-
-            {/* AI & Algorithmic Continuous Learning Feedback Card */}
-            <AiFeedbackLearningCard
-              result={result}
-              callerIntake={callerIntake}
-              currentAgent={currentAgent}
+              onForwardSuccess={setForwardedStatus}
             />
           </div>
         </div>
@@ -928,43 +1091,149 @@ export const TriageResultPanel = ({
           </div>
         )}
 
-        {dynamicFacilities?.length ? (
-          <>
-            {/* Inline search bar to change/search another pincode anytime */}
-            <div className="mt-3.5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-secondary/40 p-2.5 text-xs shadow-2xs">
-              <div className="flex items-center gap-1.5 text-foreground font-semibold">
-                <Search className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span>Search / Change Location:</span>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleFacilitySearch();
-                }}
-                className="flex items-center gap-1.5 flex-1 max-w-md ml-auto"
-              >
-                <input
-                  type="text"
-                  value={searchPincode}
-                  onChange={(e) => setSearchPincode(e.target.value)}
-                  placeholder="Enter PIN code (e.g. 782435) or District (e.g. Hojai)..."
-                  className="flex-1 min-w-0 rounded-lg border border-border/80 bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary"
-                />
-                <button
-                  type="submit"
-                  disabled={isSearchingFacilities || !searchPincode.trim()}
-                  className="flex items-center gap-1 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0 shadow-2xs"
-                >
-                  {isSearchingFacilities ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Search className="h-3 w-3" />
-                  )}
-                  <span>Search</span>
-                </button>
-              </form>
+        {/* ASSAM HEALTH NETWORK MAP CONTAINER */}
+        <div className="mt-4 rounded-xl border border-border/80 bg-card overflow-hidden shadow-xs">
+          {/* Map Top Control Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-secondary/40 px-3.5 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <MapIcon className="h-4 w-4 text-primary shrink-0" />
+              <span className="font-bold text-foreground">Assam Health Map</span>
+              <span className="hidden sm:inline-block text-[10px] text-muted-foreground font-medium">
+                (Dark Inverted Mask · Real-time Proximity)
+              </span>
             </div>
 
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Layer Switcher: Minimal vs Detailed */}
+              <div className="inline-flex rounded-lg border border-border/80 bg-background p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setMapLayer("minimal")}
+                  className={`rounded px-2 py-0.5 text-[11px] font-bold transition-colors cursor-pointer ${
+                    mapLayer === "minimal"
+                      ? "bg-primary text-primary-foreground shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Minimal Map Layer (CARTO Voyager)"
+                >
+                  Minimal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapLayer("detailed")}
+                  className={`rounded px-2 py-0.5 text-[11px] font-bold transition-colors cursor-pointer ${
+                    mapLayer === "detailed"
+                      ? "bg-primary text-primary-foreground shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Detailed Map Layer (Google Maps)"
+                >
+                  Detailed
+                </button>
+              </div>
+
+              {/* Drop Pin Toggle */}
+              <button
+                type="button"
+                onClick={() => setIsPinModeActive((prev) => !prev)}
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer shadow-2xs border ${
+                  isPinModeActive
+                    ? "bg-rose-600 text-white border-rose-500 animate-pulse"
+                    : "bg-background border-border/80 text-foreground hover:bg-secondary hover:border-primary/50"
+                }`}
+                title="Drop custom pin on map to set caller location"
+              >
+                <Crosshair className="h-3 w-3" />
+                <span>{isPinModeActive ? "Click on Map" : "Drop Pin"}</span>
+              </button>
+
+              {/* Reset View */}
+              <button
+                type="button"
+                onClick={() => mapRef.current?.resetView()}
+                className="inline-flex items-center gap-1 rounded-lg border border-border/80 bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer shadow-2xs"
+                title="Reset Assam map view"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+
+              {/* Full-Screen / Make Large Modal Button */}
+              <button
+                type="button"
+                onClick={() => setIsMapExpanded(true)}
+                className="inline-flex items-center gap-1 rounded-lg bg-primary/10 border border-primary/30 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer shadow-2xs"
+                title="Expand Assam Map Full Screen"
+              >
+                <Maximize2 className="h-3 w-3" />
+                <span>Large View</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Drop Pin Hint Banner */}
+          {isPinModeActive && (
+            <div className="bg-rose-500/15 border-b border-rose-500/30 px-3 py-1.5 text-center text-xs font-bold text-rose-700 dark:text-rose-300 animate-in fade-in">
+              📍 Drop Pin Active: Click anywhere inside Assam to set the caller&apos;s custom location and recalculate distances!
+            </div>
+          )}
+
+          {/* Map Canvas */}
+          <div className="h-[340px] sm:h-[380px] w-full relative bg-[#0a1128]">
+            <MapWrapper
+              ref={mapRef}
+              facilities={dynamicFacilities}
+              filters={{
+                mapLayer,
+                district: effectiveLoc?.district || "all",
+                searchQuery: searchPincode || "",
+                radius: 0,
+              }}
+              targetLocation={effectiveTargetLocation}
+              isPinModeActive={isPinModeActive}
+              onPinDropped={handlePinDropped}
+              onDistrictSelect={handleDistrictSelect}
+              selectedFacility={selectedFacilityForMap}
+            />
+          </div>
+        </div>
+
+        {/* Inline search bar to change/search another pincode anytime */}
+        <div className="mt-3.5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-secondary/40 p-2.5 text-xs shadow-2xs">
+          <div className="flex items-center gap-1.5 text-foreground font-semibold">
+            <Search className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span>Search / Change Location:</span>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleFacilitySearch();
+            }}
+            className="flex items-center gap-1.5 flex-1 max-w-md ml-auto"
+          >
+            <input
+              type="text"
+              value={searchPincode}
+              onChange={(e) => setSearchPincode(e.target.value)}
+              placeholder="Enter PIN code (e.g. 782435) or District (e.g. Hojai)..."
+              className="flex-1 min-w-0 rounded-lg border border-border/80 bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary"
+            />
+            <button
+              type="submit"
+              disabled={isSearchingFacilities || !searchPincode.trim()}
+              className="flex items-center gap-1 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0 shadow-2xs"
+            >
+              {isSearchingFacilities ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Search className="h-3 w-3" />
+              )}
+              <span>Search</span>
+            </button>
+          </form>
+        </div>
+
+        {dynamicFacilities?.length ? (
+          <>
             <ul className="mt-3 space-y-3">
               {dynamicFacilities.map((f, i) => {
                 const cleanDisplayAddress = f.address
@@ -975,41 +1244,65 @@ export const TriageResultPanel = ({
                       .trim()
                   : "";
 
+                const isSelectedOnMap = selectedFacilityForMap?.id === f.id || selectedFacilityForMap?.name === f.name;
+
                 return (
                   <li
                     key={f.id || f.name + i}
                     data-testid="facility-card-item"
-                    className="group rounded-xl border border-border/70 bg-card/60 hover:bg-card hover:border-primary/50 p-4 transition-all duration-200 shadow-2xs"
+                    onClick={() => focusFacilityOnMap(f)}
+                    className={`group rounded-xl border p-4 transition-all duration-200 shadow-2xs cursor-pointer ${
+                      isSelectedOnMap
+                        ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+                        : "border-border/70 bg-card/60 hover:bg-card hover:border-primary/50"
+                    }`}
                   >
                     <div className="flex flex-col space-y-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
-                          {f.facility_tag}
-                        </span>
-                        {f.is_exact_pincode ? (
-                          <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
-                            🎯 Local Area Match
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
+                            {f.facility_tag}
                           </span>
-                        ) : f.is_nearby_pincode ? (
-                          <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                            📍 Nearby Facility
-                          </span>
-                        ) : null}
-                        {(f.is_dispensary || isDispensary(f)) && isWeekend && (
-                          <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
-                            Closed on Weekends (OPD Mon–Fri 10AM–3PM)
-                          </span>
-                        )}
-                        {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
-                          <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                            OPD: Mon–Fri 10:00 AM – 3:00 PM
-                          </span>
-                        )}
-                        {(f.is_hospital || isHospital(f)) && (
-                          <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
-                            OPD: 10:00 AM – 4:00 PM · IPD &amp; Emergency: 24x7
-                          </span>
-                        )}
+
+                          {f.is_exact_pincode ? (
+                            <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                              🎯 Local Area Match
+                            </span>
+                          ) : f.is_nearby_pincode ? (
+                            <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                              📍 Nearby Facility
+                            </span>
+                          ) : null}
+                          {(f.is_dispensary || isDispensary(f)) && isWeekend && (
+                            <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
+                              Closed on Weekends (OPD Mon–Fri 10AM–4PM)
+                            </span>
+                          )}
+                          {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
+                            <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                              OPD: Mon–Fri 10:00 AM – 4:00 PM
+                            </span>
+                          )}
+                          {(f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f)) && (
+                            <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
+                              Open · IPD &amp; Casualty: 24x7
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Focus on map quick button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            focusFacilityOnMap(f);
+                          }}
+                          className="inline-flex items-center gap-1 rounded bg-secondary/80 hover:bg-primary hover:text-white px-2 py-0.5 text-[10px] font-bold text-foreground transition-colors cursor-pointer"
+                          title="Focus marker on Assam Map"
+                        >
+                          <MapPin className="h-3 w-3" />
+                          <span>Show on Map</span>
+                        </button>
                       </div>
 
                       <p className="flex items-center gap-2 text-sm font-bold text-foreground">
@@ -1021,17 +1314,38 @@ export const TriageResultPanel = ({
                         <p className="text-xs leading-relaxed text-muted-foreground">{cleanDisplayAddress}</p>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
-                        <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
-                          {f.facility_type}
-                        </span>
-                        {f.district && (
-                          <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                            {f.district}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {f.distance_km != null && (
+                            <span className="inline-flex items-center gap-1 rounded bg-secondary/80 border border-border/70 px-1.5 py-0.5 text-foreground font-semibold">
+                              <Navigation className="h-3 w-3 text-primary shrink-0" />
+                              {f.distance_km === 0 || f.is_exact_pincode ? "0 km" : `${Number(f.distance_km).toFixed(1)} km`}
+                            </span>
+                          )}
+                          <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
+                            {f.facility_type}
                           </span>
-                        )}
-                        {f.phone && (
-                          <span className="mono text-primary font-bold">{f.phone}</span>
+                          {f.district && (
+                            <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
+                              {f.district}
+                            </span>
+                          )}
+                          {f.phone && (
+                            <span className="mono text-primary font-bold">{f.phone}</span>
+                          )}
+                        </div>
+
+                        {f.maps_url && (
+                          <a
+                            href={f.maps_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            <span>Google Maps</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
                         )}
                       </div>
                     </div>
@@ -1052,42 +1366,10 @@ export const TriageResultPanel = ({
                   No PIN Code Entered by Caller
                 </h4>
                 <p className="text-xs text-amber-900/90 dark:text-amber-300 leading-relaxed">
-                  Triage clinical decision is evaluated above. To view and rank nearest healthcare facilities in ascending distance order, please enter the caller&apos;s 6-digit Assam PIN code or District below:
+                  Triage clinical decision is evaluated above. To view and rank nearest healthcare facilities in ascending distance order, please enter the caller&apos;s 6-digit Assam PIN code or District below, or click <strong>&quot;Drop Pin&quot;</strong> on the map above:
                 </p>
               </div>
             </div>
-
-            {/* Pincode Search Bar */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleFacilitySearch();
-              }}
-              className="flex flex-wrap items-center gap-2 pt-1"
-            >
-              <div className="relative flex-1 min-w-[220px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={searchPincode}
-                  onChange={(e) => setSearchPincode(e.target.value)}
-                  placeholder="Enter 6-digit PIN code (e.g. 782435, 781006) or District (e.g. Hojai)..."
-                  className="w-full rounded-lg border border-border/80 bg-background pl-9 pr-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-primary shadow-2xs"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isSearchingFacilities || !searchPincode.trim()}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-xs hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
-              >
-                {isSearchingFacilities ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Search className="h-3.5 w-3.5" />
-                )}
-                <span>Find Facilities</span>
-              </button>
-            </form>
 
             {/* Quick Assam Location Shortcuts */}
             <div className="space-y-2 pt-1">
@@ -1122,13 +1404,176 @@ export const TriageResultPanel = ({
                 ))}
               </div>
             </div>
-
-            <p className="text-[11px] text-muted-foreground border-t border-amber-500/20 pt-2.5">
-              💡 Tip: You can also enter the PIN code in the <strong>Caller Intake</strong> form on the left and click <strong>&quot;Run triage&quot;</strong> again.
-            </p>
           </div>
         )}
       </div>
+
+      {/* FULL-SCREEN / LARGE VIEW MODAL FOR ASSAM MAP (PORTALED TO DOCUMENT.BODY OVER ENTIRE WEBSITE) */}
+      {isMapExpanded && mounted && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[99999] flex flex-col w-screen h-screen min-w-[100vw] min-h-[100vh] bg-[#0a1128]/98 p-3 sm:p-5 backdrop-blur-lg animate-in fade-in zoom-in-95 duration-200">
+          {/* Modal Header Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-white shadow-xl mb-3 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md">
+                <MapIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white leading-tight">
+                  Assam Health Network Map — Large View
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Interactive Leaflet map with dark masked Assam boundary &amp; real-time facility proximity
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Toolbar Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* District Filter Dropdown */}
+              <select
+                value={selectedDistrictFilter}
+                onChange={(e) => handleDistrictSelect(e.target.value)}
+                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-blue-500 shadow-2xs"
+              >
+                <option value="all">All Assam Districts</option>
+                {ASSAM_DISTRICTS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+
+              {/* Minimal vs Detailed Layer Buttons */}
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-800 p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setMapLayer("minimal")}
+                  className={`rounded px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                    mapLayer === "minimal"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  Minimal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapLayer("detailed")}
+                  className={`rounded px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                    mapLayer === "detailed"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  Detailed (Google)
+                </button>
+              </div>
+
+              {/* Drop Pin Toggle */}
+              <button
+                type="button"
+                onClick={() => setIsPinModeActive((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-2xs border ${
+                  isPinModeActive
+                    ? "bg-rose-600 text-white border-rose-400 animate-pulse"
+                    : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
+                }`}
+              >
+                <Crosshair className="h-3.5 w-3.5" />
+                <span>{isPinModeActive ? "Click Map to Drop Pin" : "Drop Pin"}</span>
+              </button>
+
+              {/* Reset View */}
+              <button
+                type="button"
+                onClick={() => fullScreenMapRef.current?.resetView()}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer shadow-2xs"
+                title="Reset View"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset</span>
+              </button>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setIsMapExpanded(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer shadow-md"
+              >
+                <X className="h-4 w-4" />
+                <span>Close (Esc)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Modal Main Body */}
+          <div className="flex-1 flex flex-col lg:flex-row gap-3 min-h-0 overflow-hidden">
+            {/* Map Canvas */}
+            <div className="flex-1 h-full rounded-xl overflow-hidden border border-slate-700 relative bg-[#0a1128] shadow-2xl">
+              {isPinModeActive && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg animate-bounce">
+                  📍 Click anywhere inside Assam to drop location pin
+                </div>
+              )}
+              <MapWrapper
+                ref={fullScreenMapRef}
+                facilities={dynamicFacilities}
+                filters={{
+                  mapLayer,
+                  district: selectedDistrictFilter !== "all" ? selectedDistrictFilter : (effectiveLoc?.district || "all"),
+                  searchQuery: searchPincode || "",
+                  radius: 0,
+                }}
+                targetLocation={effectiveTargetLocation}
+                isPinModeActive={isPinModeActive}
+                onPinDropped={handlePinDropped}
+                onDistrictSelect={handleDistrictSelect}
+                selectedFacility={selectedFacilityForMap}
+              />
+            </div>
+
+            {/* Right Side Facility Drawer (in full-screen mode) */}
+            <div className="hidden lg:flex w-80 sm:w-96 flex-col bg-slate-900/95 border border-slate-800 rounded-xl p-3.5 text-white overflow-hidden shadow-2xl">
+              <div className="border-b border-slate-800 pb-2.5 mb-2.5">
+                <h4 className="text-sm font-bold text-white flex items-center justify-between">
+                  <span>Nearest Facilities</span>
+                  <span className="text-[11px] font-mono text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800">
+                    {dynamicFacilities.length} total
+                  </span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Click any facility below to fly &amp; inspect on map
+                </p>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                {dynamicFacilities.map((f, i) => (
+                  <div
+                    key={f.id || f.name + i}
+                    onClick={() => focusFacilityOnMap(f)}
+                    className="p-3 rounded-lg border border-slate-800 bg-slate-800/60 hover:bg-slate-800 hover:border-blue-500/60 transition-all cursor-pointer shadow-sm text-xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-bold text-white truncate max-w-[200px]">{f.name}</span>
+                      {f.distance_km != null && (
+                        <span className="text-emerald-400 font-bold font-mono text-[10.5px]">
+                          {f.distance_km === 0 || f.is_exact_pincode ? "0 km" : `${Number(f.distance_km).toFixed(1)} km`}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-400 text-[11px] line-clamp-2">{f.address}</p>
+                    <div className="flex items-center justify-between text-[10.5px] text-slate-400 pt-1 border-t border-slate-700/50">
+                      <span>{f.district || "Assam"}</span>
+                      <span className="text-blue-400 font-semibold hover:underline">Fly to marker ↗</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

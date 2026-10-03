@@ -115,6 +115,95 @@ export function getFacilityTier(facility, isSevere) {
   }
 }
 
+/**
+ * Intelligent sub-type guesser based on facility name and primary category (from EKMS Map)
+ */
+export function deriveSubType(name = "", type = "NHM") {
+  const nameUpper = (name || "").toUpperCase();
+  const cleanType = (type || "").toUpperCase();
+
+  if (cleanType === "ESIC") {
+    if (nameUpper.includes("TIE UP") || nameUpper.includes("TIE-UP")) {
+      return "ESIC Tie-Up Hospital";
+    }
+    if (nameUpper.includes("HOSPITAL")) {
+      return "ESIC Hospital";
+    }
+    return "ESIS Dispensary";
+  }
+
+  // NHM Sub-types
+  if (nameUpper.includes("DISTRICT HOSPITAL") || nameUpper.match(/\bDH\b/)) {
+    return "DH";
+  }
+  if (nameUpper.includes("SUB DIVISIONAL") || nameUpper.match(/\bSDH\b/)) {
+    return "SDH";
+  }
+  if (nameUpper.includes("PRIMARY HEALTH") || nameUpper.match(/\bPHC\b/)) {
+    return "PHC";
+  }
+  return "CHC";
+}
+
+/**
+ * Strict Assam coordinate sanitation (from EKMS Map):
+ * Auto-corrects missing decimals and ensures point lies strictly within Assam bounds (Lat 24.0-28.3, Lng 89.6-96.3)
+ */
+export function sanitizeCoordinates(lat, lng) {
+  if (lat === null || lat === undefined || lng === null || lng === undefined) {
+    return { lat: null, lng: null };
+  }
+  let pLat = typeof lat === "number" ? lat : parseFloat(lat);
+  let pLng = typeof lng === "number" ? lng : parseFloat(lng);
+
+  if (isNaN(pLat) || isNaN(pLng)) {
+    return { lat: null, lng: null };
+  }
+
+  // Auto-correct missing decimal point in longitude (e.g. 9263827268... -> 92.63827268)
+  if (pLng > 180) {
+    const str = pLng.toString();
+    if (
+      str.startsWith("89") ||
+      str.startsWith("90") ||
+      str.startsWith("91") ||
+      str.startsWith("92") ||
+      str.startsWith("93") ||
+      str.startsWith("94") ||
+      str.startsWith("95") ||
+      str.startsWith("96")
+    ) {
+      pLng = parseFloat(str.slice(0, 2) + "." + str.slice(2));
+    }
+  }
+
+  // Strict check: Is coordinate inside Assam? (Lat: 24.0-28.3, Lng: 89.6-96.3)
+  if (pLat < 24.0 || pLat > 28.3 || pLng < 89.6 || pLng > 96.3) {
+    return { lat: null, lng: null };
+  }
+
+  return { lat: pLat, lng: pLng };
+}
+
+/**
+ * Haversine distance in meters (from EKMS Map)
+ */
+export function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+  const R = 6371e3; // Earth radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return Math.round(R * c);
+}
+
 export function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
   if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
   const R = 6371; // Earth radius in km
@@ -374,7 +463,7 @@ export function isDispensaryOpenNow(date = new Date()) {
  *    - Always give priority to ESIS Dispensary if dispensary is open / available!
  *    - If no dispensary, refer to ESIC Hospital (if <= 25km), else District Hospital / Tie-Up Hospital.
  */
-export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isSevere = false) {
+export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isSevere = false, isWeekend = null) {
   if (!facilities || !facilities.length) return [];
   if (
     !callerLoc ||
@@ -383,6 +472,12 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
   ) {
     return [];
   }
+
+  // Determine if weekend schedule is active (Saturday / Sunday IST)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+  const istDay = istDate.getDay();
+  const weekendActive = isWeekend !== null ? Boolean(isWeekend) : (istDay === 0 || istDay === 6);
 
   const cleanFacs = cleanFacilityCoordinates(facilities);
   const callerPin = callerLoc?.pincode ? String(callerLoc.pincode).trim() : null;
@@ -489,6 +584,39 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
       selectedKeys.add(key);
     }
   };
+
+  const isOpenFacility = (f) =>
+    f.is_hospital || f.is_esic_hospital || f.is_govt_district_hospital || f.is_tie_up || !f.is_dispensary;
+
+  // -------------------------------------------------------------
+  // WEEKEND SCHEDULE:
+  // When dispensaries are closed on weekends, show at least 4 open facilities (Hospitals / Tie-Ups)
+  // sorted strictly by distance at the top of the directory.
+  // -------------------------------------------------------------
+  if (weekendActive) {
+    const openFacilities = sortedByProximity.filter(isOpenFacility);
+    const closedDispensaries = sortedByProximity.filter((f) => f.is_dispensary);
+
+    // Pick at least 4 open facilities (or all available open facilities)
+    const minOpenCount = Math.max(4, openFacilities.length >= 4 ? 4 : openFacilities.length);
+    for (const f of openFacilities.slice(0, minOpenCount)) {
+      addFacility(f);
+    }
+
+    // Add remaining open facilities in proximity order
+    for (const f of openFacilities.slice(minOpenCount)) {
+      if (selected.length >= limit) break;
+      addFacility(f);
+    }
+
+    // Add dispensaries after open facilities if slots remain
+    for (const f of closedDispensaries) {
+      if (selected.length >= limit) break;
+      addFacility(f);
+    }
+
+    return selected.slice(0, Math.max(limit, selected.length));
+  }
 
   const exactPinFac = sortedByProximity.find((f) => f.is_exact_pincode);
   const nearestDispensary = sortedByProximity.find((f) => f.is_dispensary);

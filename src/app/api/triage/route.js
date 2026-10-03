@@ -10,7 +10,7 @@ import {
   isEsicHospital,
   isGovtDistrictHospital,
 } from "@/lib/geo";
-import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase } from "@/lib/triageEngine";
+import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase, formatClinicalSummary } from "@/lib/triageEngine";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -355,6 +355,22 @@ export async function POST(request) {
     triage.referral_destination = pDest;
     triage.call_referral_secondary = sDest;
     triage.secondary_referral_destination = sDest;
+
+    // Ensure clinical summary strictly synchronizes with the final primary forward destination and caller demographics
+    const finalSeverity = triage.urgency_score || intake.severity_reported || 5;
+    const finalDuration = intake.duration || triage.duration || "Reported today";
+    const finalComplaint = triage.primary_complaint || notes || "Primary Clinical Assessment";
+    
+    const formattedSummary = formatClinicalSummary(
+      intake,
+      finalComplaint,
+      finalSeverity,
+      finalDuration,
+      pDest
+    );
+    triage.summary_en = formattedSummary.summaryEn;
+    triage.summary_hi = formattedSummary.summaryHi;
+    triage.primary_complaint = formattedSummary.cleanCond;
 
     const latency_ms = Date.now() - startTime;
     const rawAgent = intake.agent_id || intake.agent || "A1";

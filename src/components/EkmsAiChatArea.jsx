@@ -49,8 +49,37 @@ function formatReferralReason(reason) {
   return reason || "";
 }
 
+function formatMsgTime(m) {
+  const ts = m?.timestamp || m?.created_at || m?.time;
+  if (ts) {
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+    }
+  }
+  if (m?.id) {
+    const match = String(m.id).match(/\d{10,13}/);
+    if (match) {
+      const d = new Date(parseInt(match[0], 10));
+      if (!isNaN(d.getTime()) && d.getFullYear() >= 2020) {
+        return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+      }
+    }
+  }
+  return new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
 export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
-  { onComplaintChange, onSyncFields, initialNotes, onReadyToShowResult, onRunTriage, currentAgent },
+  {
+    onComplaintChange,
+    onSyncFields,
+    initialNotes,
+    onReadyToShowResult,
+    onRunTriage,
+    currentAgent,
+    triageResult,
+    activeDirective,
+  },
   ref
 ) {
   const [messages, setMessages] = useState([]);
@@ -167,9 +196,9 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   // Sync findings to parent intake form
   const notifyParent = (newMessages, newState) => {
     const summary = newState.clinicalSummary
-      ? `[Clinical Findings: ${newState.clinicalSummary}]`
+      ? newState.clinicalSummary
       : newState.suspectedCondition
-      ? `[Suspected: ${newState.suspectedCondition} | Severity: ${newState.severity} | Duration: ${newState.duration || "Noted"}]`
+      ? `${newState.suspectedCondition} (Severity: ${newState.severity}, Duration: ${newState.duration || "Noted"})`
       : "";
 
     onComplaintChange?.(summary, {
@@ -222,8 +251,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     }
 
     const isVoiceInput = Boolean(isFromSpeech);
+    const nowTime = Date.now();
     const userMsg = {
-      id: "user-" + Date.now(),
+      id: "user-" + nowTime,
+      timestamp: nowTime,
+      created_at: new Date(nowTime).toISOString(),
       sender: "user",
       text: rawText,
       rawText,
@@ -319,8 +351,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
         onSyncFields("duration", nextClinicalState.duration);
       }
 
+      const botTime = Date.now();
       const botReply = {
-        id: "bot-" + Date.now(),
+        id: "bot-" + botTime,
+        timestamp: botTime,
+        created_at: new Date(botTime).toISOString(),
         sender: "bot",
         text: data.agentScript || data.answer || "Could you describe any other symptoms?",
         options: data.options || data.suggestedAnswers || [],
@@ -344,8 +379,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     } catch (err) {
       console.error("EKMS AI Chat Error:", err);
       // Fallback response if network disconnects
+      const fallbackTime = Date.now();
       const fallbackReply = {
-        id: "bot-" + Date.now(),
+        id: "bot-" + fallbackTime,
+        timestamp: fallbackTime,
+        created_at: new Date(fallbackTime).toISOString(),
         sender: "bot",
         text: `Ask the IP: "Can you specify how long you have had this complaint, and what medicines have you taken so far?"`,
         options: [
@@ -426,6 +464,36 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     onRunTriage?.({ triageState: tState, chatHistory: messages });
   };
 
+  const triage = triageResult?.triage;
+
+  const effectiveCondition =
+    triage?.primary_complaint ||
+    triageResult?.primary_complaint ||
+    clinicalState.suspectedCondition;
+
+  const triageUrgency = triage?.urgency_level;
+  const triageScore = triage?.urgency_score;
+
+  let effectiveSeverityLabel = null;
+  let effectiveSeverityLevel = "Routine";
+
+  if (triageUrgency) {
+    effectiveSeverityLabel = triageScore != null ? `${triageUrgency} ${triageScore}/10` : triageUrgency;
+    effectiveSeverityLevel = triageUrgency;
+  } else if (clinicalState.severity && messages.length > 0) {
+    effectiveSeverityLabel = clinicalState.severity;
+    effectiveSeverityLevel = clinicalState.severity;
+  }
+
+  let effectiveReferral = null;
+  if (activeDirective?.badge) {
+    effectiveReferral = activeDirective.badge;
+  } else if (triage?.call_referral_primary || triage?.referral_destination) {
+    effectiveReferral = triage.call_referral_primary || triage.referral_destination;
+  } else if (clinicalState.referralDestination) {
+    effectiveReferral = formatReferralDestination(clinicalState.referralDestination);
+  }
+
   return (
     <div className="rounded-xl border border-emerald-500/30 bg-card overflow-hidden shadow-sm w-full max-w-full min-w-0">
       {/* 1. EKMS AI Triage & Referral Header */}
@@ -446,29 +514,33 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
 
           {/* Diagnostic & Referral Status Indicators */}
           <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5 max-w-[70%] sm:max-w-none">
-            {clinicalState.suspectedCondition && (
-              <span className="flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100/90 px-1.5 py-0.5 sm:px-2 text-[10px] sm:text-[11px] font-bold text-emerald-950 shadow-2xs">
-                <Activity className="h-3 w-3 text-emerald-700 shrink-0" />
-                <span className="max-w-[100px] sm:max-w-[170px] truncate">{clinicalState.suspectedCondition}</span>
-              </span>
-            )}
-            {clinicalState.severity && messages.length > 0 && (
+            {effectiveSeverityLabel && (
               <span
                 className={`rounded-md px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border shadow-2xs ${
-                  clinicalState.severity === "High"
-                    ? "bg-rose-100 text-rose-950 border-rose-300"
-                    : clinicalState.severity === "Moderate"
-                    ? "bg-amber-100 text-amber-950 border-amber-300"
-                    : "bg-emerald-100 text-emerald-950 border-emerald-300"
+                  effectiveSeverityLevel === "Emergency" || effectiveSeverityLevel === "High"
+                    ? "bg-rose-100 text-rose-950 border-rose-300 dark:bg-rose-950/40 dark:text-rose-200"
+                    : effectiveSeverityLevel === "Urgent" || effectiveSeverityLevel === "Moderate"
+                    ? "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/40 dark:text-amber-200"
+                    : "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200"
                 }`}
               >
-                {clinicalState.severity}
+                {effectiveSeverityLabel}
               </span>
             )}
-            {clinicalState.referralDestination && (
-              <span className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold text-primary shadow-2xs">
+            {effectiveReferral && (
+              <span className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold shadow-2xs ${
+                effectiveReferral.toLowerCase().includes("108")
+                  ? "bg-rose-100 text-rose-950 border-rose-300 dark:bg-rose-950/50 dark:text-rose-200"
+                  : effectiveReferral.toLowerCase().includes("104")
+                  ? "bg-blue-100 text-blue-950 border-blue-300 dark:bg-blue-950/50 dark:text-blue-200"
+                  : effectiveReferral.toLowerCase().includes("hospital")
+                  ? "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/50 dark:text-amber-200"
+                  : effectiveReferral.toLowerCase().includes("tie")
+                  ? "bg-cyan-100 text-cyan-950 border-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-200"
+                  : "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-200"
+              }`}>
                 <PhoneForwarded className="h-3 w-3 shrink-0" />
-                <span className="max-w-[110px] sm:max-w-[280px] truncate">{formatReferralDestination(clinicalState.referralDestination)}</span>
+                <span className="max-w-[110px] sm:max-w-[280px] truncate">{effectiveReferral}</span>
               </span>
             )}
           </div>
@@ -537,9 +609,12 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
               {m.sender === "user" && (
                 <div className="max-w-[85%] rounded-lg px-3.5 py-2.5 leading-relaxed bg-primary text-primary-foreground font-medium shadow-xs">
                   <div className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider text-primary-foreground/75 mb-0.5">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <Sparkles className="h-3 w-3" />
                       <span>{getActiveAgentLabel()}</span>
+                      <span className="font-normal opacity-80 normal-case tracking-normal">
+                        &bull; {formatMsgTime(m)}
+                      </span>
                     </div>
                     {(m.isVoice === true || m.source === "voice") && (
                       <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">
@@ -557,6 +632,10 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                   <div className="flex items-start gap-2">
                     <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700" />
                     <div className="space-y-0.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-semibold mb-0.5">
+                        <span className="text-emerald-800 dark:text-emerald-300 font-bold">EKMS AI Assistant</span>
+                        <span className="font-normal text-muted-foreground">&bull; {formatMsgTime(m)}</span>
+                      </div>
                       <p className="text-xs sm:text-sm font-medium">
                         <span className="font-bold text-emerald-900">Ask the IP: </span>
                         &ldquo;{cleanQuestionText || m.text}&rdquo;
@@ -575,7 +654,10 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                       <div className="flex flex-wrap items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950">
-                            Ask the IP:
+                            EKMS AI Assistant
+                          </span>
+                          <span className="text-[10px] font-medium text-emerald-850">
+                            &bull; {formatMsgTime(m)}
                           </span>
                           {m.suspectedCondition && (
                             <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-900 bg-emerald-100/60 px-2 py-0.5 rounded border border-emerald-600/30">

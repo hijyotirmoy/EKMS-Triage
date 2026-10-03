@@ -27,7 +27,11 @@ export async function GET(request) {
         (searchParams.get("urgency") || "").toLowerCase()
       );
 
-    const nearest = rankNearestFacilities(callerLoc, facilities, 6, isSevere);
+    const isWeekendParam = searchParams.get("weekend") !== null
+      ? searchParams.get("weekend") === "true"
+      : null;
+
+    const nearest = rankNearestFacilities(callerLoc, facilities, 6, isSevere, isWeekendParam);
 
     return NextResponse.json({
       resolved_location: callerLoc,

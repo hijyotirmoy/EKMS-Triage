@@ -22,6 +22,7 @@ import {
   User,
   Activity,
   History,
+  CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -180,6 +181,48 @@ export function getAgentFullLabel(agentCode) {
   return agentCode ? `Agent ${agentCode}` : "Agent";
 }
 
+export function getCleanComplaintSummary(c) {
+  if (!c) return "Caller arrived with acute health inquiry.";
+  
+  const intake = c.intake || {};
+  const triage = c.triage || {};
+
+  // 1. Check if summary_en is already set and clean
+  let summary = triage.summary_en || "";
+
+  // 2. If summary is empty or has bracketed/technical text, check ekms_ai_context / clinicalSummary
+  if (!summary || summary.startsWith("[")) {
+    summary = c.ekms_ai_context?.triageState?.clinicalSummary || c.ekms_ai_context?.clinicalSummary || triage.clinical_summary || "";
+  }
+
+  // 3. If still empty, check intake.symptom_notes
+  if (!summary && intake.symptom_notes) {
+    summary = intake.symptom_notes;
+  }
+
+  // 4. Strip any leading bracketed prefixes like [Clinical Findings: ...] or [Suspected: ...] and strip "Clinical Reason: ..."
+  if (summary) {
+    summary = summary
+      .replace(/^\[(?:Clinical Findings|Suspected):?[^\]]+\]\s*/i, "")
+      .replace(/Clinical Reason:[\s\S]*$/i, "")
+      .trim();
+  }
+
+  // 5. If summary is still missing or just raw short keyword or bracketed leftover, construct the standard clinical summary paragraph
+  if (!summary || summary.length < 20 || summary.startsWith("[")) {
+    const ageStr = intake.age ? `${intake.age}-year-old` : "Adult";
+    const sexStr = intake.sex ? `${intake.sex.toLowerCase()} caller` : "caller";
+    const cond = triage.suspected_condition || triage.condition || intake.symptom || triage.primary_complaint || "Acute Health Condition";
+    const cleanCond = cond.replace(/^\[[^\]]+\]\s*/, "").trim();
+    const sev = intake.severity_reported || triage.severity_score || (triage.urgency_level === "emergency" ? 9 : triage.urgency_level === "urgent" ? 6 : 3);
+    const dur = intake.duration || triage.duration || "Less than 2 hours";
+    const ref = triage.call_referral_primary || triage.primary_referral_destination || "104 Health Helpline";
+    summary = `${ageStr} ${sexStr} reports ${cleanCond} with severity ${sev}/10 (${dur}); guided to ${ref} for 24x7 tele-doctor consultation and medical advice.`;
+  }
+
+  return summary;
+}
+
 // Generate unique row identifier even if multiple rows share the same case_ref
 export function getCaseUniqueKey(c, idx = 0) {
   if (c?.id) return String(c.id);
@@ -246,6 +289,18 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
         const { caseRef, id } = event.payload;
         setCases((prev) => {
           const updated = prev.filter((c) => c.case_ref !== caseRef && c.id !== id);
+          setCachedCases(updated);
+          return updated;
+        });
+      } else if ((event?.type === "CASE_FORWARDED" || event?.type === "CASE_UPDATED") && event?.payload) {
+        const { case_ref, id } = event.payload;
+        setCases((prev) => {
+          const updated = prev.map((c) => {
+            if (c.case_ref === case_ref || c.id === id) {
+              return { ...c, ...event.payload };
+            }
+            return c;
+          });
           setCachedCases(updated);
           return updated;
         });
@@ -508,20 +563,10 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                       </div>
                       <p className="text-[11px] font-medium text-muted-foreground tracking-wide mt-0.5">{c.intake?.phone || "—"}</p>
                     </td>
-                    <td className="max-w-[280px] py-3 pr-3">
-                      <p className={isOpen ? "text-foreground font-medium text-xs leading-relaxed" : "truncate text-muted-foreground"}>
-                        {isOpen ? (c.intake?.symptom_notes || c.triage?.summary_en) : (c.intake?.symptom_notes || c.triage?.summary_en)}
+                    <td className="max-w-[340px] py-3 pr-3">
+                      <p className="text-foreground font-medium text-xs leading-relaxed">
+                        {getCleanComplaintSummary(c)}
                       </p>
-                      {isOpen && c.triage?.summary_en && c.intake?.symptom_notes && (
-                        <p className="mt-1.5 text-xs text-muted-foreground italic leading-relaxed">
-                          {c.triage.summary_en}
-                        </p>
-                      )}
-                      {isOpen && c.triage?.reasoning && (
-                        <div className="mt-2 text-xs leading-relaxed text-foreground/80 border-t border-border/40 pt-1.5">
-                          <p><strong className="text-foreground">Clinical Reason:</strong> {c.triage.reasoning}</p>
-                        </div>
-                      )}
                     </td>
                     <td className="py-3 pr-3">
                       <UrgencyBadge
@@ -531,17 +576,25 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                       />
                     </td>
                     <td className="py-3 pr-3">
-                      {(() => {
-                        const badge = getReferralBadge(c);
-                        return (
-                          <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
-                          >
-                            <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
-                            <span className="truncate">{badge.label}</span>
+                      <div className="flex flex-col items-start gap-1">
+                        {(() => {
+                          const badge = getReferralBadge(c);
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
+                            >
+                              <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
+                              <span className="truncate">{badge.label}</span>
+                            </span>
+                          );
+                        })()}
+                        {/* Green Forwarded indicator appears ONLY if forwarded/sent */}
+                        {Boolean(c.is_forwarded || c.forwarded_at || c.dispatch_id || c.handover_sent || c.status === "forwarded") && (
+                          <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="h-3 w-3 shrink-0" /> Forwarded
                           </span>
-                        );
-                      })()}
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 pr-3 text-[11px] text-muted-foreground whitespace-nowrap font-medium">
                       {new Date(c.created_at || Date.now()).toLocaleString("en-IN", {
@@ -725,84 +778,101 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   );
 };
 
-function CaseConversationModal({ caseItem, allCases = [], onClose }) {
-  if (!caseItem) return null;
-
-  const phoneQuery = normalizePhone(caseItem.intake?.phone || caseItem.phone);
-
-  // Find all encounters from this caller to support viewing full cumulative chat history
-  const callerEncounters = useMemo(() => {
-    if (!Array.isArray(allCases) || allCases.length === 0) return [caseItem];
-    const matched = allCases.filter((item) => {
-      const p = normalizePhone(item.intake?.phone || item.phone);
-      if (phoneQuery && p && p === phoneQuery) return true;
-      if (item.case_ref && item.case_ref === caseItem.case_ref) return true;
-      return false;
-    });
-
-    if (matched.length === 0) return [caseItem];
-    // Sort oldest first so conversation flows chronologically from the beginning
-    return matched.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-  }, [allCases, caseItem, phoneQuery]);
-
-  // Selected encounter view tab: "all" or specific case item
-  const [activeEncounterId, setActiveEncounterId] = useState("all");
-
-  const currentViewingCase = useMemo(() => {
-    if (activeEncounterId === "all") return caseItem;
-    return callerEncounters.find((c, idx) => getCaseUniqueKey(c, idx) === activeEncounterId) || caseItem;
-  }, [activeEncounterId, callerEncounters, caseItem]);
-
-  const agentCode = getAgentCode(currentViewingCase);
-  const triage = currentViewingCase.triage || {};
-  const intake = currentViewingCase.intake || {};
-  const nearest = currentViewingCase.nearest_facilities?.[0];
-  const primaryBadge = getReferralBadge(currentViewingCase);
-  const secondaryBadge = getSecondaryReferralBadge(currentViewingCase);
-
-  // Compile full cumulative chat messages across all encounters or active selected encounter
-  const combinedTranscript = useMemo(() => {
-    if (activeEncounterId !== "all") {
-      const hist =
-        currentViewingCase.ekms_ai_context?.chatHistory ||
-        currentViewingCase.chatHistory ||
-        currentViewingCase.chat_history;
-      if (Array.isArray(hist) && hist.length > 0) return hist;
-      return null;
+function formatChatTime(m, fallbackDate) {
+  const ts = m?.timestamp || m?.created_at || m?.time;
+  if (ts) {
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
     }
-
-    // Combine messages from all encounters from the beginning
-    const allMessages = [];
-    const seenMsgSignatures = new Set();
-
-    for (let i = 0; i < callerEncounters.length; i++) {
-      const enc = callerEncounters[i];
-      const hist =
-        enc.ekms_ai_context?.chatHistory ||
-        enc.chatHistory ||
-        enc.chat_history;
-
-      if (Array.isArray(hist) && hist.length > 0) {
-        for (const m of hist) {
-          const sig = `${m.sender || m.role}_${(m.text || m.content || "").trim().toLowerCase()}`;
-          if (!seenMsgSignatures.has(sig)) {
-            seenMsgSignatures.add(sig);
-            allMessages.push(m);
-          }
-        }
+  }
+  if (m?.id) {
+    const match = String(m.id).match(/\d{10,13}/);
+    if (match) {
+      const d = new Date(parseInt(match[0], 10));
+      if (!isNaN(d.getTime()) && d.getFullYear() >= 2020) {
+        return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
       }
     }
+  }
+  const base = fallbackDate ? new Date(fallbackDate) : new Date();
+  if (!isNaN(base.getTime())) {
+    return base.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  }
+  return "";
+}
 
-    if (allMessages.length > 0) return allMessages;
+function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onClose }) {
+  const caseItem = useMemo(() => {
+    if (!initialCaseItem) return null;
+    const found = allCases?.find(
+      (c) =>
+        (c.case_ref && c.case_ref === initialCaseItem.case_ref) ||
+        (c.id && c.id === initialCaseItem.id)
+    );
+    return found ? { ...initialCaseItem, ...found } : initialCaseItem;
+  }, [initialCaseItem, allCases]);
 
-    // Fallback: check active case
+  if (!caseItem) return null;
+
+  const agentCode = getAgentCode(caseItem);
+  const triage = caseItem.triage || {};
+  const intake = caseItem.intake || {};
+  const nearest = caseItem.nearest_facilities?.[0];
+  const primaryBadge = getReferralBadge(caseItem);
+  const secondaryBadge = getSecondaryReferralBadge(caseItem);
+
+  const isCaseForwarded = Boolean(
+    caseItem.is_forwarded ||
+    caseItem.forwarded_at ||
+    caseItem.dispatch_id ||
+    caseItem.handover_sent ||
+    caseItem.status === "forwarded"
+  );
+
+  const forwardedTarget = String(
+    caseItem.forwarded_to ||
+    caseItem.forwarded_short_name ||
+    caseItem.dispatch_to ||
+    ""
+  ).toLowerCase();
+
+  const primaryName = String(
+    triage.call_referral_primary ||
+    triage.referral_destination ||
+    nearest?.name ||
+    ""
+  ).toLowerCase();
+
+  const secondaryName = String(
+    triage.call_referral_secondary ||
+    triage.secondary_referral_destination ||
+    "104 Health Helpline"
+  ).toLowerCase();
+
+  const isSentToSecondary = isCaseForwarded && Boolean(
+    forwardedTarget && (
+      (secondaryName.includes("104") && forwardedTarget.includes("104")) ||
+      (secondaryName.includes("hospital") && forwardedTarget.includes("hospital")) ||
+      (secondaryName.includes("108") && forwardedTarget.includes("108"))
+    ) && !(
+      (primaryName.includes("104") && forwardedTarget.includes("104")) ||
+      (primaryName.includes("hospital") && forwardedTarget.includes("hospital")) ||
+      (primaryName.includes("108") && forwardedTarget.includes("108"))
+    )
+  );
+
+  const isSentToPrimary = isCaseForwarded && !isSentToSecondary;
+
+  // Scope transcript strictly to this single triage conversation
+  const singleCaseTranscript = useMemo(() => {
     const hist =
       caseItem.ekms_ai_context?.chatHistory ||
       caseItem.chatHistory ||
       caseItem.chat_history;
     if (Array.isArray(hist) && hist.length > 0) return hist;
     return null;
-  }, [activeEncounterId, callerEncounters, currentViewingCase, caseItem]);
+  }, [caseItem]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -827,12 +897,17 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                   AI & Agent Consultation
                 </h3>
                 <span className="mono rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-xs font-bold">
-                  {currentViewingCase.case_ref}
+                  {caseItem.case_ref}
                 </span>
                 <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-bold text-foreground border border-border">
                   {getAgentFullLabel(agentCode)}
                 </span>
                 <UrgencyBadge level={triage.urgency_level} size="sm" />
+                {Boolean(caseItem.is_forwarded || caseItem.forwarded_at || caseItem.dispatch_id || caseItem.handover_sent || caseItem.status === "forwarded") && (
+                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/50 shadow-2xs">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Forwarded
+                  </span>
+                )}
               </div>
               <p className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="font-semibold text-foreground">
@@ -863,100 +938,17 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
           </button>
         </div>
 
-        {/* Multi-Encounter Run Switcher (If caller has multiple triage runs) */}
-        {callerEncounters.length > 1 && (
-          <div className="flex items-center gap-2 overflow-x-auto border-b border-border/80 bg-slate-100/80 dark:bg-slate-900/60 px-4 py-2 text-xs">
-            <span className="text-[11px] font-bold text-muted-foreground uppercase flex items-center gap-1 shrink-0">
-              <History className="h-3.5 w-3.5 text-primary" /> Caller Runs:
-            </span>
-            <button
-              type="button"
-              onClick={() => setActiveEncounterId("all")}
-              className={`rounded-md px-2.5 py-1 font-bold text-xs shrink-0 transition-colors ${
-                activeEncounterId === "all"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
-              }`}
-            >
-              Full Session (From Beginning)
-            </button>
-            {callerEncounters.map((enc, idx) => {
-              const encKey = getCaseUniqueKey(enc, idx);
-              const isCurrent = activeEncounterId === encKey;
-              const timeStr = new Date(enc.created_at || Date.now()).toLocaleTimeString("en-IN", {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-              return (
-                <button
-                  key={encKey}
-                  type="button"
-                  onClick={() => setActiveEncounterId(encKey)}
-                  className={`rounded-md px-2.5 py-1 text-xs shrink-0 font-medium transition-colors ${
-                    isCurrent
-                      ? "bg-primary text-primary-foreground font-bold shadow-xs"
-                      : "bg-secondary text-foreground hover:bg-secondary/80 border border-border"
-                  }`}
-                >
-                  Run {idx + 1} ({timeStr}) • {enc.triage?.urgency_level || "Triage"}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Primary & Secondary Forward Referral Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 border-b border-border/60 bg-secondary/30 p-3 sm:px-4 text-xs">
-          {/* Primary Referral Box */}
-          <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 p-2.5 space-y-1">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-600 inline-block" />
-                Primary Referral (Forward 1)
-              </span>
-              <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
-                {nearest?.distance_km != null ? `${nearest.distance_km} km` : "Top Priority"}
-              </span>
-            </div>
-            <div className="font-bold text-emerald-950 dark:text-emerald-100 text-[12.5px] truncate">
-              {primaryBadge.icon} {triage.call_referral_primary || triage.referral_destination || nearest?.name || primaryBadge.label}
-            </div>
-            <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-snug line-clamp-2">
-              {triage.referral_reason || triage.recommended_action || "Standard OPD / Casualty evaluation indicated."}
-            </p>
-          </div>
-
-          {/* Secondary Referral Box */}
-          <div className="rounded-xl border border-blue-300 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 p-2.5 space-y-1">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-300 flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-blue-600 inline-block" />
-                Secondary Referral (Forward 2)
-              </span>
-              <span className="text-[10px] font-bold text-blue-800 dark:text-blue-300">
-                Backup Support
-              </span>
-            </div>
-            <div className="font-bold text-blue-950 dark:text-blue-100 text-[12.5px] truncate">
-              {secondaryBadge.icon} {triage.call_referral_secondary || triage.secondary_referral_destination || "104 Health Helpline"}
-            </div>
-            <p className="text-[11px] text-blue-800 dark:text-blue-300 leading-snug line-clamp-2">
-              {triage.secondary_referral_reason || "24x7 Doctor on Call telephone guidance & after-hours casualty coverage."}
-            </p>
-          </div>
-        </div>
-
         {/* Scrollable Conversation Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/50 dark:bg-background">
           <div className="flex items-center justify-center my-1">
             <span className="rounded-full bg-border/60 px-3 py-1 text-[10px] font-semibold text-muted-foreground tracking-wide uppercase">
-              Consultation Started &bull; {new Date(callerEncounters[0]?.created_at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+              Consultation Started &bull; {new Date(caseItem.created_at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
             </span>
           </div>
 
-          {combinedTranscript ? (
-            /* Render recorded live chatHistory from the very beginning */
-            combinedTranscript.map((m, idx) => {
+          {singleCaseTranscript ? (
+            /* Render recorded live chatHistory for this single case */
+            singleCaseTranscript.map((m, idx) => {
               const isAgent = m.sender === "user" || m.role === "user";
               return (
                 <div
@@ -983,7 +975,14 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 text-[10px] opacity-80 font-semibold">
-                      <span>{isAgent ? getAgentFullLabel(agentCode) : "EKMS AI Assistant"}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={isAgent ? "text-primary-foreground font-bold" : "text-blue-600 dark:text-blue-400 font-bold"}>
+                          {isAgent ? getAgentFullLabel(agentCode) : "EKMS AI Assistant"}
+                        </span>
+                        <span className={`text-[10px] font-medium ${isAgent ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
+                          &bull; {formatChatTime(m, caseItem.created_at)}
+                        </span>
+                      </div>
                       {isAgent && (m.isVoice === true || m.source === "voice") && (
                         <span className="rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase">
                           Voice NLP
@@ -1025,7 +1024,10 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3.5 shadow-2xs bg-primary text-primary-foreground space-y-1">
                   <div className="flex items-center justify-between text-[10px] opacity-80 font-semibold">
-                    <span>{getAgentFullLabel(agentCode)} (Caller Intake)</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>{getAgentFullLabel(agentCode)} (Caller Intake)</span>
+                      <span className="font-normal opacity-75">&bull; {formatChatTime(null, caseItem.created_at)}</span>
+                    </div>
                   </div>
                   <p className="text-xs sm:text-[13px] leading-relaxed">
                     {intake.symptom_notes || triage.summary_en || "Caller arrived with acute health inquiry."}
@@ -1044,9 +1046,12 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-3.5 shadow-2xs border border-border bg-white dark:bg-card text-foreground space-y-2">
                   <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
-                    <span className="flex items-center gap-1 text-blue-600 font-bold">
-                      <Sparkles className="h-3 w-3" /> EKMS AI Clinical Probing
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="flex items-center gap-1 text-blue-600 font-bold">
+                        <Sparkles className="h-3 w-3" /> EKMS AI Clinical Probing
+                      </span>
+                      <span className="font-normal text-muted-foreground">&bull; {formatChatTime(null, caseItem.created_at)}</span>
+                    </div>
                   </div>
                   
                   {Array.isArray(triage.followup_questions) && triage.followup_questions.length > 0 ? (
@@ -1092,8 +1097,11 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                   {agentCode}
                 </div>
                 <div className="max-w-[85%] rounded-2xl rounded-tr-xs p-3 shadow-2xs bg-primary/90 text-primary-foreground space-y-1">
-                  <div className="text-[10px] opacity-80 font-semibold">
-                    <span>{getAgentFullLabel(agentCode)} (Probing Completed)</span>
+                  <div className="text-[10px] opacity-80 font-semibold flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span>{getAgentFullLabel(agentCode)} (Probing Completed)</span>
+                      <span className="font-normal opacity-75">&bull; {formatChatTime(null, caseItem.created_at)}</span>
+                    </div>
                   </div>
                   <p className="text-xs leading-relaxed">
                     Verified caller location ({intake.district || intake.city || "Assam District"}, PIN: {intake.pincode || "Mapped"}) and confirmed symptom severity. Requesting final dispatch referral.
@@ -1128,9 +1136,17 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
 
             {/* Dual Forward Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {/* Primary Destination Card */}
               <div className="rounded-lg border border-emerald-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
-                <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
-                  Primary Destination
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
+                    Primary Destination
+                  </div>
+                  {isSentToPrimary && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
+                      <CheckCircle2 className="h-3 w-3" /> Forwarded
+                    </span>
+                  )}
                 </div>
                 <div className="font-bold text-foreground flex items-center gap-1 truncate">
                   <Building2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
@@ -1143,9 +1159,17 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
                 )}
               </div>
 
+              {/* Secondary Destination Card */}
               <div className="rounded-lg border border-blue-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
-                <div className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">
-                  Secondary Destination
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">
+                    Secondary Destination
+                  </div>
+                  {isSentToSecondary && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
+                      <CheckCircle2 className="h-3 w-3" /> Forwarded
+                    </span>
+                  )}
                 </div>
                 <div className="font-bold text-foreground flex items-center gap-1 truncate">
                   <PhoneCall className="h-3.5 w-3.5 text-blue-600 shrink-0" />
@@ -1164,7 +1188,7 @@ function CaseConversationModal({ caseItem, allCases = [], onClose }) {
           <div className="flex items-center gap-2 text-muted-foreground text-[11px]">
             <Clock className="h-3.5 w-3.5 text-muted-foreground" />
             <span>
-              Logged {new Date(currentViewingCase.created_at || Date.now()).toLocaleString("en-IN", {
+              Logged {new Date(caseItem.created_at || Date.now()).toLocaleString("en-IN", {
                 day: "2-digit",
                 month: "short",
                 year: "numeric",

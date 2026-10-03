@@ -28,6 +28,9 @@ import {
   UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "../lib/api";
+import { updateCaseInLocalCache } from "../lib/clientCache";
+import { broadcastEvent } from "../lib/broadcastSync";
 
 export const FORWARDING_TEAMS = [
   {
@@ -135,20 +138,64 @@ function formatTriageDate(ts) {
 }
 
 function cleanShortChiefComplaints(result, callerIntake, t) {
-  const mainComplaint =
+  const chatMsgs = result?.ekms_ai_context?.chatHistory || [];
+  const callerUtterances = Array.isArray(chatMsgs)
+    ? chatMsgs
+        .filter((m) => m.sender === "user" || m.role === "user")
+        .map((m) => m.text || "")
+        .join(". ")
+    : "";
+  const allCallerText = `${callerIntake?.symptom_notes || ""} ${result?.intake?.symptom_notes || ""} ${callerUtterances} ${result?.caller_spoken_text || ""}`.trim();
+
+  let candidate =
+    t?.primary_complaint ||
     callerIntake?.complaint ||
     result?.intake?.complaint ||
-    t?.primary_complaint ||
     result?.ekms_ai_context?.triageState?.suspectedCondition ||
     result?.ekms_ai_context?.triageState?.condition ||
     result?.ekms_ai_context?.condition ||
     "";
 
-  let raw = `${mainComplaint || callerIntake?.symptom_notes || result?.intake?.symptom_notes || ""}`.trim();
+  const isChannelName =
+    !candidate ||
+    /^(104|108|ambulance|104 health|104 tele-doctor|tele-doctor|tele doctor|medical consultation|general consultation|phone consultation|health helpline|dispensary|hospital|tie-up|referral|primary care)$/i.test(candidate.trim()) ||
+    /\b(104 tele-doctor consultation|104 health helpline|108 ambulance dispatch|tele-doctor consultation|medical consultation)\b/i.test(candidate);
+
+  if (isChannelName) {
+    const callerTextLower = allCallerText.toLowerCase();
+    if (/\b(cut|wound|laceration|bleed|chot|injury|slit|scratch)\b/i.test(callerTextLower)) {
+      candidate = "Superficial Laceration / Cut Injury";
+    } else if (/\b(chest|angina|heart|chhati)\b/i.test(callerTextLower)) {
+      candidate = "Chest Discomfort / Pain";
+    } else if (/\b(fever|bukhar|temperature|chills|shiver)\b/i.test(callerTextLower)) {
+      candidate = "Fever & Chills";
+    } else if (/\b(headache|sar dard|sir dard)\b/i.test(callerTextLower)) {
+      candidate = "Severe Headache";
+    } else if (/\b(stomach|abdom|pet dard|gastric|vomit|nausea|ulti)\b/i.test(callerTextLower)) {
+      candidate = "Abdominal / Gastric Pain";
+    } else if (/\b(dizzy|chakkar|weakness|kamzori)\b/i.test(callerTextLower)) {
+      candidate = "Weakness & Dizziness";
+    } else if (/\b(breath|saans|cough|khansi)\b/i.test(callerTextLower)) {
+      candidate = "Respiratory Symptoms / Cough";
+    } else if (/\b(burn|jal gaya)\b/i.test(callerTextLower)) {
+      candidate = "Burn Injury";
+    } else if (/\b(fracture|haddi|bone)\b/i.test(callerTextLower)) {
+      candidate = "Orthopedic / Bone Injury";
+    } else if (/\b(rash|khujli|itching|skin)\b/i.test(callerTextLower)) {
+      candidate = "Skin Rash / Allergy";
+    } else if (callerIntake?.symptom_notes || result?.intake?.symptom_notes) {
+      candidate = (callerIntake?.symptom_notes || result?.intake?.symptom_notes || "").split(/[\n;.]/)[0].trim();
+    } else {
+      candidate = "Primary Clinical Assessment";
+    }
+  }
+
+  let raw = String(candidate).trim();
 
   // Strip boilerplate text
   let cleaned = raw
     .replace(/\[\s*clinical findings:?\s*/gi, "")
+    .replace(/\[\s*nlp findings:?\s*/gi, "")
     .replace(/reported symptoms:?\s*/gi, "")
     .replace(/caller reports?\s*/gi, "")
     .replace(/patient reports?\s*/gi, "")
@@ -160,17 +207,14 @@ function cleanShortChiefComplaints(result, callerIntake, t) {
     .replace(/\[|\]/g, "")
     .trim();
 
-  // Protect anything inside parentheses (...) from being split!
-  // e.g. "Headache (Constant Pressure, Forehead)" must stay intact as a single complaint
+  // Protect anything inside parentheses (...) from being split
   const hasUnclosedParen = (s) => (s.match(/\(/g) || []).length !== (s.match(/\)/g) || []).length;
 
-  // Split only on explicit newlines, semicolons, or bullet marks
   let parts = cleaned
     .split(/\n|;|^•\s*/m)
     .map((s) => s.trim().replace(/^•\s*/, ""))
     .filter((s) => s.length > 2);
 
-  // If still 1 part and has NO parentheses, check for two distinct comma/and-separated complaints
   if (parts.length === 1 && !cleaned.includes("(") && !cleaned.includes(")")) {
     const commaParts = cleaned
       .split(/,\s+|\band\b/i)
@@ -185,7 +229,6 @@ function cleanShortChiefComplaints(result, callerIntake, t) {
     }
   }
 
-  // If any part has unclosed parentheses, treat whole string as single unified complaint
   if (hasUnclosedParen(parts[0]) || (parts[1] && hasUnclosedParen(parts[1]))) {
     return {
       firstReason: cleaned,
@@ -206,13 +249,21 @@ function cleanShortChiefComplaints(result, callerIntake, t) {
   }
 
   return {
-    firstReason: mainComplaint || "Health Symptom Assessment",
+    firstReason: cleaned || "Clinical Assessment",
     secondReason: "",
   };
 }
 
 function extractClinicalDetails(result, callerIntake, t, allRedFlags) {
-  const allText = `${callerIntake?.symptom_notes || ""} ${result?.intake?.symptom_notes || ""} ${result?.ekms_ai_context?.triageState?.condition || ""} ${result?.triage?.summary_en || ""} ${result?.triage?.reasoning || ""}`.toLowerCase();
+  const chatMsgs = result?.ekms_ai_context?.chatHistory || [];
+  const callerUtterances = Array.isArray(chatMsgs)
+    ? chatMsgs
+        .filter((m) => m.sender === "user" || m.role === "user")
+        .map((m) => m.text || "")
+        .join(". ")
+    : "";
+  const allCallerText = `${callerIntake?.symptom_notes || ""} ${result?.intake?.symptom_notes || ""} ${callerUtterances} ${result?.caller_spoken_text || ""}`.trim();
+  const allText = `${allCallerText} ${result?.ekms_ai_context?.triageState?.condition || ""} ${result?.triage?.summary_en || ""} ${result?.triage?.reasoning || ""}`.toLowerCase();
 
   // 1. Duration / Onset
   let duration = result?.ekms_ai_context?.duration || result?.ekms_ai_context?.triageState?.duration || "";
@@ -222,7 +273,7 @@ function extractClinicalDetails(result, callerIntake, t, allRedFlags) {
   }
   if (!duration) duration = "";
 
-  // 2. Clinical Red Flags (Directly from outcome page)
+  // 2. Clinical Red Flags: Strictly use the verified allRedFlags from the triage outcome panel
   let redFlags = [];
   if (Array.isArray(allRedFlags) && allRedFlags.length > 0) {
     redFlags = [...allRedFlags];
@@ -361,6 +412,7 @@ export function CaseHandoverForwarding({
   activeDirective,
   allRedFlags = [],
   callerIntake = null,
+  onForwardSuccess,
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -571,13 +623,41 @@ ${redFlagsText}
         navigator.clipboard?.writeText?.(dispatchDossier);
       } catch (e) { }
 
-      setSentStatus({
+      const statusData = {
         teamName: selectedTeam.name,
         shortName: selectedTeam.shortName,
         dispatchId,
         timestamp,
         location: editData.landmark,
-      });
+      };
+      setSentStatus(statusData);
+      onForwardSuccess?.(statusData);
+
+      const forwardPayload = {
+        is_forwarded: true,
+        forwarded_at: new Date().toISOString(),
+        dispatch_id: dispatchId,
+        forwarded_to: selectedTeam.name,
+        forwarded_short_name: selectedTeam.shortName,
+        status: "forwarded",
+      };
+
+      if (result) {
+        result.is_forwarded = true;
+        result.forwarded_at = forwardPayload.forwarded_at;
+        result.dispatch_id = dispatchId;
+        result.forwarded_to = selectedTeam.name;
+        result.status = "forwarded";
+      }
+
+      const caseTarget = caseRef || result?.case_ref || result?.id;
+      if (caseTarget) {
+        updateCaseInLocalCache(caseTarget, forwardPayload);
+        broadcastEvent("CASE_FORWARDED", { case_ref: caseTarget, ...forwardPayload });
+        try {
+          api.patch("/cases", { case_ref: caseTarget, updates: forwardPayload }).catch(() => {});
+        } catch (e) {}
+      }
 
       setIsSending(false);
       setModalOpen(false);

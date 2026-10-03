@@ -64,11 +64,11 @@ export async function POST(request) {
   } catch (err) {
     console.error("Doctor Chat API error:", err);
     return NextResponse.json({
-      probingQuestion: 'Ask the IP: "Since when have you been having these symptoms, and how severe is the discomfort?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitna zyada dard/pareshani mehsoos ho rahi hai?")',
-      agentScript: 'Ask the IP: "Since when have you been having these symptoms, and how severe is the discomfort?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitna zyada dard/pareshani mehsoos ho rahi hai?")',
-      answer: 'Ask the IP: "Since when have you been having these symptoms, and how severe is the discomfort?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitna zyada dard/pareshani mehsoos ho rahi hai?")',
-      options: ["Started today", "1-2 days ago", "Mild discomfort", "Severe pain / distress"],
-      suggestedAnswers: ["Started today", "1-2 days ago", "Mild discomfort", "Severe pain / distress"],
+      probingQuestion: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+      agentScript: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+      answer: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+      options: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
+      suggestedAnswers: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
       suspectedCondition: "Clinical Evaluation",
       severity: "Moderate",
       severityScore: 5,

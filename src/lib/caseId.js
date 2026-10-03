@@ -69,26 +69,10 @@ export function caseIdToGlobalIndex(caseId) {
 }
 
 /**
- * Generates the appropriate Case ID:
- * 1. If callerPhone matches any existing case, returns that existing caller's case_ref.
- * 2. Otherwise finds the highest sequential Case ID in existing cases and returns the next serial ID.
+ * Generates a unique sequential Case ID for each new triage run:
+ * Every triage execution (even from repeat callers) is counted as a distinct new case.
  */
 export function generateNextCaseRef(existingCases = [], callerPhone = null) {
-  const queryPhone = normalizePhone(callerPhone);
-
-  // 1. Phone number match rule: same phone number retains the same Case ID
-  if (queryPhone && queryPhone.length >= 6 && Array.isArray(existingCases)) {
-    const existingCallerCase = existingCases.find((c) => {
-      const p = normalizePhone(c.intake?.phone || c.phone);
-      return p && p === queryPhone && (c.case_ref || c.case_id);
-    });
-
-    if (existingCallerCase) {
-      return existingCallerCase.case_ref || existingCallerCase.case_id;
-    }
-  }
-
-  // 2. Sequential serial generation
   let maxIndex = -1;
 
   if (Array.isArray(existingCases)) {

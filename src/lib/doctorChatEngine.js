@@ -10,7 +10,7 @@ import {
   DOMAIN_LABELS,
   getDiseaseProbingProtocol,
 } from "./clinicalAdaptiveEngine.js";
-import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase } from "./triageEngine.js";
+import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase, stripNegatedPhrases } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
 import { executeCentralizedLlmProxy } from "./llmProxy.js";
 import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
@@ -19,18 +19,25 @@ const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-f
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
 
 CORE CLINICAL RULES:
-1. INTERVIEW CALLER: Ask focused clinical probing questions to uncover main complaint, duration, triggers, and severity. Do NOT give medical advice, drug prescriptions, or dosages.
-2. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
-3. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
+1. FIRST UNDERSTAND THE MAIN CONDITION & COMPLAINT:
+   - When a caller describes a situation, event, incident, or symptom (e.g. "I slipped from the car", "I fell down", "I have pain in my side", "My chest is feeling heavy"), your FIRST PRIORITY is to understand the EXACT MAIN CONDITION, INJURY, PAIN LOCATION, OR SYMPTOMS.
+   - Clarify where they got hurt, where they feel pain, or what exact physical difficulty they are experiencing.
+   - DO NOT start by asking "Since when have you had this?" or asking about duration before understanding what happened to the patient and what their main condition is!
+2. NATURAL CLINICAL QUESTION FLOW:
+   - Step 1: Clarify and understand Main Complaint, Specific Symptoms, Pain Location, or Injury (e.g. "Where are you feeling pain or got injured, and what symptoms do you have?").
+   - Step 2: Emergency Red Flags & Associated Signs (e.g. bleeding, inability to move limbs, head strike, breathing trouble, dizziness, high fever).
+   - Step 3: Functional Impact & Clinical Probing (e.g. mobility, ability to stand/walk, fluid retention, speech effort) and onset/duration if not yet clear.
+   - Step 4: Final referral recommendation.
+3. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
+4. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
    - Formulate the probing question in English, followed by a concise Romanized Hinglish translation in parentheses:
      Format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
    - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
-4. MANDATORY DURATION INQUIRY: If the caller has NOT yet told you when the symptoms started (onset/duration), you MUST ask from when the symptoms have been happening (e.g. "Since when have you been having these symptoms?"). Once duration is stated or established, NEVER ask date/time again.
 5. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
 6. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
 7. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
 8. EMPATHY & EMOTIONAL REASSURANCE:
-   - For distress, pain, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
+   - For distress, pain, injury, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
 9. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
    Tier 1. 108 Ambulance Services (CRITICAL LIFE-THREATENING EMERGENCY ONLY):
       Dispatch 108 Ambulance ONLY for Severity 9 and 10 IF the patient has genuine life-threatening conditions:
@@ -55,6 +62,11 @@ CORE CLINICAL RULES:
    - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes unless caller explicitly named that disease in their own words.
    - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'High Fever', 'Throbbing Headache', 'Limb Injury').
    - NEVER suggest or name specific medicines, drugs, tablets, or injections.
+11. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
+   - NEVER ask the caller or patient to rate their pain or condition on a scale of 1 to 10 (e.g. "On a scale of 1 to 10...", "1-10 ki scale par...", "rate the severity").
+   - Real patients cannot rate numbers accurately.
+   - Instead, ALWAYS ask clinical, functional, or descriptive probing questions (e.g. "Are you able to stand and walk on your own, or are you too weak to get out of bed?", "Are you able to keep water down or is everything coming back up?", "Is the pain manageable or so intense that you cannot rest or move?").
+   - Internally deduce and calculate the severity (High / Moderate / Mild and score 1-10) based on their answers, red flags, and functional impairment.
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
@@ -366,13 +378,14 @@ export async function processDoctorConsultationTurn({
 
 CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
 1. REVIEW HISTORY: Never re-ask or rephrase questions already answered in previous turns.
-2. DURATION RULE: If duration/onset was already stated (e.g. "started today", "since morning", "2 days ago"), DO NOT ask about time/duration. Move forward immediately to Associated Symptoms, Radiation, or Red Flags.
+2. FIRST UNDERSTAND MAIN COMPLAINT & SYMPTOMS: On initial turns or when a caller describes a situation/incident/pain, focus on clarifying the injury, pain location, or specific symptoms. DO NOT blindly ask duration/time first.
 3. CONVERSATION ADVANCEMENT:
-   - Turn 1: Main complaint & Duration/Onset.
-   - Turn 2: Key Associated Symptoms & Emergency Red Flags (e.g., fever, breathlessness, nausea, chest tightness, dizziness).
-   - Turn 3: Severity, pain radiation, or impact on daily functioning.
+   - Turn 1: Main complaint, symptoms, pain location, or injury details.
+   - Turn 2: Key Associated Symptoms & Emergency Red Flags (e.g. bleeding, inability to move, breathing trouble, dizziness, head strike, fever).
+   - Turn 3: Functional impact & clinical probing (e.g. mobility, ability to keep fluids/food, speech effort, breathing distress) and onset/duration if still needed. NEVER ask the caller to rate on a 1-10 scale; deduce severity internally.
    - Turn 4+: Set "isReadyForSummary": true and provide clear final referral.
-4. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
+4. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
+5. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
@@ -822,13 +835,13 @@ export function generateContextualAnswers(questionText, userInput = "", isPsych 
     ];
   }
 
-  // 27. Pain severity & character
+  // 27. Pain severity & character (Descriptive & functional, no numerical ratings)
   if (/\b(pain|dard|severe|sharp|ache|burning|throbbing|intensity)\b/i.test(q)) {
     return [
-      "Severe sharp unbearable pain (8-10/10)",
-      "Moderate throbbing ache (5-7/10)",
-      "Mild discomfort (2-4/10)",
-      "Pain is radiating to other areas",
+      "Severe unbearable pain — cannot move or rest",
+      "Continuous sharp pain, worsens on movement",
+      "Moderate throbbing ache, manageable with rest",
+      "Mild discomfort / manageable dull ache",
     ];
   }
 
@@ -997,6 +1010,24 @@ export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInp
     return 'Ask the IP: "Could you describe what specific symptoms or pain you are feeling right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kya takleef ya dard mehsoos ho raha hai?")';
   }
 
+  // Intercept and rewrite any numerical severity / scale of 1 to 10 questions into functional clinical probing
+  const isScaleOf10Question = /\b(scale of 1 (?:to|-) ?10|1 to 10 scale|1 se 10|1-10 ki scale|rate your (?:pain|severity|weakness|condition|fever|symptom) on a scale|scale of 1-10|rate (?:it|this|the pain|the severity) on a scale|scale of 1 to 5|1 to 5 scale|scale par|on a scale of|rate the severity|rate your pain)\b/i.test(questionText);
+
+  if (isScaleOf10Question) {
+    const contextCombined = `${cleanInput} ${allContext}`.toLowerCase();
+    if (/\b(dizzy|chakkar|weakness|kamzori|faint|vomit|ulti|fluid|dehydrat|nausea)\b/i.test(contextCombined)) {
+      return 'Ask the IP: "Are you able to stand and walk safely on your own, or are you feeling too weak to get out of bed?" (Hinglish: "Kya aap bina sahare khade ho kar chal pa rahe hain ya itni kamzori hai ki utha nahi ja raha?")';
+    } else if (/\b(chest|chhati|heart|breath|saans|asthma)\b/i.test(contextCombined)) {
+      return 'Ask the IP: "Are you able to speak full sentences comfortably, or is the breathing difficulty and chest discomfort making it hard to talk?" (Hinglish: "Kya aap aasaani se bol pa rahe hain ya saans phoolne aur seene me dabav ki wajah se bolna mushkil ho raha hai?")';
+    } else if (/\b(pain|dard|headache|sar dard|stomach|pet dard|wound|chot|injury|fracture|burn)\b/i.test(contextCombined)) {
+      return 'Ask the IP: "Is the pain preventing you from moving or resting comfortably, or is it manageable with rest?" (Hinglish: "Kya dard ki wajah se hilna-dulna ya aaram karna mushkil ho raha hai ya aaram karne se sehan ho raha hai?")';
+    } else if (/\b(fever|bukhar|shivering|thand|chills)\b/i.test(contextCombined)) {
+      return 'Ask the IP: "Do you have severe shivering and chills, or are you able to eat and drink fluids normally?" (Hinglish: "Kya bukhar ke saath tez kapkapi hai ya aap theek se kha-pee pa rahe hain?")';
+    } else {
+      return 'Ask the IP: "How is this condition affecting your daily activities or ability to move around?" (Hinglish: "Is takleef ki wajah se aapke rozmara ke kaam ya chalne-firne me kitni dikkat ho rahi hai?")';
+    }
+  }
+
   // If not third-party caller, replace third-person references to caller with direct 2nd-person "you" / "your"
   if (!isThirdParty) {
     questionText = questionText
@@ -1108,9 +1139,14 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     secondaryReferral = "ESIC Hospital";
   }
   // Tier 1: 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency)
-  else if (isEmergency108) {
+  else if (
+    isEmergency108 ||
+    ((severity === "High" || severityScore >= 8) &&
+      !/\b(superficial|minor cut|bleeding.*(?:managed|slow|controlled|stopped)|can speak normally|normal|hosh me|conscious)\b/i.test(allContext) &&
+      /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|deep cut|fracture|crushing chest|heart attack|cardiac arrest|unconscious|behosh)\b/i.test(allContext))
+  ) {
     referralDestination = "108 Ambulance";
-    referralReason = "Life-threatening acute emergency or accident casualty; dispatch 108 Ambulance immediately.";
+    referralReason = "Life-threatening acute emergency or trauma injury; dispatch 108 Ambulance immediately.";
     secondaryReferral = "ESIC Hospital";
   }
   // Tier 2: Mental Health / Emotional Distress / Suicide Crisis -> 104 Health Helpline
@@ -1246,22 +1282,16 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     (prevState.duration && !/^(not|unknown|pending|unspecified)/i.test(String(prevState.duration).trim()) && prevState.duration !== "Reported today")
   );
 
-  // MANDATORY ONSET/DURATION PROBE:
-  // "The AI MUST ask from when the symptoms are happening if the caller did not tell us. Once stated or known, do NOT re-ask date/time again."
-  const hasReportedComplaint = Boolean(
-    cleanInput.length >= 3 &&
-    !/^(hi|hello|namaste|pranam|good morning|good evening|hey|kripya madad karein)[\s.!]*$/i.test(cleanInput.trim())
-  );
-
-  if (!isDurationAlreadyKnown && hasReportedComplaint && !isEmergency108 && !directIntent && !isPsych) {
-    const rawCond = raw.suspectedCondition || prevState.suspectedCondition || prevState.symptom || "these symptoms";
-    const displayComplaint = sanitizeSymptomOrCondition(rawCond, cleanInput) || "these symptoms";
-    probingQuestion = `Ask the IP: "Since when have you been having ${displayComplaint}, and did it start suddenly or gradually?" (Hinglish: "Aapko yeh takleef kab se ho rahi hai aur kya yeh achanak shuru hui ya dheere-dheere?")`;
+  // If raw probing question is empty, ask caller to describe where they feel pain/discomfort and their symptoms
+  if (!probingQuestion || probingQuestion.trim().length < 5) {
+    const rawCond = raw.suspectedCondition || prevState.suspectedCondition || prevState.symptom || "your symptoms";
+    const displayComplaint = sanitizeSymptomOrCondition(rawCond, cleanInput) || "your symptoms";
+    probingQuestion = `Ask the IP: "Could you please describe where you are feeling pain or discomfort with ${displayComplaint} and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")`;
     raw.suggestedAnswers = [
-      "Started suddenly today (a few hours ago)",
-      "For the past 1 to 2 days",
-      "For 3 to 7 days",
-      "More than a week / persistent",
+      "Severe pain in body / limbs",
+      "Chest discomfort or breathing difficulty",
+      "Stomach pain / nausea / digestive distress",
+      "Headache, dizziness, or fever",
     ];
   }
 
@@ -1432,7 +1462,11 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     const isYesNo = /\b(do you (?:have|feel|experience)|are you (?:having|experiencing)|is there (?:any)|did you (?:hit|fall|take))\b/i.test(qLower) && !isAskingDuration && !isAskingLocation;
     const answersHaveYesNo = /\b(yes|no|manageable|intermittently|definitely|not at all)\b/i.test(joinedAnswers);
 
+    // Mismatch 6: Answers contain numerical scale rating (1-3, 4-6, 7-8, 9-10, 1-10, /10)
+    const answersAreScaleRating = /\b(1-3|4-6|7-8|9-10|1-10|scale of 1|scale of 10|\/10)\b/i.test(joinedAnswers);
+
     if (
+      answersAreScaleRating ||
       (isAskingLocation && answersAreSeverity && !answersHaveLocation) ||
       (isAskingDuration && !answersHaveDuration) ||
       (isAskingAge && !answersHaveAge) ||
@@ -1461,15 +1495,22 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     .join(" ")
     .toLowerCase();
 
+  const affirmativeCallerText = stripNegatedPhrases(userUtterances);
+
+  const callerDeniesFever =
+    /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|do\s+not\s+have\s+fever|without\s+fever|fever\s+nahi|bukhar\s+nahi|no\s+chills|no\s+body\s*aches?|without\s+chills|nehi|nahi|not\s+having\s+fever)\b/i.test(
+      userUtterances
+    ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever|high grade fever)\b/i.test(userUtterances);
+
   let finalCondition = raw.suspectedCondition;
   if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
     finalCondition = "Traumatic Fall / Impact Injury Assessment";
   } else if (/Caller reports/i.test(finalCondition)) {
-    if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(allContext)) {
+    if (/\b(snake|saap|saanp|bite|envenomation)\b/i.test(affirmativeCallerText)) {
       finalCondition = "Snake Bite / Envenomation Assessment";
-    } else if (/\b(chest pain|chhati|heart)\b/i.test(allContext)) {
+    } else if (/\b(chest pain|chhati|heart)\b/i.test(affirmativeCallerText)) {
       finalCondition = "Acute Chest Pain / Discomfort";
-    } else if (/\b(fever|bukhar)\b/i.test(allContext)) {
+    } else if (!callerDeniesFever && /\b(fever|bukhar)\b/i.test(affirmativeCallerText)) {
       finalCondition = "Febrile Symptoms / Fever";
     } else {
       const cleaned = finalCondition.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
@@ -1483,13 +1524,25 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     finalCondition = "Clinical Assessment";
   }
 
+  // If fever is denied but condition contains fever/febrile, fix condition using actual affirmative symptoms
+  if (callerDeniesFever && /\b(fever|febrile|bukhar|chills)\b/i.test(finalCondition)) {
+    if (/\b(vomit\w*|ulti\w*)\b/i.test(affirmativeCallerText)) {
+      finalCondition = "Persistent Vomiting / Nausea";
+    } else if (/\b(dizzy|chakkar|weakness|kamzori|faint)\b/i.test(affirmativeCallerText)) {
+      finalCondition = "Weakness & Dizziness Assessment";
+    } else if (/\b(chest|chhati|heart)\b/i.test(affirmativeCallerText)) {
+      finalCondition = "Chest Discomfort Assessment";
+    } else if (/\b(stomach|abdom|pet)\b/i.test(affirmativeCallerText)) {
+      finalCondition = "Abdominal Discomfort Assessment";
+    } else {
+      finalCondition = prevState.suspectedCondition && !/\b(fever|febrile)\b/i.test(prevState.suspectedCondition)
+        ? prevState.suspectedCondition
+        : "Clinical Assessment";
+    }
+  }
+
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
-
-  const callerDeniesFever =
-    /\b(no fever|nehi|nahi|not having fever|without fever|fever nahi|bukhar nahi|no chills|mild discomfort|just not feeling good)\b/i.test(
-      userUtterances
-    ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever)\b/i.test(userUtterances);
 
   const filteredRedFlags = (Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : []).filter(
     (f) => {
@@ -1503,7 +1556,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       ) {
         if (callerDeniesFever) return false;
         return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|10[2-5]\s*(?:°|f|deg))\b/i.test(
-          userUtterances
+          affirmativeCallerText
         );
       }
       if (fLower.includes("self-harm") || fLower.includes("suicid")) {
@@ -1513,11 +1566,11 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       }
       if (fLower.includes("chest") || fLower.includes("cardiac") || fLower.includes("coronary")) {
         return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(
-          userUtterances
+          affirmativeCallerText
         );
       }
       if (fLower.includes("bleed") || fLower.includes("wound") || fLower.includes("cut")) {
-        return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(userUtterances);
+        return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(affirmativeCallerText);
       }
       return true;
     }
@@ -1530,25 +1583,25 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     }
   };
 
-  if (/\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal bleeding|gi bleed)\b/i.test(userUtterances)) {
+  if (/\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal bleeding|gi bleed)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Gastrointestinal bleeding / hematemesis (blood in vomit)");
   }
-  if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(userUtterances)) {
+  if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Inability to retain oral fluids");
   }
-  if (!callerDeniesFever && /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi)\b/i.test(userUtterances)) {
+  if (!callerDeniesFever && /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("High fever with chills and shivering");
   }
-  if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(userUtterances)) {
+  if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Severe shortness of breath");
   }
-  if (/\b(unconscious|behosh|fainted|blackout|syncope|unresponsive)\b/i.test(userUtterances)) {
+  if (/\b(unconscious|behosh|fainted|blackout|syncope|unresponsive)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Loss of consciousness / fainting episode");
   }
-  if (/\b(seizure|convulsions?|fits?|mirgi)\b/i.test(userUtterances)) {
+  if (/\b(seizure|convulsions?|fits?|mirgi)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Seizure / convulsions");
   }
-  if (/\b(heavy bleed|profuse bleed|khoon beh raha)\b/i.test(userUtterances)) {
+  if (/\b(heavy bleed|profuse bleed|khoon beh raha)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Heavy uncontrolled bleeding");
   }
 
@@ -2221,16 +2274,16 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
-  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped)\b/i.test(effectiveInput)) {
-    conditionLabel = "Traumatic Fall / Impact Injury Assessment";
-    if (!hasAsked(["hit your head", "sar par chot", "limbs", "hisse me dard"])) {
+  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped|sleeped|slept from|car|bike|vehicle|auto|bus|accident|scooty|injury|chot|hit)\b/i.test(effectiveInput)) {
+    conditionLabel = "Traumatic Fall / Accident Injury Assessment";
+    if (!hasAsked(["hit your head", "sar par chot", "limbs", "hisse me dard", "where are you hurt", "kahan chot", "where on your body"])) {
       currentStep = {
-        title: "Fall Impact & Injury Screening",
-        question: 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar par chot lagi ya sharir ke kisi hisse me dard hai?")',
+        title: "Incident & Injury Location Screening",
+        question: 'Ask the IP: "Where on your body did you get hurt or feel pain when you slipped / fell from the vehicle?" (Hinglish: "Girte ya chot lagte waqt aapko sharir ke kis hisse me chot ya dard mehsoos ho raha hai?")',
         options: [
+          "Severe pain in arm / leg / back / ribs",
           "Hit my head, feeling dizzy or dazed",
-          "Severe pain in arm / leg / back",
-          "Unable to get up from the floor",
+          "Bleeding / cut wound needing dressing",
           "Bruised and sore, but can move limbs",
         ],
         severity: "Moderate",
@@ -2288,13 +2341,13 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       };
     } else {
       currentStep = {
-        title: "Injury Pain Severity",
-        question: 'Ask the IP: "How severe is the pain around the injury right now?" (Hinglish: "Ghaav ya chot ke aas-paas abhi kitna tez dard mehsoos ho raha hai?")',
+        title: "Injury Functional Impact & Mobility",
+        question: 'Ask the IP: "Is the pain from the injury preventing you from moving the area or resting comfortably?" (Hinglish: "Kya chot ke dard ki wajah se hilna-dulna ya aaram karna mushkil ho raha hai?")',
         options: [
-          "Severe throbbing pain requiring urgent doctor care",
+          "Severe unbearable pain — cannot move the injured area",
+          "Continuous sharp pain, worsens on movement",
           "Moderate stinging pain, manageable with rest",
           "Mild localized discomfort",
-          "Numbness around the injured area",
         ],
         severity: "Moderate",
       };
@@ -2302,27 +2355,39 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   } else {
     // General Medical Complaint - Progressive 3-stage clinical inquiry
     conditionLabel = prevState.suspectedCondition || "General Medical Evaluation";
-    if (!hasKnownDuration && !hasAsked(["since when", "how many days", "duration", "kab se", "suddenly"])) {
+    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"])) {
       currentStep = {
-        title: "Complaint Onset & Pattern",
-        question: 'Ask the IP: "Since when have you been having this discomfort, and did it start suddenly or gradually?" (Hinglish: "Aapko yeh takleef kab se ho rahi hai aur kya yeh achanak shuru hui ya dheere-dheere?")',
+        title: "Main Complaint & Specific Symptoms",
+        question: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")',
         options: [
-          "Started suddenly today (< 24 hours)",
-          "For the past 1 to 2 days",
-          "For 3 to 7 days (Ongoing)",
-          "More than a week / persistent",
+          "Pain or injury in limbs / body",
+          "Chest discomfort or breathing difficulty",
+          "Stomach pain / gastric issue / nausea",
+          "Headache, dizziness, or fever",
         ],
         severity: "Moderate",
       };
     } else if (!hasAsked(["other symptoms", "fever, pain", "associated", "bukhar, dard", "chakkar"])) {
       currentStep = {
         title: "Associated Red Flags & Secondary Symptoms",
-        question: 'Ask the IP: "Are you experiencing any other symptoms such as fever, body aches, nausea, or dizziness?" (Hinglish: "Kya aapko bukhar, badan dard, ulti ya chakkar jaisi koi aur takleef bhi mehsoos ho rahi hai?")',
+        question: 'Ask the IP: "Are you experiencing any other symptoms such as severe pain, breathing difficulty, bleeding, or dizziness?" (Hinglish: "Kya aapko tez dard, saans lene me dikkat, khoon behna ya chakkar jaisi koi aur pareshani bhi hai?")',
         options: [
-          "Mild fever with body aches and tiredness",
-          "Nausea, stomach upset or loss of appetite",
-          "Dizziness and general physical weakness",
-          "No other symptoms, only this main complaint",
+          "Severe pain and physical weakness",
+          "Shortness of breath / dizziness",
+          "Mild fever or stomach upset",
+          "No other emergency symptoms",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasKnownDuration && !hasAsked(["since when", "how many days", "duration", "kab se"])) {
+      currentStep = {
+        title: "Complaint Duration & Onset",
+        question: 'Ask the IP: "Since when have you had this condition, and did it start suddenly today or a few days ago?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitne dino se ho rahi hai?")',
+        options: [
+          "Started suddenly today (< 24 hours)",
+          "For the past 1 to 2 days",
+          "For 3 to 7 days (Ongoing)",
+          "More than a week / persistent",
         ],
         severity: "Moderate",
       };

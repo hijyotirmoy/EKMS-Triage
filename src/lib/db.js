@@ -517,6 +517,43 @@ export async function saveCase(caseData) {
   return caseData;
 }
 
+export async function updateCase(caseRefOrId, updates) {
+  if (!caseRefOrId || !updates) return null;
+  const target = String(caseRefOrId);
+  let updatedCase = null;
+
+  memoryCases = memoryCases.map((c) => {
+    if (String(c.case_ref) === target || String(c.id) === target) {
+      updatedCase = { ...c, ...updates };
+      return updatedCase;
+    }
+    return c;
+  });
+
+  const ctx = await getFirestoreContext();
+  if (ctx && updatedCase) {
+    try {
+      if (ctx.type === "admin") {
+        const snap = await ctx.db.collection("cases").where("case_ref", "==", target).get();
+        if (!snap.empty) {
+          await snap.docs[0].ref.set(updates, { merge: true });
+        } else if (updatedCase.id) {
+          await ctx.db.collection("cases").doc(updatedCase.id).set(updates, { merge: true });
+        }
+      } else {
+        const { doc, setDoc } = await import("firebase/firestore");
+        if (updatedCase.id) {
+          await setDoc(doc(ctx.db, "cases", updatedCase.id), updates, { merge: true }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("Could not update case in Firestore:", e.message);
+    }
+  }
+
+  return updatedCase;
+}
+
 function recomputeCachedStats(casesList) {
   const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
   for (const c of casesList) {

@@ -1,6 +1,8 @@
 // Clinical Adaptive Questioning Engine for ESIC/ESIS Triage
 // Dynamically classifies diseases, adapts questions, red-flag probing, and companion symptoms
 
+import { stripNegatedPhrases } from "./triageEngine.js";
+
 export const CLINICAL_DOMAINS = {
   FEVER: "fever",
   CARDIAC: "cardiac",
@@ -104,7 +106,7 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     }
   }
 
-  // Combine text for new classification
+  // Combine text for new classification and strip negated phrases
   const combined = [
     currentTriage.symptom || "",
     allText,
@@ -112,8 +114,10 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     .join(" ")
     .toLowerCase();
 
+  const affirmativeCombined = stripNegatedPhrases(combined);
+
   // Helper for whole-word or boundary matching
-  const has = (re) => re.test(combined);
+  const has = (re) => re.test(affirmativeCombined);
 
   // 1. Pesticide & Poisoning / Envenomation (High acuity priority)
   if (
@@ -2712,6 +2716,7 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
   }
 
   const text = rawText.toLowerCase();
+  const affirmativeText = stripNegatedPhrases(text);
 
   // 1. Detect Domain & Condition
   const domain = detectClinicalDomain(text, currentTriage);
@@ -2719,65 +2724,65 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
 
   // 2. Identify Primary Symptom keywords & Recognized Diseases
   let primarySymptom = null;
-  if (/\b(cancer|tumor|tumour|oncolog|malignan|carcinoma|leukemia|lymphoma|chemo|chemotherapy|sarcoma|melanoma|metastasis|lump|biopsy|myeloma)\b/i.test(text)) {
+  if (/\b(cancer|tumor|tumour|oncolog|malignan|carcinoma|leukemia|lymphoma|chemo|chemotherapy|sarcoma|melanoma|metastasis|lump|biopsy|myeloma)\b/i.test(affirmativeText)) {
     primarySymptom = "Cancer / Oncology";
-  } else if (/\b(diabet|sugar|hypoglycem|hyperglycem|ketoacidosis|dka|insulin)\b/i.test(text)) {
+  } else if (/\b(diabet|sugar|hypoglycem|hyperglycem|ketoacidosis|dka|insulin)\b/i.test(affirmativeText)) {
     primarySymptom = "Diabetes / Blood Sugar";
-  } else if (/\b(kidney|renal|pathri|stone|dialysis|creatinine|urinary|urine|peshab|micturition|nephro)\b/i.test(text)) {
+  } else if (/\b(kidney|renal|pathri|stone|dialysis|creatinine|urinary|urine|peshab|micturition|nephro)\b/i.test(affirmativeText)) {
     primarySymptom = "Kidney Stone / Renal Issue";
-  } else if (/\b(jaundice|peelia|hepat|liver|cirrhosis|bilirubin)\b/i.test(text)) {
+  } else if (/\b(jaundice|peelia|hepat|liver|cirrhosis|bilirubin)\b/i.test(affirmativeText)) {
     primarySymptom = "Jaundice / Liver Complaint";
-  } else if (/\b(dengue|malaria|typhoid|tuberculosis|tb|pneumonia|cholera|chikungunya|sepsis)\b/i.test(text)) {
+  } else if (/\b(dengue|malaria|typhoid|tuberculosis|tb|pneumonia|cholera|chikungunya|sepsis)\b/i.test(affirmativeText)) {
     primarySymptom = "Infection (Dengue/Malaria/Typhoid/TB)";
-  } else if (/\b(stroke|paralysis|lakwa|seizure|mirgi|epilepsy|daura|fits|convulsion|unconscious|behoshi|coma)\b/i.test(text)) {
+  } else if (/\b(stroke|paralysis|lakwa|seizure|mirgi|epilepsy|daura|fits|convulsion|unconscious|behoshi|coma)\b/i.test(affirmativeText)) {
     primarySymptom = "Stroke / Seizure / Neurological";
-  } else if (/\b(arthritis|gathiya|fracture|haddi|bone|joint|sciatica|spondylitis|slip disc)\b/i.test(text)) {
+  } else if (/\b(arthritis|gathiya|fracture|haddi|bone|joint|sciatica|spondylitis|slip disc)\b/i.test(affirmativeText)) {
     primarySymptom = "Joint Pain / Arthritis / Fracture";
-  } else if (/\b(appendix|appendicitis|hernia|gallstone|piles|bawasir|fistula)\b/i.test(text)) {
+  } else if (/\b(appendix|appendicitis|hernia|gallstone|piles|bawasir|fistula)\b/i.test(affirmativeText)) {
     primarySymptom = "Surgical / Appendicitis / Hernia";
-  } else if (/\b(pregnant|pregnancy|garbh|delivery|labor pain|miscarriage|period|menstrual)\b/i.test(text)) {
+  } else if (/\b(pregnant|pregnancy|garbh|delivery|labor pain|miscarriage|period|menstrual)\b/i.test(affirmativeText)) {
     primarySymptom = "Maternal / Gynecological Health";
-  } else if (/\b(tooth|teeth|dant|gum|dant dard)\b/i.test(text)) {
+  } else if (/\b(tooth|teeth|dant|gum|dant dard)\b/i.test(affirmativeText)) {
     primarySymptom = "Dental / Tooth Pain";
-  } else if (/\b(depression|panic|anxiety|suicid|mental)\b/i.test(text)) {
+  } else if (/\b(depression|panic|anxiety|suicid|mental)\b/i.test(affirmativeText)) {
     primarySymptom = "Mental Health / Anxiety Crisis";
-  } else if (/\b(fever|bukhar|temperature|pyrexia|feverish|garam sharir|chills)\b/i.test(text)) {
+  } else if (/\b(fever|bukhar|temperature|pyrexia|feverish|garam sharir|chills)\b/i.test(affirmativeText)) {
     primarySymptom = "Fever";
-  } else if (/\b(chest|chhati|seena|heart|cardiac|angina|left arm|pressure on chest|heavy chest)\b/i.test(text)) {
+  } else if (/\b(chest|chhati|seena|heart|cardiac|angina|left arm|pressure on chest|heavy chest)\b/i.test(affirmativeText)) {
     primarySymptom = "Chest Pain / Pressure";
-  } else if (/\b(headache|sar dard|sir dard|migraine|thunderclap|heavy head|sir bhari)\b/i.test(text)) {
+  } else if (/\b(headache|sar dard|sir dard|migraine|thunderclap|heavy head|sir bhari)\b/i.test(affirmativeText)) {
     primarySymptom = "Headache";
-  } else if (/\b(abdominal|stomach|pet dard|pet|gastric|acidity|cramps|marod|pet kharab)\b/i.test(text)) {
+  } else if (/\b(abdominal|stomach|pet dard|pet|gastric|acidity|cramps|marod|pet kharab)\b/i.test(affirmativeText)) {
     primarySymptom = "Abdominal Pain";
-  } else if (/\b(breathless|shortness of breath|saans phoolna|saans lene|asthma|wheezing|duma)\b/i.test(text)) {
+  } else if (/\b(breathless|shortness of breath|saans phoolna|saans lene|asthma|wheezing|duma)\b/i.test(affirmativeText)) {
     primarySymptom = "Breathlessness / Asthma";
-  } else if (/\b(cough|khansi|cold|sardi|phlegm|balgam|sneezing)\b/i.test(text)) {
+  } else if (/\b(cough|khansi|cold|sardi|phlegm|balgam|sneezing)\b/i.test(affirmativeText)) {
     primarySymptom = "Cough & Cold";
-  } else if (/\b(cut|cuts|injury|chot|wound|bleed|bleeding|khoon|fracture|haddi|accident)\b/i.test(text)) {
+  } else if (/\b(cut|cuts|injury|chot|wound|bleed|bleeding|khoon|fracture|haddi|accident)\b/i.test(affirmativeText)) {
     primarySymptom = "Injury / Trauma";
-  } else if (/\b(pesticide|poison|zeher|spray|keetnashak|snake|bite|saanp|kutta)\b/i.test(text)) {
+  } else if (/\b(pesticide|poison|zeher|spray|keetnashak|snake|bite|saanp|kutta)\b/i.test(affirmativeText)) {
     primarySymptom = "Pesticide / Poisoning Exposure";
-  } else if (/\b(blood pressure|bp high|bp low|bp issue|hypertension)\b/i.test(text)) {
+  } else if (/\b(blood pressure|bp high|bp low|bp issue|hypertension)\b/i.test(affirmativeText)) {
     primarySymptom = "Blood Pressure Fluctuation";
-  } else if (/\b(weak|weakness|kamzori|kamjori|thakan|fatigue|body ache|badan dard)\b/i.test(text)) {
+  } else if (/\b(weak|weakness|kamzori|kamjori|thakan|fatigue|body ache|badan dard)\b/i.test(affirmativeText)) {
     primarySymptom = "Weakness & Body Ache";
-  } else if (/\b(vomit|vomiting|ulti|nausea|ji machlana|throwing up)\b/i.test(text)) {
+  } else if (/\b(vomit|vomiting|ulti|nausea|ji machlana|throwing up)\b/i.test(affirmativeText)) {
     primarySymptom = "Vomiting / Nausea";
-  } else if (/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg)\b/i.test(text)) {
+  } else if (/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg)\b/i.test(affirmativeText)) {
     primarySymptom = "Leg Pain / Lower Limb";
-  } else if (/\b(swelling|skin swelling|sujan|soojan|edema|swollen|cellulitis|abscess|boil|blister)\b/i.test(text)) {
+  } else if (/\b(swelling|skin swelling|sujan|soojan|edema|swollen|cellulitis|abscess|boil|blister)\b/i.test(affirmativeText)) {
     primarySymptom = "Skin Swelling";
-  } else if (/\b(rash|khujli|itching|allergy|daane|rashes|psoriasis|eczema)\b/i.test(text)) {
+  } else if (/\b(rash|khujli|itching|allergy|daane|rashes|psoriasis|eczema)\b/i.test(affirmativeText)) {
     primarySymptom = "Skin Rash / Allergy / Dermatological";
-  } else if (/\b(burn|jal gaya|aag se jala|burns)\b/i.test(text)) {
+  } else if (/\b(burn|jal gaya|aag se jala|burns)\b/i.test(affirmativeText)) {
     primarySymptom = "Burn Injury";
-  } else if (/\b(eye|aankh|ear|kaan|throat|gala|vision)\b/i.test(text)) {
+  } else if (/\b(eye|aankh|ear|kaan|throat|gala|vision)\b/i.test(affirmativeText)) {
     primarySymptom = "ENT / Eye Emergency";
   }
 
   // Universal Fallback: If no keyword regex matched, accept any non-small-talk medical disease input
   if (!primarySymptom && currentStage === "symptom") {
-    const cleanWord = text.replace(/[^a-zA-Z0-9\s]/g, "").trim();
+    const cleanWord = affirmativeText.replace(/[^a-zA-Z0-9\s]/g, "").trim();
     const isSmallTalk = /\b(hi|hello|hey|test|ok|okay|yes|haan|no|nahi|thanks|thank you|good morning)\b/i.test(cleanWord);
     if (cleanWord.length >= 3 && !isSmallTalk) {
       primarySymptom = cleanWord
@@ -2790,61 +2795,61 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
 
   // 3. Identify Companion / Associated Symptoms
   const companionSymptoms = [];
-  if (/\b(weak|weakness|kamzori|kamjori|thakan|exhausted|tired|behal)\b/i.test(text) && primarySymptom !== "Weakness & Body Ache") {
+  if (/\b(weak|weakness|kamzori|kamjori|thakan|exhausted|tired|behal)\b/i.test(affirmativeText) && primarySymptom !== "Weakness & Body Ache") {
     companionSymptoms.push("Weakness / Malaise");
   }
-  if (/\b(chills|shivering|rigors|thand|thithuran|kaanpna)\b/i.test(text)) {
+  if (/\b(chills|shivering|rigors|thand|thithuran|kaanpna)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Chills / Shivering");
   }
-  if (/\b(body ache|badan dard|joint pain|muscle pain|kamar dard)\b/i.test(text) && primarySymptom !== "Weakness & Body Ache") {
+  if (/\b(body ache|badan dard|joint pain|muscle pain|kamar dard)\b/i.test(affirmativeText) && primarySymptom !== "Weakness & Body Ache") {
     companionSymptoms.push("Body Ache");
   }
-  if (/\b(headache|sar dard|sir dard|migraine|head pain|sir bhari)\b/i.test(text) && primarySymptom !== "Headache") {
+  if (/\b(headache|sar dard|sir dard|migraine|head pain|sir bhari)\b/i.test(affirmativeText) && primarySymptom !== "Headache") {
     companionSymptoms.push("Headache");
   }
-  if (/\b(vomit|vomiting|ulti|nausea|ji machlana)\b/i.test(text) && primarySymptom !== "Vomiting / Nausea") {
+  if (/\b(vomit|vomiting|ulti|nausea|ji machlana)\b/i.test(affirmativeText) && primarySymptom !== "Vomiting / Nausea") {
     companionSymptoms.push("Nausea / Vomiting");
   }
-  if (/\b(cough|khansi|cold|sardi|balgam|phlegm)\b/i.test(text) && primarySymptom !== "Cough & Cold") {
+  if (/\b(cough|khansi|cold|sardi|balgam|phlegm)\b/i.test(affirmativeText) && primarySymptom !== "Cough & Cold") {
     companionSymptoms.push("Cough & Cold");
   }
-  if (/\b(sore throat|gala dard|gale me dard|throat pain|kharash)\b/i.test(text)) {
+  if (/\b(sore throat|gala dard|gale me dard|throat pain|kharash)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Sore Throat");
   }
-  if (/\b(chest pain|seena dard|chhati me dard|chest tightness|pressure)\b/i.test(text) && primarySymptom !== "Chest Pain / Pressure") {
+  if (/\b(chest pain|seena dard|chhati me dard|chest tightness|pressure)\b/i.test(affirmativeText) && primarySymptom !== "Chest Pain / Pressure") {
     companionSymptoms.push("Chest Discomfort");
   }
-  if (/\b(stomach|pet dard|pet me dard|cramps|acidity|gas|burning stomach)\b/i.test(text) && primarySymptom !== "Abdominal Pain") {
+  if (/\b(stomach|pet dard|pet me dard|cramps|acidity|gas|burning stomach)\b/i.test(affirmativeText) && primarySymptom !== "Abdominal Pain") {
     companionSymptoms.push("Abdominal Discomfort");
   }
-  if (/\b(loose motion|loose motions|diarrhea|dast|pet kharab)\b/i.test(text)) {
+  if (/\b(loose motion|loose motions|diarrhea|dast|pet kharab)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Loose Motions / Diarrhea");
   }
-  if (/\b(burning urine|pishab me jalan|peshab me jalan|burning micturition)\b/i.test(text)) {
+  if (/\b(burning urine|pishab me jalan|peshab me jalan|burning micturition)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Burning Urination");
   }
-  if (/\b(dizziness|chakkar|giddiness|fainting|behoshi)\b/i.test(text)) {
+  if (/\b(dizziness|chakkar|giddiness|fainting|behoshi)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Dizziness / Vertigo");
   }
-  if (/\b(sweat|sweating|pasina|cold sweat|thanda pasina)\b/i.test(text)) {
+  if (/\b(sweat|sweating|pasina|cold sweat|thanda pasina)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Cold Sweats");
   }
-  if (/\b(breathless|saans phoolna|shortness of breath|asthma)\b/i.test(text) && primarySymptom !== "Breathlessness / Asthma") {
+  if (/\b(breathless|saans phoolna|shortness of breath|asthma)\b/i.test(affirmativeText) && primarySymptom !== "Breathlessness / Asthma") {
     companionSymptoms.push("Breathlessness");
   }
-  if (/\b(neck stiffness|gardan akad|stiff neck)\b/i.test(text)) {
+  if (/\b(neck stiffness|gardan akad|stiff neck)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Neck Stiffness");
   }
-  if (/\b(rash|rashes|daane|laal daane|petechiae)\b/i.test(text) && primarySymptom !== "Skin Rash / Allergy") {
+  if (/\b(rash|rashes|daane|laal daane|petechiae)\b/i.test(affirmativeText) && primarySymptom !== "Skin Rash / Allergy") {
     companionSymptoms.push("Skin Rash");
   }
-  if (/\b(loss of appetite|bhookh nahi|cannot eat|bhookh na lagna)\b/i.test(text)) {
+  if (/\b(loss of appetite|bhookh nahi|cannot eat|bhookh na lagna)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Loss of Appetite");
   }
-  if (/\b(palpitations|heart racing|dil ki dhadkan|dhadkan)\b/i.test(text)) {
+  if (/\b(palpitations|heart racing|dil ki dhadkan|dhadkan)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Palpitations");
   }
-  if (/\b(left arm|arm pain|jaw pain|radiating)\b/i.test(text)) {
+  if (/\b(left arm|arm pain|jaw pain|radiating)\b/i.test(affirmativeText)) {
     companionSymptoms.push("Radiating Pain to Arm/Jaw");
   }
 

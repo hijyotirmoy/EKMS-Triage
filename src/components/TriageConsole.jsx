@@ -54,7 +54,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [activeRightTab, setActiveRightTab] = useState("scribe"); // 'scribe' | 'triage' - Default to Call Transcript tab so it is always present
+  const [activeDirective, setActiveDirective] = useState(null);
+  const [activeRightTab, setActiveRightTab] = useState("triage"); // 'triage' | 'scribe' - Default to Triage Outcome tab open on the left
   const [ekmsContext, setEkmsContext] = useState(null);
   const [chatPresetTrigger, setChatPresetTrigger] = useState("");
   const [callerFoundInfo, setCallerFoundInfo] = useState(null);
@@ -661,6 +662,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             ref={chatRef}
             currentAgent={currentAgent}
             initialNotes={chatPresetTrigger}
+            triageResult={result}
+            activeDirective={activeDirective}
             onComplaintChange={(compiledNotes, ctx) => {
               setForm((f) => ({ ...f, symptom_notes: compiledNotes }));
               setEkmsContext(ctx);
@@ -713,13 +716,25 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         const hasInterim = Boolean(callSession?.interimTranscript);
         const hasActiveScribe = isCallActive || hasTranscripts || hasInterim;
 
-        const currentRightView = activeRightTab || "scribe";
+        const currentRightView = activeRightTab || "triage";
 
         return (
           <div ref={outcomeRef} className="flex flex-col w-full min-w-0 scroll-mt-16">
-            {/* Always visible tab toggle bar so agent can access Call Transcript & Triage Outcome at any time */}
+            {/* Always visible tab toggle bar: Triage Outcome on the left (default), Call Transcript on the right */}
             <div className="mb-2.5 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-secondary/50 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("triage")}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
+                    currentRightView === "triage"
+                      ? "bg-background text-foreground shadow-xs border border-border/70"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Stethoscope className="h-3.5 w-3.5 text-primary" />
+                  Triage Outcome {result ? "✓" : ""}
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveRightTab("scribe")}
@@ -734,18 +749,6 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                   {isCallActive && (
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
                   )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveRightTab("triage")}
-                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition ${
-                    currentRightView === "triage"
-                      ? "bg-background text-foreground shadow-xs border border-border/70"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Stethoscope className="h-3.5 w-3.5 text-primary" />
-                  Triage Outcome {result ? "✓" : ""}
                 </button>
               </div>
 
@@ -789,6 +792,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                 loading={loading}
                 callerIntake={form}
                 currentAgent={currentAgent}
+                onDirectiveChange={setActiveDirective}
                 onUpdatePincode={(newPin) => {
                   if (newPin) {
                     setForm((f) => ({ ...f, pincode: newPin }));
