@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Loader2,
   Sparkles,
@@ -23,11 +23,13 @@ import { UrgencyBadge } from "./UrgencyBadge";
 import { LiveScribeWindow } from "./LiveScribeWindow";
 import { extractClinicalEntities, processTranscriptionForAi } from "../lib/clinicalAdaptiveEngine";
 import { broadcastEvent } from "../lib/broadcastSync";
-import { appendCaseToLocalCache } from "../lib/clientCache";
+import { appendCaseToLocalCache, getCachedCases } from "../lib/clientCache";
+import { getCallerIdForPhone } from "../lib/callerId";
 
 const EMPTY = {
   caller_name: "",
   phone: "",
+  caller_id: "",
   age: "",
   sex: "",
   symptom_notes: "",
@@ -68,6 +70,10 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const activeCallerId = useMemo(() => {
+    return form.caller_id || callerFoundInfo?.caller_id || getCallerIdForPhone(form.phone, callerHistory);
+  }, [form.caller_id, form.phone, callerFoundInfo, callerHistory]);
+
   const hasClearedOnMountRef = useRef(false);
 
   // On page load / refresh: clear manual room transcripts once on initial load
@@ -79,13 +85,130 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
     }
   }, [callSession?.clearTranscripts]);
 
-  // Caller history lookup by phone number
-  const lookupCaller = useCallback(async (phoneNumber) => {
-    if (!phoneNumber) return;
+  // 1. Session Storage persistence: restore state on initial mount so refreshing inside triage preserves data
+  const hasRestoredSessionRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || hasRestoredSessionRef.current) return;
+    hasRestoredSessionRef.current = true;
+    try {
+      const stored = sessionStorage.getItem("ekms_active_triage_session");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.form && (parsed.form.phone || parsed.form.caller_name || parsed.form.symptom_notes)) {
+          if (parsed.form.caller_name === "." || parsed.form.caller_name === "'") parsed.form.caller_name = "";
+          if (parsed.form.pincode === "Kamrup Metro" || parsed.form.pincode === ".") parsed.form.pincode = "";
+          setForm(parsed.form);
+        }
+        if (parsed.result) {
+          const res = parsed.result;
+          const caseTarget = res.case_ref || res.case_id || res.id;
+          if (caseTarget && !res.is_forwarded) {
+            try {
+              const forwardStored = sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`);
+              if (forwardStored) {
+                const fParsed = JSON.parse(forwardStored);
+                if (fParsed.is_forwarded) {
+                  res.is_forwarded = true;
+                  res.forwarded_at = fParsed.forwarded_at;
+                  res.dispatch_id = fParsed.dispatch_id;
+                  res.forwarded_to = fParsed.forwarded_to;
+                  res.forwarded_short_name = fParsed.forwarded_short_name;
+                  res.status = "forwarded";
+                  res.dispatch_info = fParsed.dispatch_info;
+                }
+              }
+            } catch (e) {}
+          }
+          setResult(res);
+        }
+        if (parsed.callerFoundInfo) {
+          const storedPhone10 = (parsed.callerFoundInfo.phone || "").replace(/\D/g, "").slice(-10);
+          const formPhone10 = (parsed.form?.phone || "").replace(/\D/g, "").slice(-10);
+          if (storedPhone10.length === 10 && storedPhone10 === formPhone10) {
+            setCallerFoundInfo(parsed.callerFoundInfo);
+            if (Array.isArray(parsed.callerHistory) && parsed.callerHistory.length > 0) {
+              setCallerHistory(parsed.callerHistory);
+            }
+          } else {
+            setCallerFoundInfo(null);
+            setCallerHistory([]);
+          }
+        }
+        if (parsed.activeDirective) {
+          setActiveDirective(parsed.activeDirective);
+        }
+        if (parsed.ekmsContext) {
+          setEkmsContext(parsed.ekmsContext);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore triage session from storage:", e);
+    }
+  }, []);
+
+  // 2. Save active state to sessionStorage on changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const sessionData = {
+        form,
+        result,
+        callerHistory,
+        callerFoundInfo,
+        activeDirective,
+        ekmsContext,
+      };
+      sessionStorage.setItem("ekms_active_triage_session", JSON.stringify(sessionData));
+    } catch (e) {}
+  }, [form, result, callerHistory, callerFoundInfo, activeDirective, ekmsContext]);
+
+  // 3. Auto-save intake draft to database on beforeunload / refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const cleanPhone = String(form.phone || "").replace(/\D/g, "");
+      if (cleanPhone.length >= 10 && (form.caller_name || form.symptom_notes)) {
+        const draftPayload = JSON.stringify({
+          phone: form.phone,
+          caller_name: form.caller_name || "Caller",
+          age: form.age ? Number(form.age) : null,
+          sex: form.sex || null,
+          symptom_notes: form.symptom_notes || "Triage consultation intake",
+          duration: form.duration || null,
+          severity_reported: Number(form.severity_reported) || 5,
+          city: form.city || null,
+          district: form.district || null,
+          pincode: form.pincode || null,
+          latitude: form.latitude ? Number(form.latitude) : null,
+          longitude: form.longitude ? Number(form.longitude) : null,
+          ekms_ai_context: ekmsContext,
+        });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon("/api/caller/draft", new Blob([draftPayload], { type: "application/json" }));
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [form, ekmsContext]);
+
+  // Caller history lookup by phone number - works directly without needing browser refresh
+  const lookupCaller = useCallback(async (phoneNumber, force = false) => {
+    if (!phoneNumber) {
+      setCallerFoundInfo(null);
+      setCallerHistory([]);
+      return;
+    }
     const clean = String(phoneNumber).replace(/\D/g, "");
-    const query = clean.length >= 10 ? clean.slice(-10) : clean;
-    if (query.length < 6) return;
-    if (lastLookedUpRef.current === query) return;
+    const query = clean.length >= 10 ? clean.slice(-10) : "";
+    if (query.length !== 10) {
+      setCallerFoundInfo(null);
+      setCallerHistory([]);
+      lastLookedUpRef.current = "";
+      return;
+    }
+    if (!force && lastLookedUpRef.current === query) return;
 
     lastLookedUpRef.current = query;
     setIsLookingUp(true);
@@ -94,18 +217,22 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       const data = await res.json();
       if (data && data.found && data.caller) {
         const c = data.caller;
+        const cleanCallerName = (c.caller_name && c.caller_name.trim() !== "." && c.caller_name.trim() !== "'") ? c.caller_name : "";
+        const resolvedCid = c.caller_id || getCallerIdForPhone(query, data.history);
+        c.caller_id = resolvedCid;
         // Known caller: populate THIS caller's stored data and history
         setForm((f) => ({
           ...f,
           phone: phoneNumber,
-          caller_name: c.caller_name || "",
-          age: c.age ? String(c.age) : "",
-          sex: c.sex || "",
-          city: c.city || "",
-          district: c.district || "",
-          pincode: c.pincode || "",
-          latitude: c.latitude ? String(c.latitude) : "",
-          longitude: c.longitude ? String(c.longitude) : "",
+          caller_id: resolvedCid,
+          caller_name: cleanCallerName || f.caller_name || "",
+          age: c.age ? String(c.age) : (f.age || ""),
+          sex: c.sex || f.sex || "",
+          city: c.city || f.city || "",
+          district: c.district || f.district || "",
+          pincode: (c.pincode && c.pincode !== "Kamrup Metro") ? c.pincode : (f.pincode || ""),
+          latitude: c.latitude ? String(c.latitude) : (f.latitude || ""),
+          longitude: c.longitude ? String(c.longitude) : (f.longitude || ""),
         }));
         setCallerFoundInfo(c);
         if (data.history && Array.isArray(data.history)) {
@@ -114,30 +241,92 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           setCallerHistory([]);
         }
         toast.success(
-          `Previous record found for ${c.caller_name || phoneNumber}: Details & history loaded.`
+          `Record found for ${cleanCallerName || phoneNumber}: Details & history loaded.`
         );
       } else {
-        // Different / New caller number: preserve whatever details the agent has already typed
-        setForm((f) => ({
-          ...f,
-          phone: phoneNumber,
-          caller_name: f.caller_name || "",
-          age: f.age || "",
-          sex: f.sex || "",
-          city: f.city || "",
-          district: f.district || "",
-          pincode: f.pincode || "",
-          latitude: f.latitude || "",
-          longitude: f.longitude || "",
-        }));
-        setCallerFoundInfo(null);
-        setCallerHistory([]);
-        toast.info(
-          `New number (${phoneNumber}): Please fill caller details.`
-        );
+        // Fallback: Check local cache ONLY with strict 10-digit exact match
+        const localCases = getCachedCases();
+        const matches = localCases.filter((item) => {
+          const rawIp = String(item.intake?.phone || "").replace(/\D/g, "");
+          const ip10 = rawIp.length >= 10 ? rawIp.slice(-10) : "";
+          return ip10.length === 10 && ip10 === query;
+        });
+
+        if (matches.length > 0) {
+          const latestLocal = matches[0];
+          const intake = latestLocal.intake || {};
+          const cleanCallerName = (intake.caller_name && intake.caller_name.trim() !== "." && intake.caller_name.trim() !== "'") ? intake.caller_name : "";
+          const resolvedCid = latestLocal.caller_id || latestLocal.intake?.caller_id || getCallerIdForPhone(query, matches);
+          const callerInfo = {
+            caller_name: cleanCallerName,
+            phone: intake.phone || phoneNumber,
+            caller_id: resolvedCid,
+            age: intake.age != null && String(intake.age).trim() !== "." ? String(intake.age) : "",
+            sex: intake.sex && intake.sex !== "." ? intake.sex : "",
+            city: intake.city && intake.city !== "." ? intake.city : "",
+            district: intake.district && intake.district !== "." ? intake.district : "",
+            pincode: intake.pincode && intake.pincode !== "Kamrup Metro" ? intake.pincode : "",
+            last_case_ref: latestLocal.case_ref || "",
+            case_count: matches.length,
+          };
+          setForm((f) => ({
+            ...f,
+            phone: phoneNumber,
+            caller_id: resolvedCid,
+            caller_name: cleanCallerName || f.caller_name || "",
+            age: callerInfo.age || f.age || "",
+            sex: callerInfo.sex || f.sex || "",
+            city: callerInfo.city || f.city || "",
+            district: callerInfo.district || f.district || "",
+            pincode: callerInfo.pincode || f.pincode || "",
+            latitude: intake.latitude ? String(intake.latitude) : (f.latitude || ""),
+            longitude: intake.longitude ? String(intake.longitude) : (f.longitude || ""),
+          }));
+          setCallerFoundInfo(callerInfo);
+          setCallerHistory(
+            matches.map((c) => ({
+              case_ref: c.case_ref || "",
+              caller_id: c.caller_id || c.intake?.caller_id || resolvedCid,
+              created_at: c.created_at || "",
+              caller_name: c.intake?.caller_name || "",
+              chief_complaint: c.triage?.primary_complaint || c.intake?.symptom_notes || c.triage?.summary_en || "",
+              reason: c.intake?.symptom_notes || c.triage?.summary_en || "",
+              summary: c.triage?.summary_en || "",
+              red_flags: Array.isArray(c.triage?.red_flags) && c.triage.red_flags.length > 0
+                ? c.triage.red_flags
+                : (c.ekms_ai_context?.triageState?.redFlagsDetected || []),
+              urgency_level: c.triage?.urgency_level || "Routine",
+              urgency_score: c.triage?.urgency_score || 0,
+              navigation: c.triage?.recommended_action || c.triage?.recommended_facility_type || "",
+              recommended_action: c.triage?.recommended_action || "",
+              recommended_facility_type: c.triage?.recommended_facility_type || "",
+            }))
+          );
+          toast.success(
+            `Record found for ${cleanCallerName || phoneNumber}: Details loaded.`
+          );
+        } else {
+          // Brand New Number: Clear all previous returning caller state completely!
+          const newCid = data?.caller_id || getCallerIdForPhone(query);
+          setCallerFoundInfo(null);
+          setCallerHistory([]);
+          setHistoryPage(1);
+          setForm((f) => ({
+            ...f,
+            phone: phoneNumber,
+            caller_id: newCid,
+            caller_name: f.caller_name === "." ? "" : f.caller_name,
+            pincode: f.pincode === "Kamrup Metro" ? "" : f.pincode,
+          }));
+          toast.info(
+            `New number (${phoneNumber}): Please fill caller details.`
+          );
+        }
       }
     } catch (err) {
       console.warn("Caller lookup error:", err);
+      setCallerFoundInfo(null);
+      setCallerHistory([]);
     } finally {
       setIsLookingUp(false);
     }
@@ -329,6 +518,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
     const payload = {
       ...form,
+      caller_id: activeCallerId,
       agent_id: agentCode,
       symptom_notes: compiledNotes,
       age: form.age === "" ? null : Number(form.age),
@@ -348,11 +538,16 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       setActiveRightTab("triage");
       
       // Update local storage cache & broadcast to other tabs instantly without extra Firestore reads
+      const finalCallerId = data.caller_id || activeCallerId;
       const caseRecord = {
         id: data.case_id || data.case_ref,
         case_ref: data.case_ref,
+        caller_id: finalCallerId,
         agent_id: data.agent_id || agentCode,
-        intake: data.intake || payload,
+        intake: {
+          ...(data.intake || payload),
+          caller_id: finalCallerId,
+        },
         triage: data.triage,
         resolved_location: data.resolved_location,
         nearest_facilities: data.nearest_facilities,
@@ -363,7 +558,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       broadcastEvent("NEW_CASE", caseRecord);
 
       onCaseCreated?.();
-      toast.success(`${data.triage.urgency_level} — ${data.case_ref}`);
+      toast.success(`${data.triage.urgency_level} — ${finalCallerId || data.case_ref}`);
       if (form.phone) {
         lastLookedUpRef.current = "";
         lookupCaller(form.phone);
@@ -425,8 +620,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                       })}
                     </span>
                   </div>
-                  <span className="mono text-[11px] text-primary/80">
-                    {item.case_ref}
+                  <span className="mono text-[11px] text-primary/80 font-bold">
+                    {item.caller_id || activeCallerId || item.case_ref}
                   </span>
                 </div>
                 <UrgencyBadge level={item.urgency_level} score={item.urgency_score} size="sm" />
@@ -501,6 +696,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             type="button"
             data-testid="intake-form-reset"
             onClick={() => {
+              try {
+                sessionStorage.removeItem("ekms_active_triage_session");
+              } catch (e) {}
               setForm(EMPTY);
               setResult(null);
               setChatPresetTrigger("");
@@ -533,9 +731,13 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                   {(callerFoundInfo.city || callerFoundInfo.district) ? ` • ${callerFoundInfo.city || callerFoundInfo.district}` : ""}
                 </span>
               </div>
-              {callerFoundInfo.last_case_ref && (
+              {(callerFoundInfo.caller_id || activeCallerId) ? (
                 <span className="font-mono text-[11px] text-emerald-800 hidden sm:inline font-bold">
-                  Prev: {callerFoundInfo.last_case_ref}
+                  Caller ID: {callerFoundInfo.caller_id || activeCallerId}
+                </span>
+              ) : callerFoundInfo.last_case_ref && (
+                <span className="font-mono text-[11px] text-emerald-800 hidden sm:inline font-bold">
+                  Caller ID: {activeCallerId}
                 </span>
               )}
             </div>
@@ -572,21 +774,24 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
               value={form.phone}
               onChange={(e) => {
                 const val = e.target.value;
-                setForm((f) => ({ ...f, phone: val }));
                 const digits = val.replace(/\D/g, "");
-                if (callerFoundInfo && digits !== (callerFoundInfo.phone || "").replace(/\D/g, "").slice(-10)) {
-                  setCallerFoundInfo(null);
-                  setCallerHistory([]);
-                  setHistoryPage(1);
+                const autoCid = digits.length === 10 ? getCallerIdForPhone(digits, callerHistory) : "";
+                setForm((f) => ({ ...f, phone: val, caller_id: autoCid || f.caller_id }));
+                if (digits.length !== 10) {
+                  if (callerFoundInfo) setCallerFoundInfo(null);
+                  if (callerHistory.length > 0) setCallerHistory([]);
                   lastLookedUpRef.current = "";
-                }
-                if (digits.length === 10) {
-                  lookupCaller(val);
+                } else {
+                  lookupCaller(val, true);
                 }
               }}
               onBlur={() => {
-                if (form.phone && form.phone.trim().length >= 6) {
-                  lookupCaller(form.phone);
+                const digits = (form.phone || "").replace(/\D/g, "");
+                if (digits.length === 10) {
+                  lookupCaller(form.phone, true);
+                } else {
+                  setCallerFoundInfo(null);
+                  setCallerHistory([]);
                 }
               }}
               placeholder="987XXXXXXX"
@@ -619,8 +824,20 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           </Field>
         </div>
 
-        {/* 2. Location Fields - 2 in a row on mobile */}
-        <div className="mt-2.5 sm:mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+        {/* 2. Caller ID & Location Fields - 4 in a row on desktop */}
+        <div className="mt-2.5 sm:mt-3 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <Field label="Caller ID">
+            <input
+              data-testid="intake-form-caller-id"
+              readOnly
+              className={`${inputCls} font-mono font-bold bg-muted/40 cursor-default ${
+                activeCallerId ? "text-primary dark:text-primary-foreground" : "text-muted-foreground"
+              }`}
+              value={activeCallerId || "Pending phone..."}
+              placeholder="e.g. CID0001K102"
+              title="Unique permanent Caller ID assigned to this phone number"
+            />
+          </Field>
           <Field label="City / town">
             <input
               data-testid="intake-form-city"
@@ -643,7 +860,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
               ))}
             </select>
           </Field>
-          <Field label="Pincode" className="col-span-2 sm:col-span-1">
+          <Field label="Pincode">
             <input
               data-testid="intake-form-pincode"
               className={inputCls}
@@ -793,6 +1010,22 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                 callerIntake={form}
                 currentAgent={currentAgent}
                 onDirectiveChange={setActiveDirective}
+                callerHistory={callerHistory}
+                onForwardSuccess={(statusData) => {
+                  setResult((prev) => {
+                    if (!prev) return prev;
+                    return {
+                      ...prev,
+                      is_forwarded: true,
+                      forwarded_at: statusData?.timestamp || new Date().toISOString(),
+                      dispatch_id: statusData?.dispatchId,
+                      forwarded_to: statusData?.teamName,
+                      forwarded_short_name: statusData?.shortName,
+                      status: "forwarded",
+                      dispatch_info: statusData,
+                    };
+                  });
+                }}
                 onUpdatePincode={(newPin) => {
                   if (newPin) {
                     setForm((f) => ({ ...f, pincode: newPin }));

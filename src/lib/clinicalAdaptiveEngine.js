@@ -142,9 +142,10 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     return CLINICAL_DOMAINS.VOMITING;
   }
 
-  // 2b. Leg Pain / Calf Pain / DVT / Lower Limb Distress
+  // 2b. Extremity / Hand / Wrist / Leg Pain / Musculoskeletal Distress
   if (
-    has(/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg|calf muscle|sciatica)\b/i)
+    has(/\b(hand|wrist|finger|palm|thumb|haath|kalai|leg|calf|thigh|pair|tang|ankle|foot|knee|ghutna|arm|elbow|shoulder|kandha)\b/i) &&
+    has(/\b(pain|dard|ache|hurts?|sore|sprain|swell|sujan|twist|fall|fell|injury|chot)\b/i)
   ) {
     return CLINICAL_DOMAINS.LEG_PAIN;
   }
@@ -177,6 +178,13 @@ export function detectClinicalDomain(allText = "", currentTriage = {}) {
     has(/\b(headache|headaches|sar dard|sir dard|migraine|chakkar|giddiness|vertigo|behoshi|faint|syncope|stroke|paralysis|slurred|ladkhada|seizure|daura)\b/i)
   ) {
     return CLINICAL_DOMAINS.HEADACHE;
+  }
+
+  // 6b. Maternal / Gynecological Health / Menstrual Cramps / Period Pain
+  if (
+    has(/\b(period|periods|menstrual|menses|dysmenorrhea|mahavari|periods cramps|period cramps|periods ka dard|pregnant|pregnancy|garbh|delivery|labor pain|miscarriage|bleeding per vagin|pv bleeding)\b/i)
+  ) {
+    return CLINICAL_DOMAINS.GYNECOLOGY;
   }
 
   // 7. Gastrointestinal / Abdominal Pain / Vomiting / Diarrhea
@@ -528,30 +536,71 @@ export function getMedicationQuestionData(domain, currentTriage = {}) {
           "Yes — Paracetamol / Dolo / Crocin 650mg",
           "Yes — Antibiotics (Amoxicillin / Azithromycin / Cefixime)",
           "Yes — Painkiller / Combiflam / Ibuprofen",
-          "Yes — Cough / Cold / Antiallergic medicine",
+          "Yes — Cough / Cold / Antipyretic medicine",
         ],
         probingQuestions: [
           "Paracetamol lene ke kitni der baad bukhar kam hota hai? (How long after taking Paracetamol does fever come down?)",
           "Aakhri baar bukhar ki dawai kitne baje li thi? (What exact time was the last antipyretic dose taken?)",
-          "Kya kisi dawai se pehle reaction ya allergy hui hai? (Any known drug allergy to sulfa or penicillin?)",
+          "Kya aapko pehle se diabetes, high BP ya asthma jaisi koi bimari hai? (Do you have any pre-existing health conditions like diabetes, BP, or asthma?)",
         ],
       };
-    case CLINICAL_DOMAINS.ABDOMINAL:
+    case CLINICAL_DOMAINS.ABDOMINAL: {
+      const isVomiting = /\b(vomit|vomiting|ulti|nausea|ji machlana)\b/i.test(
+        `${currentTriage?.symptom || ""} ${currentTriage?.condition || ""} ${currentTriage?.rawNotes || ""} ${currentTriage?.affirmativeText || ""}`
+      );
+      if (isVomiting) {
+        return {
+          agentScript:
+            "Ask the IP: 'Have you taken any medication for vomiting (like Ondansetron/Domperidone), antacid, or started ORS? Also, do you have any pre-existing health conditions like diabetes or BP?'",
+          options: [
+            "No medications taken yet",
+            "Yes — Vomiting medicine (Ondansetron / Vomikind / Domperidone)",
+            "Yes — ORS / Electrolyte solution started",
+            "Yes — Antacid / Gas medicine (Pantocid / Omez / Digene)",
+            "Yes — History of diabetes / BP / pre-existing condition",
+            "Yes — Antispasmodic painkiller (Meftal-Spas / Cyclopam)",
+          ],
+          probingQuestions: [
+            "Kya ulti rokne ke liye koi dawai (jaise Ondansetron/Domperidone) ya ORS ghol liya hai? (Did you take any anti-emetic like Ondansetron or start ORS?)",
+            "Kya aapko pehle se diabetes, high BP ya koi aur purani bimari hai? (Do you have pre-existing diabetes, hypertension, or chronic illness?)",
+            "Kya dawai lene ke turant baad ulti ho gayi thi? (Did vomiting recur immediately after taking the pill?)",
+          ],
+        };
+      }
       return {
         agentScript:
-          "Ask the IP: 'Have you taken any antacid, gas medicine, painkiller, or ORS for this stomach problem?'",
+          "Ask the IP: 'Have you taken any antacid, gas medicine, painkiller, or ORS for this stomach problem, and do you have any pre-existing health conditions like diabetes or high BP?'",
         options: [
           "No medications taken",
           "Yes — Antacid / Gas medicine (Pantocid / Omez / Digene)",
           "Yes — Antispasmodic painkiller (Meftal-Spas / Cyclopam)",
           "Yes — ORS / Electrolyte solution / Electral",
-          "Yes — Loose motions medicine (Norflox / Sporlac)",
+          "Yes — Loose motions / Vomiting medicine (Norflox / Ondansetron)",
           "Yes — Other medicines",
         ],
         probingQuestions: [
           "Dawai lene ke baad kya ulti ho gayi ya pet dard kam hua? (Did vomiting occur after taking medicine, or did cramps subside?)",
           "Kya patient ne ORS ghol ya nimbu-paani peena shuru kiya hai? (Has ORS or lemon-salt water hydration started?)",
-          "Kya pehle se koi regular dawa (jaise BP, sugar ya arthritis) chal rahi hai? (Any daily chronic medications for BP, sugar, or arthritis?)",
+          "Kya aapko pehle se diabetes, BP ya pet ki koi bimari hai? (Do you have any pre-existing conditions like diabetes or hypertension?)",
+        ],
+      };
+    }
+    case CLINICAL_DOMAINS.ALLERGY:
+      return {
+        agentScript:
+          "Ask the IP: 'What triggered this allergy (specific medicine, food, insect bite, or dust), what exact reaction occurred, and did you take any antiallergic medicine (like Cetirizine/Avil)?'",
+        options: [
+          "No medications taken yet",
+          "Yes — Antiallergic tablet (Cetirizine / Levocet / Avil / Allegra)",
+          "Yes — Steroid medication (Prednisolone / Betnesol / Dexamethasone)",
+          "Yes — Topical ointment / Calamine lotion applied",
+          "Yes — Emergency injection taken at clinic (Avil / Decadron)",
+          "Yes — Reaction triggered by a specific medicine (Penicillin/Sulfa/Painkiller)",
+        ],
+        probingQuestions: [
+          "Yeh allergy kiske baad shuru hui — kisi dawai, khane ki cheez, keede ke kaatne ya dhool se? (What triggered this allergy — specific medicine, food item, insect sting, or dust?)",
+          "Kya honth, chehre, aankhon ya gale mein sujan aayi hai? (Is there swelling on lips, face, eyes, or throat?)",
+          "Kya koi antiallergic dawai (Cetirizine, Avil ya Allegra) li hai aur kitni der pehle li thi? (Was any antiallergic medicine like Cetirizine/Avil taken and when?)",
         ],
       };
     case CLINICAL_DOMAINS.HEADACHE:
@@ -656,7 +705,7 @@ export function getMedicationQuestionData(domain, currentTriage = {}) {
         probingQuestions: [
           "Kya is takleef ke liye pichle 2-4 ghante mein koi dawai li hai aur uska naam kya hai? (Did you take any medicine in the last 2-4 hours, and what is its name?)",
           "Kya rozana chalne wali koi dawai (BP, Sugar, Thyroid) chhut gayi hai? (Did you miss any daily scheduled doses of BP/Sugar/Thyroid?)",
-          "Kya kisi dawai se pehle allergy ya reaction hua tha? (Any known drug allergy or adverse reaction?)",
+          "Kya aapko pehle se koi aur purani bimari jaise BP, Sugar ya Asthma hai? (Do you have any pre-existing health conditions like BP, Diabetes, or Asthma?)",
         ],
       };
   }
@@ -2768,6 +2817,14 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     primarySymptom = "Weakness & Body Ache";
   } else if (/\b(vomit|vomiting|ulti|nausea|ji machlana|throwing up)\b/i.test(affirmativeText)) {
     primarySymptom = "Vomiting / Nausea";
+  } else if (/\b(wrist|kalai)\b/i.test(affirmativeText) && /\b(hand|haath)\b/i.test(affirmativeText)) {
+    primarySymptom = "Hand & Wrist Pain";
+  } else if (/\b(wrist|kalai)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|sprain|swelling|sujan|injury|chot|fall|fell)\b/i.test(affirmativeText)) {
+    primarySymptom = "Pain in Wrist Area";
+  } else if (/\b(hand|haath|finger|ungli|palm|thumb)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|sore|sprain|swelling|sujan|injury|chot|fall|fell)\b/i.test(affirmativeText)) {
+    primarySymptom = "Pain in Hand";
+  } else if (/\b(shoulder|kandha|elbow|kohni|arm|bazu)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|injury|chot)\b/i.test(affirmativeText)) {
+    primarySymptom = "Arm & Shoulder Pain";
   } else if (/\b(leg pain|calf pain|thigh pain|pair dard|tang me dard|leg swell|swollen leg|dvt|put weight on|weight on leg)\b/i.test(affirmativeText)) {
     primarySymptom = "Leg Pain / Lower Limb";
   } else if (/\b(swelling|skin swelling|sujan|soojan|edema|swollen|cellulitis|abscess|boil|blister)\b/i.test(affirmativeText)) {
@@ -2925,6 +2982,38 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     }
   }
 
+  // 6b. Extract Allergies & Medications
+  let detectedAllergies = null;
+  if (/\b(no\s+(?:known\s+)?allerg(?:y|ies)|not\s+allergic|no\s+reaction|koi\s+allergy\s+nahi|allergy\s+nahi|nil\s+allergy)\b/i.test(text)) {
+    detectedAllergies = "No known drug or food allergies reported";
+  } else if (/\b(penicillin|sulfa|aspirin|ibuprofen|paracetamol|amoxicillin)\b/i.test(text) && /\ballerg\w*\b/i.test(text)) {
+    const match = text.match(/\b(penicillin|sulfa|aspirin|ibuprofen|paracetamol|amoxicillin)\b/i);
+    detectedAllergies = `Known drug allergy to ${match ? match[0].toUpperCase() : "medication"}`;
+  } else if (/\b(peanuts?|eggs?|seafood|fish|prawns?|milk|food)\b/i.test(text) && /\ballerg\w*\b/i.test(text)) {
+    const match = text.match(/\b(peanuts?|eggs?|seafood|fish|prawns?|milk|food)\b/i);
+    detectedAllergies = `Known food allergy (${match ? match[0] : "food item"})`;
+  } else if (/\b(dust|pollen|insect|bee\s*sting)\b/i.test(text) && /\ballerg\w*\b/i.test(text)) {
+    detectedAllergies = "Environmental / insect sting allergy";
+  } else if (/\ballergic\s+to\s+([a-zA-Z\s]{2,30})/i.test(text)) {
+    const match = text.match(/\ballergic\s+to\s+([a-zA-Z\s]{2,30})/i);
+    if (match && match[1]) detectedAllergies = `Allergic to ${match[1].trim()}`;
+  }
+
+  let detectedMedications = null;
+  if (/\b(no\s+medicin(?:e|es)|no\s+medication|haven'?t\s+taken|not\s+taken|koi\s+dawa\s+nahi|dawai\s+nahi|none|nil)\b/i.test(text)) {
+    detectedMedications = "";
+  } else {
+    const medsFound = [];
+    if (/\b(ondansetron|vomikind|domperidone|emset)\b/i.test(text)) medsFound.push("Tab. Ondansetron / Anti-emetic taken for vomiting");
+    if (/\b(ors|electral|electrolyte)\b/i.test(text)) medsFound.push("ORS oral rehydration started");
+    if (/\b(paracetamol|dolo|crocin|pcm)\b/i.test(text)) medsFound.push("Tab. Paracetamol taken");
+    if (/\b(combiflam|ibuprofen|diclofenac|painkiller)\b/i.test(text)) medsFound.push("Analgesic / Painkiller taken");
+    if (/\b(cetirizine|avil|allegra|levocet)\b/i.test(text)) medsFound.push("Antihistamine (Cetirizine/Avil) taken");
+    if (/\b(pantoprazole|pantocid|pan\s*40|antacid|digene|omez)\b/i.test(text)) medsFound.push("Antacid / PPI taken for acidity");
+    if (/\b(inhaler|asthalin|budecort)\b/i.test(text)) medsFound.push("Inhaler (Asthalin) used");
+    if (medsFound.length > 0) detectedMedications = medsFound.join("; ");
+  }
+
   const isGeneralComplaint = /\b(not feeling well|feeling unwell|tabiyat kharab|bimar|bimaar|sick|unwell|takleef|problem|ill|pareshani|pain|dard)\b/i.test(text);
 
   // 7. Check if meaningful clinical content was found
@@ -2934,6 +3023,8 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     cleanSeverity ||
     cleanDuration ||
     probingAnswer ||
+    detectedAllergies ||
+    detectedMedications ||
     isGeneralComplaint
   );
 
@@ -2974,6 +3065,8 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     domain,
     conditionLabel,
     probingAnswer,
+    detectedAllergies: detectedAllergies || null,
+    detectedMedications: detectedMedications || null,
   };
 }
 

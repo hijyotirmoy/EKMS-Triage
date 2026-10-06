@@ -37,6 +37,7 @@ import {
   setCachedStats,
 } from "../lib/clientCache";
 import { subscribeToSync, broadcastEvent } from "../lib/broadcastSync";
+import { getCallerIdForPhone } from "../lib/callerId";
 
 
 const inputCls =
@@ -509,6 +510,7 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                     title="Select all on current page"
                   />
                 </th>
+                <th className="py-2 pr-3 font-semibold">Caller ID</th>
                 <th className="py-2 pr-3 font-semibold">Case</th>
                 <th className="py-2 pr-3 font-semibold">Agent</th>
                 <th className="py-2 pr-3 font-semibold">Caller</th>
@@ -541,6 +543,11 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                         onChange={(e) => toggleSelectOne(rowKey, e)}
                         className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
                       />
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span className="inline-flex items-center rounded-md bg-purple-50 border border-purple-200/80 px-2 py-1 text-xs font-bold text-purple-700 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-300 font-mono tracking-wider">
+                        {c.caller_id || c.intake?.caller_id || getCallerIdForPhone(c.intake?.phone)}
+                      </span>
                     </td>
                     <td className="py-3 pr-3">
                       <span className="inline-flex items-center rounded-md bg-blue-50 border border-blue-200/80 px-2 py-1 text-xs font-bold text-blue-700 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 tracking-wider">
@@ -896,6 +903,9 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onClo
                 <h3 className="text-base sm:text-lg font-bold text-foreground">
                   AI & Agent Consultation
                 </h3>
+                <span className="mono rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 px-2 py-0.5 text-xs font-bold font-mono">
+                  {caseItem.caller_id || caseItem.intake?.caller_id || getCallerIdForPhone(caseItem.intake?.phone)}
+                </span>
                 <span className="mono rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-xs font-bold">
                   {caseItem.case_ref}
                 </span>

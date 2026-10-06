@@ -72,14 +72,14 @@ export function isKeyAvailable(key) {
  * Executes an async operation with rapid automatic failover across the Groq key pool.
  * On HTTP 429, immediately marks the key on cooldown and tries the next key with ZERO delay.
  */
-export async function executeGroqWithFailover(fn, { label = "Groq", maxAttempts } = {}) {
+export async function executeGroqWithFailover(fn, { label = "Groq", maxAttempts = 3 } = {}) {
   const allKeys = getGroqKeys();
   if (allKeys.length === 0) {
     throw new Error("No Groq API keys configured in pool.");
   }
 
   const totalKeys = allKeys.length;
-  const attemptsLimit = Math.min(maxAttempts || totalKeys, totalKeys);
+  const attemptsLimit = Math.min(maxAttempts || 3, totalKeys);
 
   // Find next healthy key starting from current pointer
   let startIndex = currentKeyIndex % totalKeys;
@@ -143,10 +143,10 @@ export async function executeGroqWithFailover(fn, { label = "Groq", maxAttempts 
           continue; // Zero delay, instant retry with next key
         }
 
-        if (result.ok === false && (result.status === 401 || result.status === 403)) {
-          markKeyRateLimited(activeKey, 300000); // 5 min cooldown for auth errors
+        if (result.isRestricted || result.status === 401 || result.status === 403) {
+          markKeyRateLimited(activeKey, 24 * 60 * 60 * 1000); // 24h cooldown for invalid/restricted keys
           console.warn(
-            `[GroqPool:${label}] Key #${activeIdx + 1} (${maskKey(activeKey)}) auth issue (${result.status}). Switching to next key...`
+            `[GroqPool:${label}] Key #${activeIdx + 1} (${maskKey(activeKey)}) disabled (${result.status || "restricted"}). Switching to next key...`
           );
           currentKeyIndex = (activeIdx + 1) % totalKeys;
           continue;
@@ -178,8 +178,9 @@ export async function groqChatCompletion({
   candidateModels = ["qwen/qwen3.8-27b"],
   response_format = { type: "json_object" },
   temperature = 0.2,
-  max_tokens = 300,
-  timeoutMs = 3000,
+  max_tokens = 450,
+  timeoutMs = 2500,
+  maxAttempts = 3,
 }) {
   const modelsToTry = candidateModels.length > 0 ? candidateModels : [model];
 
@@ -227,6 +228,15 @@ export async function groqChatCompletion({
           if (res.status === 401 || res.status === 403) {
             return res; // Signal auth issue to rotate key
           }
+
+          if (res.status === 400) {
+            const errData = await res.json().catch(() => ({}));
+            if (errData?.error?.code === "organization_restricted") {
+              return { status: 400, isRestricted: true };
+            }
+            console.warn(`[GroqPool] Bad request (400) on model ${m}: ${errData?.error?.message || "Invalid payload"}`);
+            return null;
+          }
         } catch (fetchErr) {
           // If aborted or network dropped, continue to next model/key
           if (fetchErr.name === "AbortError") {
@@ -237,7 +247,7 @@ export async function groqChatCompletion({
 
       return null;
     },
-    { label: "ChatCompletions" }
+    { label: "ChatCompletions", maxAttempts }
   );
 }
 

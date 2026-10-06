@@ -2,7 +2,7 @@
 // Allows AI and algorithmic models to learn from human agent corrections in real time.
 // Persists feedback to Firestore with in-memory caching for zero-latency retrieval.
 
-import { getFirestoreDb } from "./firebase";
+import { getFirestoreDb } from "./firebase.js";
 
 // Pre-seeded clinical learning rules (starts empty, dynamically learned from agents)
 const INITIAL_LEARNED_RULES = [];

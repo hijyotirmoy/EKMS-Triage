@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getFacilities, saveCase, getCases } from "@/lib/db";
 import { generateNextCaseRef } from "@/lib/caseId";
+import { getCallerIdForPhone } from "@/lib/callerId";
 import {
   resolveCallerLocation,
   rankNearestFacilities,
@@ -10,7 +11,7 @@ import {
   isEsicHospital,
   isGovtDistrictHospital,
 } from "@/lib/geo";
-import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase, formatClinicalSummary } from "@/lib/triageEngine";
+import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase, formatClinicalSummary, extractCallerReportedProblems } from "@/lib/triageEngine";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -359,7 +360,14 @@ export async function POST(request) {
     // Ensure clinical summary strictly synchronizes with the final primary forward destination and caller demographics
     const finalSeverity = triage.urgency_score || intake.severity_reported || 5;
     const finalDuration = intake.duration || triage.duration || "Reported today";
-    const finalComplaint = triage.primary_complaint || notes || "Primary Clinical Assessment";
+    const callerProblems = extractCallerReportedProblems({
+      result: { ekms_ai_context: ekmsCtx, intake, caller_spoken_text: callerSpokenText },
+      callerIntake: intake,
+      t: triage,
+    });
+    const finalComplaint = callerProblems.length > 0
+      ? callerProblems.join(" · ")
+      : (triage.primary_complaint || notes || "Primary Clinical Assessment");
     
     const formattedSummary = formatClinicalSummary(
       intake,
@@ -385,13 +393,16 @@ export async function POST(request) {
     }
 
     const case_ref = generateNextCaseRef(existingCases, intake.phone);
+    const caller_id = intake.caller_id || getCallerIdForPhone(intake.phone, existingCases);
 
     const casePayload = {
       case_ref,
+      caller_id,
       agent_id: agentCode,
       intake: {
         caller_name: intake.caller_name || null,
         phone: intake.phone || null,
+        caller_id,
         age: intake.age != null && intake.age !== "" ? Number(intake.age) : null,
         sex: intake.sex || null,
         symptom_notes: intake.symptom_notes,
@@ -426,6 +437,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       case_ref,
+      caller_id,
       case_id: saved.id || case_ref,
       agent_id: agentCode,
       intake: casePayload.intake,

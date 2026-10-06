@@ -92,85 +92,134 @@ export function getHospitalOpdOperatingStatus(date = new Date()) {
  * -> Refer to Hospital (ESIC Hospital / nearest Govt District Hospital).
  */
 export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, intake = {}, tState = {}) {
-  const text = `${textContext || ""} ${intake?.symptom_notes || ""} ${intake?.complaint || ""} ${tState?.symptom || ""} ${tState?.condition || ""} ${tState?.suspectedCondition || ""}`.toLowerCase();
+  const rawText = `${textContext || ""} ${intake?.symptom_notes || ""} ${intake?.complaint || ""} ${tState?.symptom || ""} ${tState?.condition || ""} ${tState?.suspectedCondition || ""}`.toLowerCase();
 
   // Explicit caller intent for 108 Ambulance
-  if (/\b(call 108|dispatch ambulance|send ambulance|108 ambulance|ambulance chahiye|ambulance bulao|need ambulance|108 call)\b/i.test(text)) {
+  if (/\b(call 108|dispatch ambulance|send ambulance|108 ambulance|ambulance chahiye|ambulance bulao|need ambulance|108 call)\b/i.test(rawText)) {
     return { is108: true, reason: "Caller explicitly requested 108 Emergency Ambulance dispatch." };
   }
 
-  // Check IST daytime: 6:00 AM (360 min) to 6:00 PM (1080 min)
+  // Explicit caller negations & symptom denials: e.g. "no accident", "no injury", "bleeding stopped", "vision is clear"
+  const isAccidentDenied = /\b(no\s+accident|not\s+an\s+accident|no\s+injury|not\s+injured|without\s+injury|accident\s+nahi|durghatna\s+nahi)\b/i.test(rawText);
+  const bleedingControlled = /\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut|no bleeding|bleeding nahi)\b/i.test(rawText);
+  const canSpeakNormally = (
+    /\b(can\s+speak\s+normally|able\s+to\s+speak\s+normally|speaking\s+normally|no\s+gasping|not\s+gasping|not\s+turning\s+blue)\b/i.test(rawText) ||
+    (/\b(can\s+speak|able\s+to\s+speak)\b/i.test(rawText) && !/\b(unable|cannot|can'?t|not\s+able|difficulty)\b/i.test(rawText))
+  ) && !/\b(unable\s+to\s+speak|cannot\s+speak|can'?t\s+speak|struggling\s+to\s+speak|gasping)\b/i.test(rawText);
+  const isConsciousAlert = /\b(conscious|hosh me|awake|alert|responding normally|talking)\b/i.test(rawText);
+  const hasChestPainDenial = /\b(no\s+chest\s+pain|seene\s*me\s*dard\s*nahi|chhati\s*dard\s*nahi|not\s+chest\s+pain)\b/i.test(rawText);
+
+  // Strip negated phrases to obtain purely affirmative clinical context
+  const affirmativeText = stripNegatedPhrases(rawText);
+
+  // Time calculations (IST):
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-  const currentMinutes = istDate.getHours() * 60 + istDate.getMinutes();
-  const isDaytime6to6 = currentMinutes >= 360 && currentMinutes < 1080;
+  const currentHour = istDate.getHours();
+  const currentMinutes = currentHour * 60 + istDate.getMinutes();
+  const isNightAfter10PM = currentHour >= 22 || currentHour < 6; // 10:00 PM to 6:00 AM IST
+  const isDaytimeOPD = currentMinutes >= 600 && currentMinutes < 960; // 10:00 AM to 4:00 PM IST
 
-  const numSeverity = Number(severity) || Number(intake?.severity_reported) || (tState?.severityScore || (tState?.severity === "High" ? 9 : 5));
+  // ONLY dispatch 108 for STRICT LIFE-AND-DEATH CRISES:
 
-  // Must be critical severity (at least 8, typically 9 or 10)
-  if (numSeverity < 8) {
-    return { is108: false, reason: "Severity is below emergency threshold." };
-  }
-
-  // Explicit caller negations: e.g. "I can speak normally", "no gasping", "bleeding stopped"
-  const canSpeakNormally = /\b(can speak normally|able to speak|speak in full sentences|bol pa raha|bol sakti hoon|bol sakta hoon|no gasping|not gasping|not turning blue|speaking normally)\b/i.test(text);
-  const bleedingControlled = /\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut)\b/i.test(text);
-  const isConsciousAlert = /\b(conscious|hosh me|awake|alert|responding normally|talking)\b/i.test(text);
-
-  // 1. Severe Breathing Issues: Gasping for air, skin turning blue, or inability to speak in full sentences
-  const hasSevereBreathing = !canSpeakNormally && (
-    /\b(gasping for air|gasping|skin turning blue|lips turning blue|turning blue|blue skin|cyanosis|unable to speak in full sentences|cannot speak in full sentences|saans lene me haanf|choking|stridor)\b/i.test(text)
+  // 1. Uncontrollable spurting / arterial bleeding, deep gaping cuts with severe hemorrhage failing to stop
+  const hasUncontrollableBleeding = !bleedingControlled && !isAccidentDenied && (
+    /\b(spurting\s*bleed\w*|arterial\s*bleed\w*|heavy\s*bleed\w*.*(?:not\s*stop|uncontrollable|failing|pressure|soaking)|uncontrollable\s*bleed\w*|massive\s*bleed\w*|amputation|crushed\s*limb)\b/i.test(affirmativeText) ||
+    (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(spurting|heavy\s*bleed|cannot\s*stop|not\s*stopping|uncontrolled|soaking)\b/i.test(affirmativeText)) ||
+    /\b(heavy active bleeding|cannot stop bleeding|bleeding continuously despite pressure)\b/i.test(affirmativeText)
   );
 
-  // 2. Unconsciousness: The person is unresponsive and will not wake up
-  const hasUnconsciousness = !isConsciousAlert && /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|not waking up|coma|collapsed and not responding)\b/i.test(text);
+  // 2. Severe Respiratory Failure / Breathlessness: Active gasping for air, cyanosis, unable to speak full sentences
+  const hasSevereBreathing = !canSpeakNormally && (
+    /\b(gasping for air|gasping|skin turning blue|lips turning blue|turning blue|blue skin|cyanosis|unable to speak in full sentences|cannot speak in full sentences|struggling for every breath|severe breathlessness|saans lene me haanf|choking|stridor)\b/i.test(affirmativeText)
+  );
 
-  // 3. Uncontrollable Bleeding: Heavy bleeding that does not stop after 10 minutes of firm, direct pressure
-  const hasUncontrollableBleeding = !bleedingControlled && /\b(uncontrollable bleed|does not stop after 10 min|not stop after 10 min|heavy bleeding.*10 min|spurting bleed|arterial bleed|massive bleed|bleeding profusely|amputation|crushed limb)\b/i.test(text);
+  // 3. Unconsciousness / Senselessness / Coma / Sudden Collapse: Individual is unresponsive and will not wake up
+  const hasUnconsciousness = !isConsciousAlert && (
+    /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|senseless|senselessness|not waking up|coma|collapsed and not responding|loss of consciousness)\b/i.test(affirmativeText)
+  );
 
-  // 4. Major Trauma: Serious car accidents, head/spinal injuries, falls from a significant height, or severe burns covering a large area
-  const hasMajorTrauma = /\b(serious car accident|major car accident|serious road accident|serious bike accident|head injury.*unconscious|spinal injury|spine injury|neck injury|fall from.*height|fall from roof|fall from building|fall from tree|severe burn.*large area|extensive burns|third degree burn|trapped in vehicle|machine crushed)\b/i.test(text);
+  // 4. Acute Myocardial Infarction / Cardiac Arrest: Crushing chest pressure radiating to left arm/jaw with cold diaphoresis (not denied)
+  const hasCardiacArrest = !hasChestPainDenial && (
+    /\b(cardiac arrest|crushing chest pain.*(?:left arm|sweat|gasping)|heart attack.*crushing|chest pain.*sweating.*radiating)\b/i.test(affirmativeText)
+  );
 
-  // 5. Prolonged Seizures: A seizure lasting more than 5 minutes, or a person having their first-ever seizure
-  const hasProlongedSeizures = /\b(seizure.*(?:more than|lasting|over)\s*5\s*min|status epilepticus|first-ever seizure|first time seizure|pehle kabhi daura nahi|continuous seizure|fits.*5 min)\b/i.test(text);
+  // 5. Catastrophic Major Trauma & Severe Accidents: Serious vehicular collision, fall from height/roof with head trauma/unconsciousness, visible deformity
+  const hasCatastrophicTrauma = !isAccidentDenied && (
+    /\b(serious car accident|major car accident|serious road accident|trapped in vehicle|fall from (?:roof|building|height|tree)|severe accident|head injury.*unconscious|bone deformity|visible bone|open fracture|unable to move.*(?:accident|trauma)|third degree burn)\b/i.test(affirmativeText)
+  );
 
-  // 6. Anaphylaxis: A severe allergic reaction causing the throat, lips, or tongue to swell, restricting airways
-  const hasAnaphylaxis = /\b(anaphylaxis|swelling of (?:the )?(?:throat|lips|tongue)|throat.*swelling.*airway|tongue.*swelling.*breath|airway restriction.*allergy)\b/i.test(text);
+  // 6. High Risk Pregnancy Emergency: Heavy vaginal bleeding, amniotic rupture / active labor, severe abdominal pain, eclampsia
+  const hasHighRiskPregnancy = (
+    /\b(pregnant|pregnancy|garbhwati|hamla|foetus|fetus)\b/i.test(rawText) &&
+    /\b(heavy\s*(?:vaginal\s*)?bleed\w*|severe\s*(?:continuous\s*)?(?:abdominal|pelvic)\s*pain|water\s*broke|amniotic\s*sac|active\s*labor|eclampsia|seizures?|convulsions?|bleeding\s*during\s*pregnancy)\b/i.test(affirmativeText)
+  );
 
-  // 7. Cardiac arrest / crushing chest pain radiating to left arm or jaw with cold sweating
-  const hasCardiacArrest = /\b(cardiac arrest|heart attack.*crushing|crushing chest pain.*left arm|chest pain.*sweating.*radiating)\b/i.test(text);
+  // 7. Prolonged Seizure (>5 minutes) or Status Epilepticus
+  const hasProlongedSeizures = /\b(seizure.*(?:more than|lasting|over)\s*5\s*min|status epilepticus|continuous seizure|fits.*5 min)\b/i.test(affirmativeText);
 
-  // Active severe self-harm wound with spurting bleeding
-  const hasActiveTraumaCut = /\b(slit.*wrist|cut.*wrist.*heavy bleed|stab.*heavy bleed)\b/i.test(text) && !bleedingControlled;
+  // 8. Acute Anaphylactic Airway Obstruction: Throat / tongue swelling restricting breathing
+  const hasAnaphylaxis = /\b(anaphylaxis|swelling of (?:the )?(?:throat|tongue).*airway|airway restriction.*allergy)\b/i.test(affirmativeText);
 
+  // 9. Acute Poisoning Ingestion with collapse
+  const hasAcutePoisoning = /\b(drank poison|ingested poison|drank pesticide|acid ingestion).*unresponsive\b/i.test(affirmativeText);
+
+  // 10. Snake Bite Envenomation: Life-threatening emergency requiring immediate Anti-Snake Venom (ASV)
+  const hasSnakeBite =
+    /\b(snake\s*bite|saap\s*(?:ne\s*)?kaat|saanp\s*(?:ne\s*)?kaat|snakebite|envenomation)\b/i.test(affirmativeText) ||
+    /\b(snake\s*bite|saap\s*kaat|saanp\s*kaat|snakebite|envenomation)\b/i.test(rawText);
+
+  // If a genuine life-and-death emergency is clinically verified:
+  if (hasSnakeBite) {
+    return { is108: true, reason: "Snake bite is a critical life-threatening emergency requiring immediate 108 Emergency Ambulance dispatch for anti-snake venom (ASV) and casualty resuscitation." };
+  }
   if (hasSevereBreathing) {
-    return { is108: true, reason: "Severe breathing issues with gasping for air, cyanosis, or inability to speak in full sentences." };
+    return { is108: true, reason: "Severe breathing failure: gasping for air, cyanosis, or inability to speak in full sentences requires immediate 108 Ambulance dispatch." };
   }
   if (hasUnconsciousness) {
-    return { is108: true, reason: "Unconsciousness: person is unresponsive and will not wake up." };
+    return { is108: true, reason: "Senselessness / Unconsciousness: unresponsive individual requires immediate 108 Ambulance dispatch." };
   }
-  if (hasUncontrollableBleeding || hasActiveTraumaCut) {
-    return { is108: true, reason: "Uncontrollable bleeding: heavy bleeding failing to stop after 10 minutes of direct pressure." };
+  if (hasUncontrollableBleeding) {
+    return { is108: true, reason: "Severe deep cut / uncontrollable arterial bleeding failing to stop requires immediate 108 Ambulance dispatch." };
   }
-  if (hasMajorTrauma) {
-    return { is108: true, reason: "Major trauma: serious car accident, head/spinal injury, fall from height, or extensive burns." };
-  }
-  if (hasProlongedSeizures) {
-    return { is108: true, reason: "Prolonged seizure lasting more than 5 minutes or first-ever seizure." };
-  }
-  if (hasAnaphylaxis) {
-    return { is108: true, reason: "Anaphylaxis: severe allergic reaction causing throat, lips, or tongue swelling restricting airways." };
+  if (hasHighRiskPregnancy) {
+    return { is108: true, reason: "High-risk pregnancy emergency (heavy bleeding, active labor/water broke, or eclampsia) requires immediate 108 Ambulance dispatch." };
   }
   if (hasCardiacArrest) {
-    return { is108: true, reason: "Acute cardiac arrest / myocardial infarction with crushing chest pain radiating to arm." };
+    return { is108: true, reason: "Suspected acute cardiac arrest / myocardial infarction with crushing chest pain requires immediate 108 Ambulance dispatch." };
+  }
+  if (hasCatastrophicTrauma) {
+    return { is108: true, reason: "Severe catastrophic accident / major trauma casualty requires immediate 108 Ambulance dispatch." };
+  }
+  if (hasProlongedSeizures) {
+    return { is108: true, reason: "Prolonged seizure (>5 minutes) / status epilepticus requires immediate 108 Ambulance dispatch." };
+  }
+  if (hasAnaphylaxis) {
+    return { is108: true, reason: "Acute anaphylaxis with airway compromise requires immediate 108 Ambulance dispatch." };
+  }
+  if (hasAcutePoisoning) {
+    return { is108: true, reason: "Severe acute poisoning ingestion requires immediate 108 Ambulance dispatch." };
   }
 
-  // Between 6 AM and 6 PM: No life-threatening emergency -> DO NOT CALL 108 AMBULANCE! Refer to Hospital!
+  // IF NOT A LIFE-AND-DEATH CRISIS: DO NOT CALL 108 AMBULANCE!
+  // Evaluate manageable condition based on time-of-day:
+  if (isNightAfter10PM) {
+    return {
+      is108: false,
+      reason: "Night hours (after 10:00 PM): Condition is manageable without life-and-death threat. Routed to 104 Health Helpline for 24x7 doctor tele-consultation (or ESIC Hospital Casualty if urgent medical evaluation is needed)."
+    };
+  }
+
+  if (isDaytimeOPD) {
+    return {
+      is108: false,
+      reason: "Daytime (10:00 AM – 4:00 PM): Stable / manageable condition without acute life-and-death danger. Routed to ESIS Dispensary (or ESIC Hospital) for OPD evaluation and medicines."
+    };
+  }
+
   return {
     is108: false,
-    reason: isDaytime6to6
-      ? "Between 6:00 AM and 6:00 PM, patient is referred to Hospital (ESIC Hospital) as there are no life-threatening emergency signs."
-      : "Non-life-threatening presentation; patient guided to Hospital casualty for clinical evaluation."
+    reason: "Manageable clinical presentation without life-and-death collapse. Routed to ESIC Hospital or 104 Health Helpline."
   };
 }
 
@@ -190,7 +239,7 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
  */
 /**
  * Removes negated medical clauses (e.g. "No, I do not have fever or body aches",
- * "no chest pain", "fever nahi hai", "without bleeding") from conversational text
+ * "no chest pain", "fever nahi hai", "without bleeding", "no injury", "no accident") from conversational text
  * so negative symptoms are never mistaken as active red flags or conditions.
  */
 export function stripNegatedPhrases(text = "") {
@@ -203,25 +252,253 @@ export function stripNegatedPhrases(text = "") {
     " "
   );
 
-  // 2. Direct "no X, no Y" or "no X or Y"
+  // 1b. Compound negations: "no X or Y", "no X nor Y", "no X and no Y"
+  // e.g. "no rash or breathing trouble", "no fever or body ache", "no cough and no cold"
   clean = clean.replace(
-    /\bno\s+(?:fever|bukhar|body\s*aches?|badan\s*dard|pain|dard|chest\s*pain|chhati\s*me\s*dard|headache|sar\s*dard|dizziness|chakkar|vomit\w*|ulti\w*|bleeding|khoon|cough|khansi|cold|chills|shivering|kapkapi|shortness\s*of\s*breath|saans\s*me\s*takleef|rash|allerg\w*|seizure|daura|swelling|sujan)(?:\s*(?:or|nor|,|and)\s*(?:fever|bukhar|body\s*aches?|badan\s*dard|pain|dard|chest\s*pain|chhati\s*me\s*dard|headache|sar\s*dard|dizziness|chakkar|vomit\w*|ulti\w*|bleeding|khoon|cough|khansi|cold|chills|shivering|kapkapi|shortness\s*of\s*breath|saans\s*me\s*takleef|rash|allerg\w*|seizure|daura|swelling|sujan))*/gi,
+    /\bno\s+([a-z\s]+?)\s+(?:or|nor|,|and\s+no|and)\s+([a-z\s]+?)(?=[.,;!?]|$|\b(?:but|however|only|except)\b)/gi,
+    (match, p1, p2) => {
+      const p1Words = p1.trim().split(/\s+/).length;
+      const p2Words = p2.trim().split(/\s+/).length;
+      if (p1Words <= 4 && p2Words <= 4) {
+        return " ";
+      }
+      return match;
+    }
+  );
+
+  // 2. Direct "no X, no Y" or "no X or Y"
+  const symptomKeywords = [
+    "accident", "durghatna", "injury", "chot", "cut", "wound", "ghao", "fracture", "burn", "trauma",
+    "fever", "bukhar", "high\\s*fever", "body\\s*aches?", "badan\\s*dard", "joint\\s*pain", "jodon\\s*me\\s*dard",
+    "pain", "dard", "chest\\s*pain", "chhati\\s*me\\s*dard", "headache", "sar\\s*dard", "sir\\s*dard",
+    "dizziness", "chakkar", "vomit\\w*", "ulti\\w*", "nausea", "bleeding", "khoon", "cough", "khansi",
+    "cold", "sardi", "zukham", "chills", "shivering", "kapkapi",
+    "breathing\\s*(?:trouble|difficulty|problem|issue|distress)?",
+    "difficulty\\s*(?:in\\s*)?breathing", "trouble\\s*breathing", "shortness\\s*of\\s*breath",
+    "saans\\s*(?:me\\s*)?(?:takleef|dikkat|phoolna)?", "breathlessness", "gasping", "wheezing",
+    "rash", "khujli", "itching", "allerg\\w*", "seizure", "daura", "swelling", "sujan",
+    "stomach\\s*pain", "pet\\s*dard", "cramps?", "loose\\s*motion", "diarrhea", "dast"
+  ].join("|");
+
+  clean = clean.replace(
+    new RegExp(`\\bno\\s+(?:${symptomKeywords})(?:\\s*(?:or|nor|,|and)\\s*(?:${symptomKeywords}))*`, "gi"),
     " "
   );
 
-  // 3. Hindi negations: "[symptom] nahi/nehi/nhi hai" / "[symptom] nahi"
+  // 2b. "not an accident", "not injured", "without injury", "not an emergency", "no breathing trouble"
   clean = clean.replace(
-    /\b(?:fever|bukhar|badan\s*dard|body\s*ache|dard|pain|seene\s*me\s*dard|chhati\s*dard|sar\s*dard|headache|chakkar|dizziness|ulti|vomit|khoon|bleeding|khansi|cough|kapkapi|chills|thand|saans\s*takleef|sujan)\s*(?:bhi\s+)?(?:nahi|nehi|nhi|na)\s*(?:hai|h)?\b/gi,
+    /\b(?:not\s+an?\s+(?:accident|injury|emergency)|not\s+injured|without\s+(?:injury|accident|chot|bleeding|fever|pain))\b/gi,
+    " "
+  );
+
+  // 3. Hindi negations: "[symptom] nahi/nehi/nhi hai" / "[symptom] nahi" / "[symptom] theek hai"
+  clean = clean.replace(
+    new RegExp(`\\b(?:${symptomKeywords})\\s*(?:bhi\s+)?(?:nahi|nehi|nhi|na|theek|normal)\\s*(?:hai|h)?\\b`, "gi"),
     " "
   );
 
   // 4. Hindi prefix negation: "nahi hai [symptom]" / "koi [symptom] nahi hai"
   clean = clean.replace(
-    /\b(?:nahi|nehi|nhi|na)\s*(?:hai|h)?\s*(?:koi\s+)?(?:fever|bukhar|badan\s*dard|body\s*ache|dard|pain|seene\s*me\s*dard|chhati\s*dard|sar\s*dard|headache|chakkar|dizziness|ulti|vomit|khoon|bleeding|khansi|cough|kapkapi|chills|thand|saans\s*takleef|sujan)\b/gi,
+    new RegExp(`\\b(?:nahi|nehi|nhi|na)\\s*(?:hai|h)?\\s*(?:koi\\s+)?(?:${symptomKeywords})\\b`, "gi"),
+    " "
+  );
+
+  // 5. Global denials of other symptoms: "no other symptoms", "no other problem", "no other pain", "nothing else", "pain is only in X"
+  clean = clean.replace(
+    /\b(?:no\s+other\s*symptoms?|no\s+other\s*problem|no\s+other\s*complaint|no\s+other\s*pain|nothing\s+else|koi\s+aur\s+(?:lakshan|dikkat|takleef)\s*nahi|aur\s+kuch\s*nahi)\b/gi,
     " "
   );
 
   return clean.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Deduplicates and consolidates clinical red flags.
+ * Eliminates exact duplicates, substring redundancies (e.g. "High fever with chills" vs "High fever with chills and shivering"),
+ * and semantic template overlap (e.g. "Snake bite" vs "Poisoning / toxic chemical exposure or snake envenomation").
+ */
+export function deduplicateRedFlags(flags = []) {
+  if (!Array.isArray(flags)) return [];
+
+  const isDurationString = (str) => {
+    return (
+      /\b(duration|since|days?|hours?|weeks?|months?|dino?|ghante?|yesterday|today|4-7 days|2-3 days|less than 2 hours)\b/i.test(str) ||
+      /^\d+\s*-\s*\d+\s*(?:days?|hours?|weeks?|months?)$/i.test(str.trim()) ||
+      /^duration:?\s*/i.test(str.trim())
+    );
+  };
+
+  const rawCleaned = [];
+  for (const f of flags) {
+    if (!f || typeof f !== "string") continue;
+    const clean = f.trim().replace(/^[-*•\d.)\s]+/, "").trim();
+    if (clean.length > 2 && !rawCleaned.includes(clean) && !isDurationString(clean)) {
+      rawCleaned.push(clean);
+    }
+  }
+
+  // Filter out generic filler flags if more specific ones exist
+  const hasSpecificFlags = rawCleaned.some((f) => {
+    const l = f.toLowerCase();
+    return (
+      !l.includes("acute presentation") &&
+      !l.includes("high severity reported") &&
+      !l.includes("urgent ambulance transfer") &&
+      !l.includes("minor injury")
+    );
+  });
+
+  const filteredCandidates = hasSpecificFlags
+    ? rawCleaned.filter((f) => {
+        const l = f.toLowerCase();
+        return (
+          !l.includes("acute presentation") &&
+          !l.includes("high severity reported") &&
+          !l.includes("urgent ambulance transfer")
+        );
+      })
+    : rawCleaned;
+
+  const result = [];
+
+  for (const candidate of filteredCandidates) {
+    const candLower = candidate.toLowerCase();
+
+    // Skip duration just in case
+    if (isDurationString(candLower)) continue;
+
+    // 1. Check exact match or subsumption by an existing flag in result
+    const isSubsumed = result.some((existing) => {
+      const existLower = existing.toLowerCase();
+      if (existLower === candLower) return true;
+      if (existLower.includes(candLower) && existLower.length > candLower.length) return true;
+      return false;
+    });
+    if (isSubsumed) continue;
+
+    // 2. Check if candidate subsumes an existing flag (candidate is longer/more detailed)
+    const existingIndexToReplace = result.findIndex((existing) => {
+      const existLower = existing.toLowerCase();
+      if (candLower.includes(existLower) && candLower.length > existLower.length) return true;
+      return false;
+    });
+    if (existingIndexToReplace !== -1) {
+      result[existingIndexToReplace] = candidate;
+      continue;
+    }
+
+    // 3. Concept-specific deduplication (avoiding duplicate templates for same symptom)
+    // Concept A: Snake bite vs Poisoning template
+    const isSpecificSnake = /\b(snake\s*bite|fang\s*marks?|snake\s*envenomation)\b/i.test(candLower);
+    const isGenericPoisonSnake = /\bpoisoning\s*\/\s*toxic chemical exposure or snake envenomation\b/i.test(candLower);
+
+    if (isGenericPoisonSnake) {
+      const hasSpecificSnake = result.some((r) => /\b(snake\s*bite|fang\s*marks?|snake\s*envenomation)\b/i.test(r));
+      if (hasSpecificSnake) continue;
+    }
+
+    if (isSpecificSnake && !candLower.includes("fang")) {
+      const genericIdx = result.findIndex((r) => /\bpoisoning\s*\/\s*toxic chemical exposure or snake envenomation\b/i.test(r));
+      if (genericIdx !== -1) {
+        result.splice(genericIdx, 1);
+      }
+    }
+
+    // Concept B: Fever & Chills
+    const isFeverChills = /\b(fever|bukhar|chills|shivering|rigor)\b/i.test(candLower);
+    if (isFeverChills) {
+      const feverIdx = result.findIndex((r) => /\b(fever|bukhar|chills|shivering|rigor)\b/i.test(r));
+      if (feverIdx !== -1) {
+        if (candidate.length > result[feverIdx].length) {
+          result[feverIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept C: Chest pain
+    const isChestPain = /\b(chest pain|chhati.*dard|cardiac pressure|angina)\b/i.test(candLower);
+    if (isChestPain) {
+      const chestIdx = result.findIndex((r) => /\b(chest pain|chhati.*dard|cardiac pressure|angina)\b/i.test(r));
+      if (chestIdx !== -1) {
+        if (candidate.length > result[chestIdx].length) {
+          result[chestIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept D: Shortness of breath
+    const isBreathing = /\b(shortness of breath|breathless|gasping|respiratory distress)\b/i.test(candLower);
+    if (isBreathing) {
+      const breathIdx = result.findIndex((r) => /\b(shortness of breath|breathless|gasping|respiratory distress)\b/i.test(r));
+      if (breathIdx !== -1) {
+        if (candidate.length > result[breathIdx].length) {
+          result[breathIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept E: Bleeding / Hematemesis / Melena
+    const isBleeding = /\b(uncontrolled bleeding|heavy bleed|profuse bleed|vascular injury|hematemesis|blood in vomit|melena)\b/i.test(candLower);
+    if (isBleeding) {
+      const bleedIdx = result.findIndex((r) =>
+        /\b(uncontrolled bleeding|heavy bleed|profuse bleed|vascular injury|hematemesis|blood in vomit|melena)\b/i.test(r)
+      );
+      if (bleedIdx !== -1) {
+        if (candidate.length > result[bleedIdx].length) {
+          result[bleedIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept F: Unconscious / Syncope
+    const isUnconscious = /\b(unconscious|behosh|loss of consciousness)\b/i.test(candLower);
+    if (isUnconscious) {
+      const uncIdx = result.findIndex((r) => /\b(unconscious|behosh|loss of consciousness)\b/i.test(r));
+      if (uncIdx !== -1) {
+        if (candidate.length > result[uncIdx].length) {
+          result[uncIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept G: Weakness / Dizziness / Inability to stand / Confusion
+    const isWeaknessDizzy = /\b(weakness|inability to stand|unable to stand|confusion and dizziness|postural dizziness|syncope|faint|chakkar)\b/i.test(candLower);
+    if (isWeaknessDizzy) {
+      const weakIdx = result.findIndex((r) =>
+        /\b(weakness|inability to stand|unable to stand|confusion and dizziness|postural dizziness|syncope|faint|chakkar)\b/i.test(r)
+      );
+      if (weakIdx !== -1) {
+        if (candLower.includes("postural") || candLower.includes("syncope") || candLower.includes("stand")) {
+          result[weakIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    // Concept H: Abdominal pain / acute abdomen
+    const isAbdominalPain = /\b(abdominal pain|acute abdomen|stomach pain|pet.*dard)\b/i.test(candLower);
+    if (isAbdominalPain) {
+      const abdomIdx = result.findIndex((r) =>
+        /\b(abdominal pain|acute abdomen|stomach pain|pet.*dard)\b/i.test(r)
+      );
+      if (abdomIdx !== -1) {
+        if (candidate.length > result[abdomIdx].length) {
+          result[abdomIdx] = candidate;
+        }
+        continue;
+      }
+    }
+
+    result.push(candidate);
+  }
+
+  // USER MANDATE: "dont put more than 5 and try to put the major ones"
+  return result.slice(0, 5);
 }
 
 /**
@@ -235,14 +512,25 @@ export function stripNegatedPhrases(text = "") {
  */
 export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSafe = false) {
   const points = [];
-  const seen = new Set();
 
   const addPoint = (pt) => {
     if (!pt || typeof pt !== "string") return;
-    const clean = pt.trim();
-    const norm = clean.toLowerCase();
-    if (!seen.has(norm) && clean.length > 3) {
-      seen.add(norm);
+    const clean = pt.trim().replace(/^[-*•\d.)\s]+/, "").trim();
+    if (
+      /\b(duration|since|days?|hours?|weeks?|months?|dino?|ghante?|yesterday|today|4-7 days|2-3 days|less than 2 hours)\b/i.test(clean) ||
+      /^\d+\s*-\s*\d+\s*(?:days?|hours?|weeks?|months?)$/i.test(clean) ||
+      /^duration:?\s*/i.test(clean)
+    ) {
+      return;
+    }
+    if (
+      clean.toLowerCase().includes("acute presentation") ||
+      clean.toLowerCase().includes("high severity reported") ||
+      clean.toLowerCase().includes("urgent ambulance transfer")
+    ) {
+      return;
+    }
+    if (clean.length > 3) {
       points.push(clean);
     }
   };
@@ -374,9 +662,9 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
       return /\b(abdomin|stomach|pet|belly|flank|cramp|dard|pain)\b/i.test(text);
     }
 
-    // Trauma / accident / fracture / burns
-    if (fLower.includes("accident") || fLower.includes("trauma") || fLower.includes("fall") || fLower.includes("fracture") || fLower.includes("burn")) {
-      return /\b(accident|hit|fall|chot|gir gaya|fracture|burn|jala)\b/i.test(text);
+    // Trauma / accident / fracture / burns / fall
+    if (fLower.includes("accident") || fLower.includes("trauma") || fLower.includes("fall") || fLower.includes("fell") || fLower.includes("fracture") || fLower.includes("burn") || fLower.includes("injury")) {
+      return /\b(accident|hit|fall|fell|falling|fallen|slip|slipped|tripped|chot|gir gaya|gir gayi|gira|fracture|burn|jala|injury|injured)\b/i.test(text);
     }
 
     // Snakebite / Poison / Chemical exposure
@@ -490,9 +778,21 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
     addPoint("Severe acute abdominal pain");
   }
 
-  // Major trauma / fall from height / bone fracture / head injury
+  // Major trauma / fall from height / physical fall on hand/body / bone fracture / head injury
   if (
-    /\b(fall from height|gir gaya|fracture|head injury|sir me chot|serious accident|car accident|severe burn)\b/i.test(
+    /\b(fell on|fell down|had a fall|recent fall|fall from|gir gaya|gir gayi|gira tha|tripped|slip ho gaya)\b/i.test(
+      affirmativeText
+    ) ||
+    (/\b(fell|fall)\b/i.test(affirmativeText) && /\b(hand|wrist|arm|knee|leg|head|ground|floor|road|bike|stair|stairs|bed)\b/i.test(affirmativeText))
+  ) {
+    const fallTarget = affirmativeText.match(/\bfell on (?:my\s+)?(hand|wrist|arm|knee|leg|head|back|shoulder)\b/i);
+    if (fallTarget && fallTarget[1]) {
+      addPoint(`Recent fall on ${fallTarget[1].toLowerCase()} / physical impact trauma`);
+    } else {
+      addPoint("Recent fall / physical impact trauma reported");
+    }
+  } else if (
+    /\b(fracture|head injury|sir me chot|serious accident|car accident|severe burn)\b/i.test(
       affirmativeText
     )
   ) {
@@ -535,6 +835,52 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
     addPoint("Acute neurological deficit / suspected stroke signs");
   }
 
+  // Menstrual danger signs / excessive bleeding or large blood clots
+  if (
+    !deniesBleeding &&
+    /\b(heavy\s*flow|heavy\s*bleed.*period|large\s*clot|blood\s*clots?|soak.*pad|multiple\s*pad|excessive\s*bleed|period.*heavy|clots\s*passing|bleed.*clots)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Excessive menstrual bleeding / passing large blood clots");
+  }
+
+  // Intense / debilitating / unbearable pain reported by IP
+  if (
+    /\b(unbearable\s*pain|terrible\s*pain|severe\s*cramps?|extreme\s*pain|bahut\s*tez\s*dard|unbearable\s*cramps?|cannot\s*move|unable\s*to\s*walk|unable\s*to\s*sit|bedridden|crying.*pain|cannot\s*sleep.*pain|intense\s*cramps?)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Severe unbearable pain / unable to perform routine activities");
+  }
+
+  // Postural dizziness / near-fainting when standing
+  if (
+    /\b(chakkar.*gir|fainted|blackout|dizzy.*standing|unable\s*to\s*stand|kamzori.*gir|feeling\s*faint|chakkar\s*aana.*gir)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Postural dizziness / near-syncope episode");
+  }
+
+  // Acute panic attack / severe psychological crisis
+  if (
+    /\b(panic\s*attack|crying\s*uncontrollably|severe\s*anxiety|extreme\s*distress|shaking.*fear|hyperventilat|bechaini.*bahut|dil\s*ghabra)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Acute panic attack / severe psychological distress");
+  }
+
+  // Acute thunderclap / sudden unbearable headache
+  if (
+    /\b(worst\s*headache|thunderclap|sudden\s*severe\s*headache|sir\s*me\s*achanak\s*tez\s*dard|unbearable\s*headache)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Sudden acute severe headache / migraine crisis");
+  }
+
   // Suicidal intent (ONLY if caller explicitly stated and is NOT safe)
   if (
     !isSafe &&
@@ -543,7 +889,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
     addPoint("Explicit thoughts of ending life reported by IP");
   }
 
-  return points.slice(0, 10);
+  return deduplicateRedFlags(points).slice(0, 5);
 }
 
 /**
@@ -565,7 +911,9 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
 
   if (isChannelOnly) {
     const callerText = stripNegatedPhrases(callerSpokenText || "");
-    if (/\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|tanka|dressing)\b/i.test(callerText)) {
+    if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|periods cramps|period cramps|periods ka dard)\b/i.test(callerText)) {
+      clean = "Dysmenorrhea / Menstrual Cramps";
+    } else if (/\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|tanka|dressing)\b/i.test(callerText)) {
       clean = "Laceration / Cut Injury";
     } else if (/\b(chest|angina|heart|dil ka dard|chhati)\b/i.test(callerText)) {
       clean = "Chest Discomfort / Pain";
@@ -589,6 +937,16 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
       clean = "Emotional Distress / Mental Health Support";
     } else if (/\b(hiv|aids|std|sti|gupt rog)\b/i.test(callerText)) {
       clean = "HIV / Sexual Health Consultation";
+    } else if (/\b(wrist|kalai)\b/i.test(callerText) && /\b(hand|haath)\b/i.test(callerText)) {
+      clean = "Hand & Wrist Pain";
+    } else if (/\b(wrist|kalai)\b/i.test(callerText)) {
+      clean = "Pain in Wrist Area";
+    } else if (/\b(hand|haath|finger|ungli)\b/i.test(callerText)) {
+      clean = "Pain in Hand";
+    } else if (/\b(shoulder|kandha|arm|bazu|elbow|kohni)\b/i.test(callerText)) {
+      clean = "Arm & Shoulder Pain";
+    } else if (/\b(leg|knee|ankle|foot|pair|taang|ghutna)\b/i.test(callerText)) {
+      clean = "Leg & Lower Extremity Pain";
     } else {
       clean = "Reported Clinical Symptoms";
     }
@@ -596,10 +954,35 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
 
   const callerText = stripNegatedPhrases(callerSpokenText || "");
 
+  // If clean is generic, resolve from caller spoken text
+  const isGeneric = /^(primary clinical assessment|clinical assessment|reported symptoms|reported clinical symptoms|general medical evaluation|general medical complaint)$/i.test(clean.trim());
+  if (isGeneric) {
+    if (/\b(wrist|kalai)\b/i.test(callerText) && /\b(hand|haath)\b/i.test(callerText)) {
+      clean = "Hand & Wrist Pain";
+    } else if (/\b(wrist|kalai)\b/i.test(callerText)) {
+      clean = "Pain in Wrist Area";
+    } else if (/\b(hand|haath|finger|ungli)\b/i.test(callerText)) {
+      clean = "Pain in Hand";
+    } else if (/\b(shoulder|kandha|arm|bazu|elbow|kohni)\b/i.test(callerText)) {
+      clean = "Arm & Shoulder Pain";
+    } else if (/\b(leg|knee|ankle|foot|feet|pair|taang|ghutna)\b/i.test(callerText)) {
+      clean = "Leg & Lower Extremity Pain";
+    } else if (/\b(headache|sir dard|sar dard|migraine)\b/i.test(callerText)) {
+      clean = "Severe Headache / Migraine";
+    } else if (/\b(chest|chhati|heart)\b/i.test(callerText)) {
+      clean = "Chest Discomfort / Pain";
+    } else if (/\b(stomach|pet|gastric|acidity)\b/i.test(callerText)) {
+      clean = "Abdominal / Gastric Pain";
+    } else if (/\b(fever|bukhar)\b/i.test(callerText)) {
+      clean = "Fever & Chills";
+    }
+  }
+
   const hasKidneyStone = /\b(kidney stone|pathri|renal calculus|renal stone|gall stone)\b/i.test(callerText);
   const hasAppendicitis = /\b(appendicitis|appendix)\b/i.test(callerText);
   const hasUlcer = /\b(ulcer|peptic ulcer)\b/i.test(callerText);
   const hasCardiacDisease = /\b(heart attack|cardiac arrest|dil ka daura)\b/i.test(callerText);
+  const hasChestComplaint = /\b(chest|chhati|heart|angina|crushing|dil ka dard|left arm)\b/i.test(callerText);
 
   // Replace fabricated medical diagnoses with non-physician symptom descriptions
   if (!hasKidneyStone) {
@@ -617,7 +1000,24 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
   }
 
   if (!hasCardiacDisease) {
-    clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Chest Discomfort / Pressure");
+    if (hasChestComplaint) {
+      clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Chest Discomfort / Pressure");
+    } else if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari)\b/i.test(callerText) || /\b(period|menstrual|dysmenorrhea)\b/i.test(clean)) {
+      clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Dysmenorrhea / Menstrual Cramps");
+    } else if (/\b(stomach|abdom|pet|gastric|cramp|colic)\b/i.test(callerText)) {
+      clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Abdominal / Gastric Pain");
+    } else {
+      clean = clean.replace(/suspected acute coronary syndrome|acute coronary syndrome|myocardial infarction|acute mi\b/gi, "Reported Clinical Symptoms");
+    }
+  }
+
+  // If caller specifically clarified periods/menstrual cramps, ensure condition reflects that
+  if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|periods cramps|period cramps|periods ka dard)\b/i.test(callerText)) {
+    if (!clean.toLowerCase().includes("dysmenorrhea") && !clean.toLowerCase().includes("menstrual") && !clean.toLowerCase().includes("period")) {
+      clean = clean && !/^(reported symptoms|clinical assessment|reported clinical symptoms)$/i.test(clean.trim())
+        ? `Dysmenorrhea / Menstrual Cramps · ${clean}`
+        : "Dysmenorrhea / Menstrual Cramps";
+    }
   }
 
   // Strip generic doctor diagnostic jargon
@@ -636,6 +1036,473 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
   clean = clean.replace(/^[\s,;-]+|[\s,;-]+$/g, "").trim();
 
   return clean || "Reported Clinical Symptoms";
+}
+
+/**
+ * Comprehensively extracts all problems (pain, physical health conditions, mental health conditions)
+ * reported by the caller / IP across chat history, intake symptom notes, and spoken text.
+ * Orders clarified / latest reported symptoms first, and preserves all distinct clinical conditions.
+ */
+export function extractCallerReportedProblems(params = {}) {
+  const result = params.result || (params.ekms_ai_context ? params : null);
+  const callerIntake = params.callerIntake || result?.intake || {};
+  const t = params.t || result?.triage || {};
+
+  const chatMsgs = result?.ekms_ai_context?.chatHistory || params.chatHistory || [];
+  const userMessages = Array.isArray(chatMsgs)
+    ? chatMsgs
+        .filter((m) => m && (m.sender === "user" || m.role === "user"))
+        .map((m) => String(m.text || m.content || "").trim())
+        .filter(Boolean)
+    : [];
+
+  // When caller has spoken in chat, the chat utterances are the canonical source of truth for what the IP actually said!
+  const hasUserChat = userMessages.length > 0;
+  const callerUtterances = userMessages.join(". ");
+  const intakeNotes = String(callerIntake?.symptom_notes || result?.intake?.symptom_notes || "").trim();
+  const intakeComplaint = String(callerIntake?.complaint || result?.intake?.complaint || "").trim();
+  const callerSpokenText = String(result?.caller_spoken_text || params.callerSpokenText || "").trim();
+  const rawCandidate = String(
+    t?.primary_complaint ||
+    result?.ekms_ai_context?.triageState?.suspectedCondition ||
+    result?.ekms_ai_context?.triageState?.condition ||
+    result?.ekms_ai_context?.condition ||
+    ""
+  ).trim();
+
+  // If chat messages exist, ONLY use callerUtterances so synthetic notes or prior sessions cannot inject phantom symptoms!
+  const combinedCallerText = hasUserChat
+    ? callerUtterances.toLowerCase()
+    : `${intakeNotes} ${intakeComplaint} ${callerSpokenText}`.trim().toLowerCase();
+  const affirmativeText = stripNegatedPhrases(combinedCallerText);
+
+  // Global check: did the caller say "no other symptoms", "only in my chest", "nothing else"?
+  const deniesOtherSymptoms =
+    /\b(no\s+other\s*symptoms?|no\s+other\s*problem|no\s+other\s*complaint|no\s+other\s*pain|nothing\s+else|only\s+in\s+my|pain\s+is\s+only|sirf\s+.*dard|koi\s+aur\s*(?:lakshan|dikkat|takleef)\s*nahi|aur\s+kuch\s*nahi)\b/i.test(combinedCallerText);
+
+  // Checks for explicit denials across user messages
+  const deniesChestPain = /\b(no\s+chest\s*pain|not\s+have\s+chest|don'?t\s+have\s+chest|chhati\s*me\s*dard\s*nahi|no\s+pain\s*in\s*chest)\b/i.test(combinedCallerText);
+  const deniesFever = (deniesOtherSymptoms && !/\b(fever|bukhar)\b/i.test(combinedCallerText)) || /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|bukhar\s+nahi|nehi\s+fever)\b/i.test(combinedCallerText);
+  const deniesBleeding = (deniesOtherSymptoms && !/\b(bleed|blood|khoon)\b/i.test(combinedCallerText)) || /\b(no\s+bleed|not\s+bleeding|don'?t\s+have\s+bleed|khoon\s*nahi)\b/i.test(combinedCallerText);
+  const deniesBreathing =
+    (deniesOtherSymptoms && !/\b(breath|saans)\b/i.test(combinedCallerText)) ||
+    /\b(?:no|without|not)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:breath\w*|saans\w*|shortness|respiratory)/i.test(combinedCallerText) ||
+    /\b(no\s+breath\w*|no\s+shortness|saans\s*theek|breathing\s*trouble\s*nahi|no\s+difficulty\s*breathing|no\s+trouble\s*breathing|no\s+breathing\s*problem)\b/i.test(combinedCallerText);
+  const deniesVomiting = (deniesOtherSymptoms && !/\b(vomit|ulti|nausea)\b/i.test(combinedCallerText)) || /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:vomit\w*|ulti\w*|nausea)/i.test(combinedCallerText);
+  const deniesJoint = /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:joint\w*|jodon)/i.test(combinedCallerText);
+  const deniesBodyAche = /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:body\s*aches?|badan\s*dard)/i.test(combinedCallerText);
+  const deniesCough = /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:cough\w*|khansi)/i.test(combinedCallerText);
+  const deniesCold = /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:cold|sardi|zukham)/i.test(combinedCallerText);
+  const deniesSkin = /\b(?:no|without)\s+(?:[a-z\s]+?\s+(?:or|nor|and)\s+)?(?:rash|khujli|itching|skin|allergy)/i.test(combinedCallerText);
+  const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(combinedCallerText);
+
+  // Exclusive "only X" or "sirf X" detection:
+  // e.g. "No rash or breathing trouble, only fever and body ache" -> strictly restrict allowed clinical concepts to FEVER and BODY_ACHE/JOINT!
+  let exclusiveAllowedConcepts = null;
+  const onlyMatch = combinedCallerText.match(/\b(?:only|sirf)\s+([a-z\s,]+?)(?=[.,;!?]|$|\b(?:please|can|help|advice|kuch|aur)\b)/i);
+  if (onlyMatch && onlyMatch[1]) {
+    const onlyClause = onlyMatch[1].toLowerCase();
+    exclusiveAllowedConcepts = new Set();
+    if (/\b(fever|bukhar|temperature|chills|shiver)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("FEVER");
+    if (/\b(body\s*ache|body\s*pain|badan\s*dard|muscle|joint|jodon)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("JOINT");
+    if (/\b(chest|chhati|heart|angina)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("CHEST");
+    if (/\b(headache|sar\s*dard|sir\s*dard|migraine)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("HEADACHE");
+    if (/\b(stomach|abdom|pet|gastric|acidity|cramp)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("ABDOMINAL");
+    if (/\b(breath\w*|saans|cough|khansi|cold)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("RESPIRATORY");
+    if (/\b(vomit|ulti|nausea)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("VOMITING");
+    if (/\b(diarrhea|loose\s*motion|dast)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("DIARRHEA");
+    if (/\b(period|periods|menstrua|menses)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("MENSTRUAL");
+    if (/\b(hand|haath|palm|finger)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("HAND");
+    if (/\b(wrist|kalai)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("WRIST");
+    if (/\b(leg|knee|foot|pair|taang)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("LEG");
+    if (/\b(snake|saap|saanp|bite)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("SNAKE_BITE");
+    if (/\b(animal|dog|kutta)\b/i.test(onlyClause)) exclusiveAllowedConcepts.add("ANIMAL_BITE");
+  }
+
+  // Check the latest affirmative user message to see if a symptom was updated / clarified
+  const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].toLowerCase() : "";
+  const lastAffirmative = stripNegatedPhrases(lastUserMsg);
+
+  const getClinicalConcept = (conditionStr = "") => {
+    const s = conditionStr.toLowerCase();
+    if (/\b(snake\s*bite|saanp|saap|envenomation|snakebite)\b/i.test(s)) return "SNAKE_BITE";
+    if (/\b(animal\s*bite|dog\s*bite|kutta\s*kaat)\b/i.test(s)) return "ANIMAL_BITE";
+    if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari)\b/i.test(s)) return "MENSTRUAL";
+    if (/\b(stomach|abdom|pet|gastric|acidity|gas problem|belly|cramp)\b/i.test(s)) return "ABDOMINAL";
+    if (/\b(headache|sir dard|sar dard|migraine)\b/i.test(s)) return "HEADACHE";
+    if (/\b(chest|angina|heart|chhati)\b/i.test(s)) return "CHEST";
+    if (/\b(fever|bukhar|chills|shiver|temperature)\b/i.test(s)) return "FEVER";
+    if (/\b(vomit|nausea|ulti)\b/i.test(s)) return "VOMITING";
+    if (/\b(diarrhea|loose motion|dast)\b/i.test(s)) return "DIARRHEA";
+    if (/\b(breath\w*|saans\w*|cough\w*|khansi\w*|wheez\w*|asthma|respiratory)\b/i.test(s)) return "RESPIRATORY";
+    if (/\b(weakness|dizzy|kamzori|chakkar|vertigo)\b/i.test(s)) return "WEAKNESS";
+    if (/\b(back|kamar)\b/i.test(s)) return "BACK";
+    if (/\b(wrist|kalai)\b/i.test(s)) return "WRIST";
+    if (/\b(hand|palm|finger|haath|ungli)\b/i.test(s)) return "HAND";
+    if (/\b(shoulder|elbow|bazu|kandha|kohni|arm)\b/i.test(s)) return "ARM";
+    if (/\b(leg|knee|ankle|foot|feet|pair|taang|ghutna|takhna)\b/i.test(s)) return "LEG";
+    if (/\b(joint\w*|jodon|badan|body pain|muscle\w*|body ache)\b/i.test(s)) return "JOINT";
+    if (/\b(cut|wound|laceration|bleed|chot|injury|fall|fell)\b/i.test(s)) return "TRAUMA";
+    if (/\b(burn|jal gaya)\b/i.test(s)) return "BURN";
+    if (/\b(rash|khujli|itching|skin|allergy)\b/i.test(s)) return "SKIN";
+    if (/\b(urinary|peshab)\b/i.test(s)) return "URINARY";
+    if (/\b(panic|anxiety|ghabrahat)\b/i.test(s)) return "PANIC";
+    if (/\b(depress|hopeless|sadness|udaas|crying)\b/i.test(s)) return "DEPRESSION";
+    if (/\b(suicid|wants to die|harm)\b/i.test(s)) return "CRISIS";
+    if (/\b(insomnia|sleep|neend)\b/i.test(s)) return "SLEEP";
+    if (/\b(hiv|aids|sti|std)\b/i.test(s)) return "HIV";
+    return "OTHER";
+  };
+
+  const foundProblems = [];
+  const seenConcepts = new Set();
+
+  const addProblem = (prob, priority = false) => {
+    if (!prob || typeof prob !== "string") return;
+    const clean = prob.trim().replace(/^[-*•\d.)\s]+/, "").trim();
+    if (clean.length < 3) return;
+
+    if (/^(104|108|ambulance|tele-doctor|primary clinical assessment|clinical assessment|reported symptoms|reported clinical symptoms)$/i.test(clean.toLowerCase())) {
+      return;
+    }
+
+    const concept = getClinicalConcept(clean);
+
+    // If caller explicitly restricted symptoms via "only" clause, drop any unmentioned concept!
+    if (exclusiveAllowedConcepts && exclusiveAllowedConcepts.size > 0) {
+      if (concept !== "OTHER" && !exclusiveAllowedConcepts.has(concept)) {
+        return;
+      }
+    }
+
+    if (concept !== "OTHER" && seenConcepts.has(concept)) {
+      if (priority) {
+        const existIdx = foundProblems.findIndex((p) => getClinicalConcept(p) === concept);
+        if (existIdx !== -1) {
+          foundProblems.splice(existIdx, 1);
+          foundProblems.unshift(clean);
+        }
+      }
+      return;
+    }
+
+    // Avoid duplicates or substring collisions
+    const exists = foundProblems.some(
+      (p) => p.toLowerCase() === clean.toLowerCase() || p.toLowerCase().includes(clean.toLowerCase()) || clean.toLowerCase().includes(p.toLowerCase())
+    );
+    if (!exists) {
+      if (concept !== "OTHER") {
+        seenConcepts.add(concept);
+      }
+      if (priority) {
+        foundProblems.unshift(clean);
+      } else {
+        foundProblems.push(clean);
+      }
+    }
+  };
+
+  // 0. Universal Natural Language Symptom Extractor from live Caller Utterances
+  // Always inspect and prioritize what the IP literally stated in the chat!
+  if (hasUserChat) {
+    for (let i = userMessages.length - 1; i >= 0; i--) {
+      const uMsg = userMessages[i].trim();
+      const uMsgLower = uMsg.toLowerCase();
+      const uAffirmative = stripNegatedPhrases(uMsgLower);
+      if (!uAffirmative || uAffirmative.length < 3) continue;
+
+      const isPriority = i === userMessages.length - 1;
+
+      // Pattern A: "pain in (my/the) [bodypart] (area)"
+      const painInMatch = uAffirmative.match(/\bpain\s+in\s+(?:my|the|both)?\s*([a-z\s]+?)(?:\s+(?:area|region|part|side))?(?=[.,;!?]|$|\b(?:since|from|for|and|with|but|because)\b)/i);
+      if (painInMatch && painInMatch[1]) {
+        const bpRaw = painInMatch[1].trim();
+        if (bpRaw.length >= 3 && !["much", "any", "some", "severe", "mild"].includes(bpRaw.toLowerCase())) {
+          const bpClean = bpRaw.charAt(0).toUpperCase() + bpRaw.slice(1);
+          const fullLabel = uMsgLower.includes("area") ? `Pain in ${bpClean} Area` : `Pain in ${bpClean}`;
+          addProblem(fullLabel, isPriority);
+        }
+      }
+
+      // Pattern B: "[bodypart] pain"
+      const bodyPartPainMatch = uAffirmative.match(/\b([a-z]+)\s+pain\b/i);
+      if (bodyPartPainMatch && bodyPartPainMatch[1]) {
+        const bp = bodyPartPainMatch[1].trim();
+        if (!["severe", "mild", "sharp", "dull", "terrible", "bad", "much", "any", "no"].includes(bp.toLowerCase()) && bp.length >= 3) {
+          addProblem(`${bp.charAt(0).toUpperCase() + bp.slice(1)} Pain`, isPriority);
+        }
+      }
+
+      // Pattern C: Hindi "[bodypart] me/mein dard"
+      const hindiDardMatch = uAffirmative.match(/\b([a-z]+)\s*(?:me|mein)\s*dard\b/i);
+      if (hindiDardMatch && hindiDardMatch[1]) {
+        const bp = hindiDardMatch[1].trim().toLowerCase();
+        if (bp === "haath" || bp === "hath") addProblem("Pain in Hand", isPriority);
+        else if (bp === "kalai") addProblem("Pain in Wrist Area", isPriority);
+        else if (bp === "kamar") addProblem("Lower Back Pain / Backache", isPriority);
+        else if (bp === "seene" || bp === "chhati") addProblem("Chest Discomfort / Pain", isPriority);
+        else if (bp === "pet") addProblem("Abdominal / Gastric Pain", isPriority);
+        else if (bp === "sar" || bp === "sir") addProblem("Severe Headache / Migraine", isPriority);
+        else if (bp === "gale") addProblem("Sore Throat / Pharyngeal Pain", isPriority);
+        else if (bp === "pair" || bp === "taang") addProblem("Leg & Lower Extremity Pain", isPriority);
+        else if (bp === "ghutne") addProblem("Knee Pain", isPriority);
+      }
+    }
+  }
+
+  // 0b. Snake Bite / Animal Bite (Life-Threatening Emergency Chief Complaint)
+  const isSnakeBite = /\b(snake\s*bite|saap\s*(?:ne\s*)?kaat|saanp\s*(?:ne\s*)?kaat|snakebite|envenomation)\b/i.test(combinedCallerText);
+  if (isSnakeBite) {
+    addProblem("Snake Bite", true);
+  }
+
+  const isAnimalBite = !isSnakeBite && /\b(dog\s*bite|animal\s*bite|kutta\s*(?:ne\s*)?kaat|monkey\s*bite)\b/i.test(combinedCallerText);
+  if (isAnimalBite) {
+    addProblem("Animal / Dog Bite Injury", true);
+  }
+
+  // 1. Check for specific pain conditions
+  // Menstrual / Dysmenorrhea
+  if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|periods cramps|period cramps|periods ka dard|period pain|bleeding and cramps)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(period|periods|menstrua|dysmenorrhea|menses)\b/i.test(lastAffirmative);
+    addProblem("Dysmenorrhea / Menstrual Cramps", isPriority);
+  }
+
+  // Stomach / Abdominal / Gastric Pain & Cramps
+  if (/\b(stomach cramps?|abdominal cramps?|stomach pain|abdominal pain|pet dard|pet me dard|pet me marod|gastric pain|gastric|acidity|gas problem|pet kharab|tummy ache|belly pain|stomach ache)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(stomach|abdom|pet|gastric|acidity)\b/i.test(lastAffirmative);
+    let label = "Abdominal Pain";
+    const hasCramp = /\b(cramp|marod)\b/i.test(affirmativeText);
+    const hasGastric = /\b(gastric|acidity|gas\s*problem)\b/i.test(affirmativeText);
+    const hasAbdom = /\b(stomach|abdom|pet|tummy|belly)\b/i.test(affirmativeText);
+    if (hasCramp && hasGastric) label = "Abdominal Cramps & Gastric Discomfort";
+    else if (hasCramp) label = "Abdominal Cramps";
+    else if (hasGastric && hasAbdom) label = "Gastric Pain & Acidity";
+    else if (hasGastric) label = "Gastric Discomfort / Acidity";
+    else if (hasAbdom) label = "Abdominal Pain";
+    addProblem(label, isPriority);
+  }
+
+  // Headache / Migraine
+  if (/\b(headache|sir dard|sar dard|migraine|sar me dard|heavy head|throbbing head)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(headache|sir dard|sar dard|migraine)\b/i.test(lastAffirmative);
+    addProblem("Severe Headache / Migraine", isPriority);
+  }
+
+  // Chest Discomfort / Pain
+  if (!deniesChestPain && /\b(chest pain|chhati me dard|chest tightness|chest pressure|dil me dard|heaviness in chest|angina|chest)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(chest|chhati|heart|angina)\b/i.test(lastAffirmative);
+    addProblem("Chest Discomfort / Pain", isPriority);
+  }
+
+  // Lower Back Pain / Backache
+  if (/\b(back pain|backache|kamar dard|kamar me dard|lower back pain|spine pain)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(back|kamar)\b/i.test(lastAffirmative);
+    addProblem("Lower Back Pain / Backache", isPriority);
+  }
+
+  // Hand & Wrist Pain
+  if (/\b(wrist|kalai|wrist area|wrist joint)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(wrist|kalai)\b/i.test(lastAffirmative);
+    addProblem("Pain in Wrist Area", isPriority);
+  }
+  if (/\b(hand|haath|palm|finger|fingers|thumb|ungli)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|sore|sprain|swelling|sujan|injury|chot|fall|fell)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(hand|haath|palm|finger)\b/i.test(lastAffirmative);
+    addProblem("Pain in Hand", isPriority);
+  }
+
+  // Arm, Shoulder & Elbow Pain
+  if (/\b(shoulder|kandha|elbow|kohni|forearm|bazu|upper arm)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|injury|chot)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(shoulder|elbow|arm)\b/i.test(lastAffirmative);
+    const label = /\b(shoulder|kandha)\b/i.test(affirmativeText) ? "Pain in Shoulder" : "Arm & Elbow Pain";
+    addProblem(label, isPriority);
+  }
+
+  // Leg, Knee, Ankle & Foot Pain
+  if (/\b(knee|knees|ghutna|ankle|takhna|foot|feet|heel|calf|pair|taang|thigh)\b/i.test(affirmativeText) && /\b(pain|dard|ache|hurts?|sprain|injury|chot)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(knee|ankle|foot|pair|taang)\b/i.test(lastAffirmative);
+    const label = /\b(knee|ghutna)\b/i.test(affirmativeText)
+      ? "Knee Pain"
+      : (/\b(ankle|takhna)\b/i.test(affirmativeText) ? "Ankle Pain & Sprain" : "Leg & Lower Extremity Pain");
+    addProblem(label, isPriority);
+  }
+
+  // Joint Pain & Body Ache (Strict separation: never bundle unmentioned symptoms!)
+  const hasJoint = !deniesJoint && /\b(joint pain|jodon me dard|joints?\b|jodon\b)/i.test(affirmativeText);
+  const hasBodyAche = !deniesBodyAche && /\b(body ache|body pain|badan dard|generalized body ache)\b/i.test(affirmativeText);
+  const hasMuscleAche = !deniesBodyAche && /\b(muscle ache|muscle pain|manspeshi)\b/i.test(affirmativeText);
+
+  if (hasJoint && (hasBodyAche || hasMuscleAche)) {
+    const isPriority = /\b(joint|jodon|badan|body|muscle)\b/i.test(lastAffirmative);
+    addProblem("Joint Pain & Body Ache", isPriority);
+  } else if (hasJoint) {
+    const isPriority = /\b(joint|jodon)\b/i.test(lastAffirmative);
+    addProblem("Joint Pain", isPriority);
+  } else if (hasBodyAche) {
+    const isPriority = /\b(badan|body)\b/i.test(lastAffirmative);
+    addProblem("Body Ache", isPriority);
+  } else if (hasMuscleAche) {
+    const isPriority = /\b(muscle|manspeshi)\b/i.test(lastAffirmative);
+    addProblem("Muscle Ache", isPriority);
+  }
+
+  // Sore Throat / Pharyngeal Pain
+  if (/\b(throat pain|gale me dard|sore throat|gale me khash khash|pain swallowing)\b/i.test(affirmativeText)) {
+    addProblem("Sore Throat / Pharyngeal Pain");
+  }
+
+  // Dental / Ear Pain
+  if (/\b(tooth pain|daant dard|toothache|ear pain|kaan dard|earache)\b/i.test(affirmativeText)) {
+    addProblem("Dental / Ear Pain");
+  }
+
+  // Eye Pain / Irritation
+  if (/\b(eye pain|aankh me dard|burning eyes|aankhon me jalan)\b/i.test(affirmativeText)) {
+    addProblem("Eye Pain & Irritation");
+  }
+
+  // 2. Health Conditions (Physical / Somatic)
+  // Nausea & Persistent Vomiting: MUST be explicitly mentioned by caller
+  const callerMentionedVomit = !deniesVomiting && /\b(vomit|vomiting|ulti|throwing up|cannot keep.*fluid|cannot keep.*food|retching)\b/i.test(combinedCallerText) && /\b(vomit|vomiting|ulti|throwing up|cannot keep.*fluid|cannot keep.*food|retching)\b/i.test(affirmativeText);
+  const callerMentionedNausea = !deniesVomiting && /\b(nausea|ji machlana)\b/i.test(combinedCallerText) && /\b(nausea|ji machlana)\b/i.test(affirmativeText);
+
+  if (callerMentionedVomit && callerMentionedNausea) {
+    const isPriority = /\b(vomit|ulti|nausea)\b/i.test(lastAffirmative);
+    addProblem("Nausea & Persistent Vomiting", isPriority);
+  } else if (callerMentionedVomit) {
+    const isPriority = /\b(vomit|ulti)\b/i.test(lastAffirmative);
+    addProblem("Persistent Vomiting", isPriority);
+  } else if (callerMentionedNausea) {
+    const isPriority = /\b(nausea|ji machlana)\b/i.test(lastAffirmative);
+    addProblem("Nausea", isPriority);
+  }
+
+  // Acute Diarrhea / Loose Motions
+  const callerMentionedDiarrhea = /\b(loose motion|loose motions|diarrhea|dast|pet chalna|watery stool)\b/i.test(combinedCallerText);
+  if (callerMentionedDiarrhea && !deniesOtherSymptoms && /\b(loose motion|loose motions|diarrhea|dast|pet chalna|watery stool)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(loose|diarrhea|dast)\b/i.test(lastAffirmative);
+    addProblem("Acute Diarrhea / Loose Motions", isPriority);
+  }
+
+  // Fever & Chills / Shivering (Strict separation: never add chills if only fever was stated!)
+  const callerMentionedFever = !deniesFever && /\b(fever|bukhar|temperature|high fever|tez bukhar)\b/i.test(combinedCallerText) && /\b(fever|bukhar|temperature|high fever|tez bukhar)\b/i.test(affirmativeText);
+  const callerMentionedChills = !deniesFever && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(combinedCallerText) && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(affirmativeText);
+
+  if (callerMentionedFever && callerMentionedChills) {
+    const isPriority = /\b(fever|bukhar|temperature|chills|shivering)\b/i.test(lastAffirmative);
+    const isHigh = /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
+    addProblem(isHigh ? "High Fever with Chills & Shivering" : "Fever with Chills", isPriority);
+  } else if (callerMentionedFever) {
+    const isPriority = /\b(fever|bukhar|temperature)\b/i.test(lastAffirmative);
+    const isHigh = /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
+    addProblem(isHigh ? "High Fever" : "Fever", isPriority);
+  } else if (callerMentionedChills) {
+    const isPriority = /\b(chills|shivering|kapkapi)\b/i.test(lastAffirmative);
+    addProblem("Chills & Shivering", isPriority);
+  }
+
+  // Respiratory Distress / Cough / Cold (Strict separation: never bundle Cough or Cold if caller only had breathing difficulty!)
+  const hasBreathing = !deniesBreathing && /\b(shortness of breath|saans.*takleef|saans phoolna|breathlessness|difficulty breathing|trouble breathing|gasping|wheezing)\b/i.test(affirmativeText);
+  const hasCough = !deniesCough && /\b(cough|khansi)\b/i.test(affirmativeText);
+  const hasCold = !deniesCold && /\b(cold|zukham|sardi|runny nose|sneeze)\b/i.test(affirmativeText);
+
+  if (hasBreathing) {
+    const isPriority = /\b(breath|saans|phoolna|difficulty)\b/i.test(lastAffirmative);
+    if (hasCough) {
+      addProblem("Cough with Difficulty Breathing", isPriority);
+    } else if (/\b(shortness of breath|saans phoolna)\b/i.test(affirmativeText)) {
+      addProblem("Shortness of Breath", isPriority);
+    } else {
+      addProblem("Difficulty Breathing", isPriority);
+    }
+  } else if (hasCough && hasCold) {
+    const isPriority = /\b(cough|khansi|cold|sardi)\b/i.test(lastAffirmative);
+    addProblem("Cough & Cold", isPriority);
+  } else if (hasCough) {
+    const isPriority = /\b(cough|khansi)\b/i.test(lastAffirmative);
+    addProblem("Cough", isPriority);
+  } else if (hasCold) {
+    const isPriority = /\b(cold|sardi|zukham)\b/i.test(lastAffirmative);
+    addProblem("Cold & Congestion", isPriority);
+  }
+
+  // Weakness & Dizziness
+  const callerMentionedWeakness = /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady)\b/i.test(combinedCallerText);
+  if (callerMentionedWeakness && !deniesOtherSymptoms && /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady)\b/i.test(affirmativeText)) {
+    addProblem("Weakness & Dizziness");
+  }
+
+  // Cut / Wound / Bleeding
+  if (!isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|khoon|tanka)\b/i.test(affirmativeText)) {
+    addProblem("Superficial Cut / Laceration Injury");
+  }
+
+  // Burn Injury / Scald
+  if (/\b(burn|jal gaya|hot water burn|scald|acid burn)\b/i.test(affirmativeText)) {
+    addProblem("Burn Injury / Thermal Scald");
+  }
+
+  // Skin Rash & Allergy
+  if (!isSnakeBite && !deniesSkin && /\b(rash|khujli|itching|skin allergy|hives|redness|dana|chakatte)\b/i.test(affirmativeText)) {
+    addProblem("Skin Rash & Allergic Reaction");
+  }
+
+  // Urinary Burning / Discomfort
+  if (/\b(burning urination|peshab me jalan|frequent urination|bar bar peshab|dysuria|pain while urinating)\b/i.test(affirmativeText)) {
+    addProblem("Urinary Burning / Discomfort");
+  }
+
+  // Orthopedic Trauma / Fracture
+  if (/\b(fracture|haddi tutna|sprain|moch|bone broken|twisted ankle)\b/i.test(affirmativeText)) {
+    addProblem("Orthopedic Trauma / Suspected Fracture");
+  }
+
+  // HIV / Sexual Health
+  if (/\b(hiv|aids|std|sti|gupt rog|sexual disease|art center|ictc|cd4|pep|prep)\b/i.test(affirmativeText)) {
+    addProblem("HIV / Sexual Health Consultation");
+  }
+
+  // 3. Mental Conditions
+  // Acute Panic & Anxiety
+  if (/\b(panic attack|severe anxiety|ghabrahat|bechaini|racing heart from anxiety|nervous breakdown|extreme panic)\b/i.test(affirmativeText)) {
+    addProblem("Acute Panic Attack & Severe Anxiety");
+  }
+
+  // Depressive Episode & Emotional Distress
+  if (/\b(depression|severe sadness|depressed|hopeless|udaas|ronaa aa raha|crying uncontrollably|grief|emotional breakdown|loneliness)\b/i.test(affirmativeText)) {
+    addProblem("Depressive Episode & Emotional Distress");
+  }
+
+  // Crisis & Suicidal Distress Support
+  if (!isSafe && /\b(suicid|wants to die|end my life|kill myself|marne ka man|cut wrist)\b/i.test(affirmativeText)) {
+    addProblem("Crisis & Suicidal Distress Support", true);
+  }
+
+  // Sleep Disturbance / Insomnia
+  if (/\b(insomnia|cannot sleep|sleeplessness|neend nahi aati|raat ko neend nahi|disturbed sleep|unable to sleep)\b/i.test(affirmativeText)) {
+    addProblem("Sleep Disturbance / Insomnia");
+  }
+
+  // Severe Mental Stress & Overwhelm
+  if (/\b(extreme stress|tanaav|mental pressure|overwhelmed|mental exhaustion)\b/i.test(affirmativeText)) {
+    addProblem("Severe Mental Stress & Overwhelm");
+  }
+
+  // 4. Also check rawCandidate (ONLY if caller did not engage in live chat)
+  if (rawCandidate && !hasUserChat) {
+    const sanitizedCandidate = sanitizeSymptomOrCondition(rawCandidate, combinedCallerText);
+    const isChannel = /^(104|108|ambulance|tele-doctor|primary clinical assessment|clinical assessment|reported symptoms|reported clinical symptoms)$/i.test(sanitizedCandidate.trim());
+    if (!isChannel) {
+      addProblem(sanitizedCandidate);
+    }
+  }
+
+  if (foundProblems.length === 0) {
+    foundProblems.push("Primary Clinical Assessment");
+  }
+
+  // USER MANDATE: "try to find out the main condiotion and try to give max 2 or 3 not more than that"
+  return foundProblems.slice(0, 3);
 }
 
 export function formatClinicalSummary(intake = {}, condition = "Reported Symptoms", severity = 5, duration = "Reported today", primaryReferral = "104 Health Helpline") {
@@ -686,8 +1553,10 @@ async function evaluateRawTriage(intake) {
   const tState = ekmsCtx.triageState || ekmsCtx;
   const notes = String(intake.symptom_notes || "").toLowerCase();
   const severity = Number(intake.severity_reported) || (tState?.severityScore || (tState?.severity === "High" ? 9 : 5));
-  const age = intake.age != null && intake.age !== "" ? Number(intake.age) : null;
-  const duration = String(intake.duration || tState?.duration || "Reported today");
+  let duration = String(intake.duration || tState?.duration || "Reported today");
+  if (/\b(fall|fell|falling|accident|injury|trauma|pain|chot|gir gaya|impact)\b/i.test(duration)) {
+    duration = "Reported today";
+  }
 
   // Extract caller's actual spoken text (excluding bot assistant prompts)
   const chatMsgs = ekmsCtx.chatHistory || [];
@@ -915,7 +1784,23 @@ async function evaluateRawTriage(intake) {
       secondaryReferral = primaryReferral === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
     }
 
-    const rawComp = tState?.suspectedCondition || tState?.condition || tState?.symptom || notes || "Primary Clinical Assessment";
+    const callerExtractedProblems = extractCallerReportedProblems({
+      result: {
+        intake,
+        caller_spoken_text: callerSpokenText,
+        ekms_ai_context: {
+          chatHistory: chatMsgs,
+          triageState: tState,
+        },
+      },
+      callerIntake: intake,
+    });
+    const callerProblemsSummary =
+      callerExtractedProblems.length > 0 && callerExtractedProblems[0] !== "Primary Clinical Assessment"
+        ? callerExtractedProblems.join(" · ")
+        : null;
+
+    const rawComp = callerProblemsSummary || tState?.suspectedCondition || tState?.condition || tState?.symptom || notes || "Primary Clinical Assessment";
     const cleanPrimaryComplaint = sanitizeSymptomOrCondition(rawComp, callerSpokenText);
 
     const primaryComplaint = isPsych && hasSelfHarmAction
@@ -953,23 +1838,29 @@ async function evaluateRawTriage(intake) {
       summaryHi = "कॉलर को मानसिक तनाव और भावनात्मक परेशानी की शिकायत है; 104 हेल्पलाइन द्वारा परामर्श उपयुक्त है।";
     }
 
-    const triageUrgencyLevel = isPsych
-      ? (hasSelfHarmAction || callerHasSuicideWords ? "Emergency" : "Urgent")
-      : (isNacoHIV
-        ? (allText.includes("pep") || allText.includes("exposure") ? "Urgent" : "Routine")
-        : (tState?.severity === "High" ? "Emergency" : (tState?.severity === "Moderate" ? "Urgent" : (effectiveSeverity >= 8 ? "Emergency" : (effectiveSeverity >= 5 ? "Urgent" : "Routine")))));
+    const triageUrgencyLevel = isEmergency108 || call108
+      ? "Emergency"
+      : (isPsych
+        ? (hasSelfHarmAction || callerHasSuicideWords ? "Emergency" : "Urgent")
+        : (isNacoHIV
+          ? (allText.includes("pep") || allText.includes("exposure") ? "Urgent" : "Routine")
+          : (tState?.severity === "High" ? "Emergency" : (tState?.severity === "Moderate" ? "Urgent" : (effectiveSeverity >= 8 ? "Emergency" : (effectiveSeverity >= 5 ? "Urgent" : "Routine"))))));
 
-    const triageUrgencyScore = isPsych
-      ? (hasSelfHarmAction ? 10 : (callerHasSuicideWords ? 9 : 7))
-      : (isNacoHIV
-        ? (allText.includes("pep") || allText.includes("exposure") ? 6 : 4)
-        : (tState?.severityScore || (tState?.severity === "High" ? 9 : (effectiveSeverity || 6))));
+    const triageUrgencyScore = isEmergency108 || call108
+      ? 10
+      : (isPsych
+        ? (hasSelfHarmAction ? 10 : (callerHasSuicideWords ? 9 : 7))
+        : (isNacoHIV
+          ? (allText.includes("pep") || allText.includes("exposure") ? 6 : 4)
+          : (tState?.severityScore || (tState?.severity === "High" ? 9 : (effectiveSeverity || 6)))));
 
-    const triageAssessedSeverity = isPsych
-      ? (hasSelfHarmAction ? "High (10/10)" : (callerHasSuicideWords ? "High (9/10)" : "Moderate (7/10)"))
-      : (isNacoHIV
-        ? (triageUrgencyLevel === "Urgent" ? "Moderate (6/10)" : "Routine (4/10)")
-        : (tState?.severity ? `${tState.severity} (${tState?.severityScore || effectiveSeverity}/10)` : (effectiveSeverity >= 8 ? "High (8/10)" : (effectiveSeverity >= 5 ? "Moderate (5/10)" : "Mild (3/10)"))));
+    const triageAssessedSeverity = isEmergency108 || call108
+      ? "Emergency (10/10)"
+      : (isPsych
+        ? (hasSelfHarmAction ? "High (10/10)" : (callerHasSuicideWords ? "High (9/10)" : "Moderate (7/10)"))
+        : (isNacoHIV
+          ? (triageUrgencyLevel === "Urgent" ? "Moderate (6/10)" : "Routine (4/10)")
+          : (tState?.severity ? `${tState.severity} (${tState?.severityScore || effectiveSeverity}/10)` : (effectiveSeverity >= 8 ? "High (8/10)" : (effectiveSeverity >= 5 ? "Moderate (5/10)" : "Mild (3/10)")))));
 
     const decision = {
       urgency_level: triageUrgencyLevel,

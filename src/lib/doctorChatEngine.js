@@ -10,7 +10,7 @@ import {
   DOMAIN_LABELS,
   getDiseaseProbingProtocol,
 } from "./clinicalAdaptiveEngine.js";
-import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase, stripNegatedPhrases } from "./triageEngine.js";
+import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase, stripNegatedPhrases, deduplicateRedFlags } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
 import { executeCentralizedLlmProxy } from "./llmProxy.js";
 import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
@@ -39,19 +39,18 @@ CORE CLINICAL RULES:
 8. EMPATHY & EMOTIONAL REASSURANCE:
    - For distress, pain, injury, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
 9. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
-   Tier 1. 108 Ambulance Services (CRITICAL LIFE-THREATENING EMERGENCY ONLY):
-      Dispatch 108 Ambulance ONLY for Severity 9 and 10 IF the patient has genuine life-threatening conditions:
-      - Severe Breathing Issues: Gasping for air, skin/lips turning blue, or inability to speak in full sentences. (If caller states they can speak normally, do NOT call ambulance!).
-      - Unconsciousness: The person is unresponsive and will not wake up.
-      - Uncontrollable Bleeding: Heavy bleeding that does not stop after 10 minutes of firm, direct pressure.
-      - Major Trauma: Serious car accidents, head/spinal injuries, falls from a significant height, or severe burns covering a large area.
-      - Prolonged Seizures: Seizure lasting > 5 minutes, or a person having their first-ever seizure.
-      - Anaphylaxis: Severe allergic reaction causing throat, lips, or tongue to swell, restricting airways.
-      - Cardiac arrest / crushing chest pain radiating to arm.
-      - Explicit caller request for ambulance.
-      CRITICAL RULE: Between 6:00 AM and 6:00 PM, if there are NO such life-threatening emergency signs (e.g. High fever with chills, severe pain, or breathless but can speak normally):
-      -> DO NOT refer to 108 Ambulance!
-      -> Refer to Hospital (ESIC Hospital)!
+   Tier 1. 108 Ambulance Services (HIGH SEVERITY 9 & EMERGENCY):
+      - In the majority of cases where severity is 9 or 10, dispatch 108 Emergency Ambulance.
+      - However, for Severity 9, if the condition is explicitly NOT too severe (patient can speak normally, manageable pain, minor superficial scratch, stable condition without airway, circulatory, or traumatic collapse), forward to others (ESIC Hospital / 104 Health Helpline).
+      - Always dispatch 108 Ambulance immediately for:
+        * Heavy bleeding, severe cut, work injury, and cut & bleeding (acute traumatic injuries or deep bleeding at work MUST dispatch 108 even if caller reports manageable).
+        * Severe breathing difficulty / gasping for air / cyanosis.
+        * Unconsciousness / collapse / unresponsive.
+        * Uncontrollable heavy bleeding.
+        * Major trauma / serious road crash / fall from height / factory or industrial machinery accident.
+        * Prolonged seizures (>5 min) or anaphylaxis.
+        * Crushing chest pain / cardiac arrest.
+        * Explicit caller request for ambulance.
    Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling, or HIV/AIDS/STI confidential information over the phone.
    Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
    Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
@@ -67,6 +66,19 @@ CORE CLINICAL RULES:
    - Real patients cannot rate numbers accurately.
    - Instead, ALWAYS ask clinical, functional, or descriptive probing questions (e.g. "Are you able to stand and walk on your own, or are you too weak to get out of bed?", "Are you able to keep water down or is everything coming back up?", "Is the pain manageable or so intense that you cannot rest or move?").
    - Internally deduce and calculate the severity (High / Moderate / Mild and score 1-10) based on their answers, red flags, and functional impairment.
+12. PROBING FOR COMORBIDITIES & MEDICATIONS (NO DEDICATED ALLERGY QUESTIONS):
+   - During the conversation without breaking the conversational flow (typically around question 6 or 7, flexible based on flow), the assistant should inquire about pre-existing COMORBIDITIES and any current MEDICATIONS:
+     -> Ask naturally: "Do you have any pre-existing health conditions such as high blood pressure, diabetes/sugar, asthma, heart, or kidney disease, and are you currently taking any medicines for them?" (Hinglish: "Kya aapko pehle se diabetes, high BP, asthma ya dil ki koi bimari hai, aur kya aap koi regular dawai lete hain?")
+     -> If caller mentions taking any acute medication for their current symptom (such as Paracetamol, antacid, vomiting pill like Ondansetron, or painkiller), note the medicine and whether it provided relief.
+   - DO NOT ask dedicated or isolated allergy questions. Remove allergy-specific questions completely.
+   - Actively detect and extract any mentioned comorbidities (Diabetes, Hypertension, Asthma, Cardiac, Kidney, Thyroid) and medications into the structured output.
+
+13. DAYTIME HOSPITAL PROBING & BALANCED 108 REFERRALS:
+   - In daytime hours (6:00 AM - 6:00 PM), hospitals and OPD facilities are open and operational.
+   - DO NOT send to 108 immediately on turns 1 and 2 for general complaints (pain, vomiting, fever, limb cuts, wounds).
+   - First ask probing questions to find out whether the condition is a true life-threatening emergency or manageable at a hospital.
+   - If symptoms are manageable or stable, steer toward ESIC Hospital or ESIS Dispensary rather than defaulting to 108.
+   - Keep responses concise, direct, and fast.
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
@@ -79,6 +91,8 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
   "duration": "detected duration or accident time",
+  "comorbidity": "Known chronic conditions (e.g. Diabetes, Hypertension, Asthma) or 'None reported by caller'",
+  "medications": "Specific medicines taken or leave empty string '' if none / no answer",
   "isReadyForSummary": true | false,
   "clinicalSummary": "Concise symptom-based triage summary in English without diagnosing diseases"
 }`;
@@ -385,7 +399,9 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
    - Turn 3: Functional impact & clinical probing (e.g. mobility, ability to keep fluids/food, speech effort, breathing distress) and onset/duration if still needed. NEVER ask the caller to rate on a 1-10 scale; deduce severity internally.
    - Turn 4+: Set "isReadyForSummary": true and provide clear final referral.
 4. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
-5. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
+5. ADAPT TO SYMPTOM CLARIFICATION: If the caller updates, clarifies, or changes their symptom (e.g. from general stomach pain to 'periods cramps' or vice-versa), immediately adapt the suspected condition to the clarified symptom (e.g. 'Dysmenorrhea / Menstrual Cramps') and ask probing questions specifically tailored to that complaint. NEVER assume chest pain or unrelated conditions unless explicitly stated by the caller.
+6. NEVER HALLUCINATE CHEST PAIN: Only assess cardiac conditions if the caller affirmatively reported chest pain or heart symptoms.
+7. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
@@ -398,7 +414,7 @@ Clinical Context: Current Condition: "${currentClinicalState.suspectedCondition 
 Already Asked Questions: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format:
-{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "isReadyForSummary": false, "clinicalSummary": "..." }`,
+{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "comorbidity": "Known chronic conditions (Diabetes, Hypertension, Asthma) or None reported by caller", "medications": "Medicines taken or empty string '' if none / no answer", "isReadyForSummary": false, "clinicalSummary": "..." }`,
     },
   ];
 
@@ -409,8 +425,9 @@ Respond strictly in valid JSON format:
       model: "qwen/qwen3.8-27b",
       candidateModels: ["qwen/qwen3.8-27b"],
       temperature: 0.2,
-      max_tokens: 300,
-      timeoutMs: 3000,
+      max_tokens: 450,
+      timeoutMs: 2500,
+      maxAttempts: 3,
     });
 
     if (groqResult?.content) {
@@ -439,7 +456,7 @@ Respond strictly in valid JSON format:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: promptText }] }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 300 },
+            generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 600 },
           }),
           signal: controller.signal,
         }
@@ -1046,17 +1063,207 @@ export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInp
 }
 
 /**
+ * Extracts clean, professional comorbidity findings from text
+ */
+export function extractComorbiditiesFromText(text = "", existingComorbidity = null) {
+  if (!text) {
+    return existingComorbidity && !/^(none|nil|no pre|none reported)/i.test(existingComorbidity)
+      ? existingComorbidity
+      : "";
+  }
+  const lower = text.toLowerCase();
+
+  if (
+    /\b(no\s+(?:known\s+)?comorbidit(?:y|ies)|no\s+(?:pre-existing|chronic|prior)\s+(?:condition|illness|disease|history)|koi\s+purani\s+bimari\s+nahi|koi\s+bimari\s+nahi|no\s+bp\s+sugar|na\s+sugar\s+na\s+bp|none|nil|negative)\b/i.test(
+      lower
+    )
+  ) {
+    return "";
+  }
+
+  const conditions = [];
+
+  if (/\b(diabet(?:es|ic)|sugar|madhumeh|high blood sugar|type\s*2\s*diabetes|type\s*1\s*diabetes)\b/i.test(lower)) {
+    conditions.push("Diabetes / High Blood Sugar");
+  }
+  if (/\b(hypertension|high\s*bp|blood\s*pressure|high\s*pressure|uchh\s*raktchap)\b/i.test(lower)) {
+    conditions.push("Hypertension / High BP");
+  }
+  if (/\b(asthma|damah|dama\b|wheezing|copd|respiratory\s*disease)\b/i.test(lower)) {
+    conditions.push("Bronchial Asthma / Respiratory condition");
+  }
+  if (/\b(heart\s*disease|cardiac|cad\b|heart\s*attack|dil\s*ki\s*bimari|angina|stent|bypass)\b/i.test(lower)) {
+    conditions.push("Cardiovascular / Heart Disease");
+  }
+  if (/\b(kidney\s*disease|renal|ckd\b|dialysis|kidney\s*problem|gurde)\b/i.test(lower)) {
+    conditions.push("Chronic Kidney Disease / Renal illness");
+  }
+  if (/\b(thyroid|hypothyroid|hyperthyroid)\b/i.test(lower)) {
+    conditions.push("Thyroid disorder");
+  }
+  if (/\b(liver\s*disease|cirrhosis|jaundice|hepatitis|liver\s*problem)\b/i.test(lower)) {
+    conditions.push("Liver disease / condition");
+  }
+
+  if (conditions.length > 0) {
+    return conditions.join("; ");
+  }
+
+  const directMatch = lower.match(/\b(?:history of|suffering from|patient has|bimari hai)\s+([a-zA-Z\s]{2,30})/i);
+  if (directMatch && directMatch[1]) {
+    const rawCond = directMatch[1].trim().replace(/\b(hai|tha|se|ki)\b/gi, "").trim();
+    if (rawCond.length > 2 && !/^(no|none|nahi|nil)/i.test(rawCond)) {
+      return `Reported: ${rawCond.charAt(0).toUpperCase() + rawCond.slice(1)}`;
+    }
+  }
+
+  return existingComorbidity && !/^(none|nil|no pre|none reported)/i.test(existingComorbidity)
+    ? existingComorbidity
+    : "";
+}
+
+/**
+ * Extracts clean, professional allergy findings from text
+ */
+export function extractAllergiesFromText(text = "", existingAllergy = null) {
+  if (!text) return existingAllergy || "None reported by caller";
+  const lower = text.toLowerCase();
+  
+  if (/\b(no\s+(?:known\s+)?allerg(?:y|ies)|not\s+allergic|no\s+reaction|koi\s+allergy\s+nahi|allergy\s+nahi|none|nil|negative)\b/i.test(lower)) {
+    return "No known drug or food allergies reported";
+  }
+
+  if (/\b(penicillin|sulfa|aspirin|ibuprofen|paracetamol|nsaid|amoxicillin|cipro)\b/i.test(lower) && /\ballerg\w*\b/i.test(lower)) {
+    const drugMatch = lower.match(/\b(penicillin|sulfa|aspirin|ibuprofen|paracetamol|nsaid|amoxicillin|cipro)\b/i);
+    return `Known drug allergy to ${drugMatch ? drugMatch[0].toUpperCase() : "medication"}`;
+  }
+  if (/\b(peanuts?|eggs?|seafood|fish|prawns?|milk|wheat|soy|food)\b/i.test(lower) && /\ballerg\w*\b/i.test(lower)) {
+    const foodMatch = lower.match(/\b(peanuts?|eggs?|seafood|fish|prawns?|milk|wheat|soy|food)\b/i);
+    return `Known food allergy (${foodMatch ? foodMatch[0] : "food item"})`;
+  }
+  if (/\b(dust|pollen|insect\s*(?:bite|sting)?|bee\s*sting|cold|weather)\b/i.test(lower) && /\ballerg\w*\b/i.test(lower)) {
+    return "Environmental / insect sting allergy";
+  }
+  
+  const generalMatch = lower.match(/\ballergic\s+to\s+([a-zA-Z\s]{2,30})/i) || lower.match(/\ballergy\s+(?:from|due to|to)\s+([a-zA-Z\s]{2,30})/i);
+  if (generalMatch && generalMatch[1]) {
+    const allergen = generalMatch[1].trim().replace(/\b(hai|tha|hoti hai)\b/gi, "").trim();
+    if (allergen.length > 2) {
+      return `Allergic to ${allergen.charAt(0).toUpperCase() + allergen.slice(1)}`;
+    }
+  }
+
+  if (/\b(rash|urticaria|hives|khujli|itching|daane)\b/i.test(lower)) {
+    return "Allergic skin manifestation (rash / itching reported)";
+  }
+
+  return existingAllergy && existingAllergy !== "None reported" && existingAllergy !== ""
+    ? existingAllergy
+    : "None reported by caller";
+}
+
+/**
+ * Extracts clean, professional medication history from text
+ */
+export function extractMedicationsFromText(text = "", existingMed = null) {
+  if (existingMed && /^(none|nil|no prior|none reported|medication taken:\s*none)/i.test(String(existingMed).trim())) {
+    existingMed = "";
+  }
+  if (!text) {
+    return existingMed ? String(existingMed).replace(/^medications?\s*(?:taken)?[:\s]*/i, "") : "";
+  }
+  const lower = text.toLowerCase();
+
+  // If caller reported no medication or none taken, strictly leave blank per user mandate
+  if (/\b(no\s+medicin(?:e|es)|no\s+medication|haven'?t\s+taken|not\s+taken|kuch\s+nahi\s+liya|koi\s+dawa\s+nahi|dawai\s+nahi|dawa\s+nahi|none|nil|na\s+dawa)\b/i.test(lower)) {
+    return "";
+  }
+
+  const medsFound = [];
+  if (/\b(ondansetron|vomikind|domperidone|emset)\b/i.test(lower)) {
+    medsFound.push("Tab. Ondansetron");
+  }
+  if (/\b(ors|electral|electrolyte)\b/i.test(lower)) {
+    medsFound.push("ORS");
+  }
+  if (/\b(paracetamol|dolo|crocin|calpol|pcm)\b/i.test(lower)) {
+    medsFound.push("Tab. Paracetamol");
+  }
+  if (/\b(combiflam|ibuprofen|diclofenac|aceclofenac|painkiller)\b/i.test(lower)) {
+    medsFound.push("Combiflam / Diclofenac (Painkiller)");
+  }
+  if (/\b(cetirizine|avil|allegra|levocet|montair)\b/i.test(lower)) {
+    medsFound.push("Cetirizine / Avil");
+  }
+  if (/\b(pantoprazole|pantocid|pan\s*40|omeprazole|omez|antacid|gelusil|digene)\b/i.test(lower)) {
+    medsFound.push("Pantoprazole / Antacid");
+  }
+  if (/\b(inhaler|puff|asthalin|budecort|foracort)\b/i.test(lower)) {
+    medsFound.push("Inhaler (Asthalin)");
+  }
+  if (/\b(sorbitrate|aspirin|ecospirin)\b/i.test(lower)) {
+    medsFound.push("Aspirin / Sorbitrate");
+  }
+  if (/\b(insulin|metformin|glycomet)\b/i.test(lower)) {
+    medsFound.push("Insulin / Metformin");
+  }
+  if (/\b(telmisartan|amlodipine|atenolol|bp\s+medicine|bp\s+dawai)\b/i.test(lower)) {
+    medsFound.push("BP medicine (Telmisartan / Amlodipine)");
+  }
+
+  if (medsFound.length > 0) {
+    return medsFound.join("; ");
+  }
+
+  const genericMedMatch = lower.match(/\b(?:taking|take|taken|dawai\s+li|medicine\s+li)\s+([a-zA-Z0-9\s]{2,30})/i);
+  if (genericMedMatch && genericMedMatch[1]) {
+    const rawMed = genericMedMatch[1].trim();
+    if (rawMed.length > 2 && !/^(no|none|nahi|nil)/i.test(rawMed)) {
+      return rawMed.charAt(0).toUpperCase() + rawMed.slice(1);
+    }
+  }
+
+  return existingMed && existingMed !== "None reported" && existingMed !== "None reported by caller" && existingMed !== "No prior medication taken for current episode" && existingMed !== ""
+    ? String(existingMed).replace(/^medications?\s*(?:taken)?[:\s]*/i, "")
+    : "";
+}
+
+/**
  * Normalizes output from LLM provider into guaranteed uniform schema
  * with strict duplicate detection safeguard
  */
 function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsList = [], history = []) {
   const cleanInput = (userInput || "").toLowerCase();
   const prevRef = (prevState.referralDestination || "").toLowerCase();
-  const historyText = history
+  const userMessages = history.filter(
+    (m) => m.sender === "user" || m.role === "user"
+  );
+  const userUtterances = userMessages
     .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
     .join(" ")
     .toLowerCase();
-  const allContext = `${cleanInput} ${prevRef} ${prevState.suspectedCondition || ""} ${prevState.symptom || ""} ${historyText}`.toLowerCase();
+  const allCallerText = `${cleanInput} ${userUtterances}`.trim().toLowerCase();
+  const affirmativeCallerText = stripNegatedPhrases(allCallerText);
+
+  // Dynamic correction check: Did caller explicitly negate an accident, injury, or chest pain?
+  const isAccidentDenied = /\b(no\s+accident|not\s+an\s+accident|no\s+injury|not\s+injured|without\s+injury|no\s+cut|no\s+wound|chot\s+nahi|accident\s+nahi|durghatna\s+nahi|injury\s+nahi)\b/i.test(cleanInput);
+  const hasChestPainDenial = /\b(no\s+chest\s+pain|seene\s*me\s*dard\s*nahi|chhati\s*dard\s*nahi|not\s+chest\s+pain)\b/i.test(cleanInput);
+
+  if (isAccidentDenied && (prevState.suspectedCondition || "").includes("Accident")) {
+    prevState.suspectedCondition = "";
+    if (prevState.referralDestination === "108 Ambulance") {
+      prevState.referralDestination = null;
+    }
+  }
+  if (hasChestPainDenial && (prevState.suspectedCondition || "").includes("Coronary")) {
+    prevState.suspectedCondition = "";
+    if (prevState.referralDestination === "108 Ambulance") {
+      prevState.referralDestination = null;
+    }
+  }
+
+  // Pure caller context — NEVER mix assistant bot questions into caller symptom evaluation!
+  const allContext = `${cleanInput} ${prevRef} ${affirmativeCallerText}`.toLowerCase();
 
   const userTextHasPsych =
     /\b(suicid\w*|mar ja\w*|jaan de dunga|depress\w*|udaas\b|\brona\b|hopeless\b|anxiety\b|ghabrahat\b|mental health|akelepan\b|\bpareshan\b|\bdie\b|kill myself|crying\b|cried\b|zindagi se thak|lonely\b|niraash\b)\b/i.test(
@@ -1099,12 +1306,18 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     prevRef.includes("pharmacy") ||
     prevRef.includes("dispensary");
 
-  const severity =
+  let severity =
     raw.severity === "High" || raw.severity === "Moderate" || raw.severity === "Mild"
       ? raw.severity
       : (prevState.severity || (isPsych ? "High" : is104PhoneDoctor ? "Moderate" : "Moderate"));
 
-  const severityScore = severity === "High" ? 9 : severity === "Moderate" ? 6 : 3;
+  let severityScore = Number(raw.severityScore) || (severity === "High" ? 9 : severity === "Moderate" ? 6 : 3);
+
+  // STRICT RULE: If the case is NOT a genuine life-and-death emergency, DO NOT score it 9!
+  if (!isEmergency108 && (severity === "High" || severityScore >= 9)) {
+    severity = "Moderate";
+    severityScore = 6;
+  }
 
   let referralDestination;
   let referralReason;
@@ -1113,11 +1326,12 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   const dispensaryStatus = getDispensaryOperatingStatus();
 
-  // Check if current time is off-hours (between 4:00 PM and 10:00 AM)
+  // Check IST time:
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
   const hour = istDate.getHours();
   const currentMinutes = hour * 60 + istDate.getMinutes();
+  const isNightAfter10PM = hour >= 22 || hour < 6; // 10:00 PM to 6:00 AM IST
   const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM (960) to 10:00 AM (600)
 
   // Conditions for Category 7: ESI Tie-Up Hospital
@@ -1138,15 +1352,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     referralReason = directIntent.reason;
     secondaryReferral = "ESIC Hospital";
   }
-  // Tier 1: 108 Ambulance Services (Priority: Life-Threatening / Transport Emergency)
-  else if (
-    isEmergency108 ||
-    ((severity === "High" || severityScore >= 8) &&
-      !/\b(superficial|minor cut|bleeding.*(?:managed|slow|controlled|stopped)|can speak normally|normal|hosh me|conscious)\b/i.test(allContext) &&
-      /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|deep cut|fracture|crushing chest|heart attack|cardiac arrest|unconscious|behosh)\b/i.test(allContext))
-  ) {
+  // Tier 1: 108 Ambulance Services (Strict Life-Threatening Crisis ONLY)
+  else if (isEmergency108) {
     referralDestination = "108 Ambulance";
-    referralReason = "Life-threatening acute emergency or trauma injury; dispatch 108 Ambulance immediately.";
+    referralReason = ambulanceCheck.reason || "Life-threatening acute emergency or trauma injury; dispatch 108 Ambulance immediately.";
     secondaryReferral = "ESIC Hospital";
   }
   // Tier 2: Mental Health / Emotional Distress / Suicide Crisis -> 104 Health Helpline
@@ -1181,6 +1390,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     secondaryReferral = "ESIC Hospital";
     isDualProtocol = false;
   }
+  // After 10:00 PM: If manageable and not life-and-death -> 104 Health Helpline
+  else if (isNightAfter10PM) {
+    referralDestination = "104 Health Helpline";
+    referralReason = "Night hours (after 10:00 PM): Condition is manageable. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
+  }
   // If off-hours (after 4 PM to 10 AM) and NO emergency:
   else if (isOffHours || !dispensaryStatus.isOpen) {
     referralDestination = "104 Health Helpline";
@@ -1198,10 +1414,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     secondaryReferral = "ESIS Dispensary";
     isDualProtocol = false;
   }
-  // Tier 3: ESIS Dispensary (Priority: Primary / Routine Care)
+  // Tier 3: ESIS Dispensary (Priority: Primary / Routine Care during 10 AM - 4 PM)
   else if (dispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
-    referralReason = "Beneficiary needs basic outpatient (OPD) primary care during standard working hours (10:00 AM – 4:00 PM); visit nearest ESIS Dispensary for doctor consultation and medicines.";
+    referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS Dispensary for doctor consultation and medicines.";
     secondaryReferral = "104 Health Helpline";
     isDualProtocol = false;
   }
@@ -1218,15 +1434,20 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   }
 
   const userTurnsCount = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
-  const isEmergency = isEmergency108 || (directIntent && directIntent.destination === "108 Ambulance");
   const isDirect = Boolean(directIntent);
 
   // In first two probing turns (turns 1 and 2), we do NOT show premature referral recommendation
-  // unless there is an immediate 108 life emergency or direct caller request
+  // or jump to 108 unless there is an unequivocal critical life-or-death crisis
+  // (e.g. cardiac arrest, unresponsive/unconscious, drowning, massive arterial hemorrhage, or direct caller ambulance request).
+  // First ask probing questions to find out whether condition is emergency or manageable at hospital, especially in daytime.
+  const isLifeThreateningCrisis =
+    (directIntent && directIntent.destination === "108 Ambulance") ||
+    /\b(cardiac arrest|heart attack|unconscious|behosh|not breathing|choking|drank poison|poisoning|drowning)\b/i.test(allContext);
+
   const isReferralReady =
     userTurnsCount >= 3 ||
     Boolean(raw.isReadyForSummary) ||
-    isEmergency ||
+    isLifeThreateningCrisis ||
     isDirect;
 
   if (!isReferralReady) {
@@ -1246,18 +1467,25 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   const nlp = extractClinicalEntities(cleanInputWithoutTimestamps || cleanInput, "probing", prevState);
   const detectedDur = nlp?.detectedDuration;
 
-  // Discard raw duration if it's merely a calendar date or clock timestamp
-  const isRawDurationDateOrTime = raw.duration && (
+  // Discard raw duration if it's merely a calendar date, clock timestamp, or injury mechanism (e.g. "Recent fall")
+  const isInvalidDuration = raw.duration && (
     /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/.test(raw.duration) ||
     /\b\d{1,2}:\d{2}/.test(raw.duration) ||
-    /\b(am|pm|today's date|current time)\b/i.test(raw.duration)
+    /\b(am|pm|today's date|current time)\b/i.test(raw.duration) ||
+    /\b(fall|fell|falling|accident|injury|trauma|pain|chot|gir gaya|impact|fracture|wound)\b/i.test(raw.duration)
   );
+
+  // If a fall was reported in duration or text, ensure it is preserved as a clinical Red Flag / mechanism
+  if (raw.duration && /\b(fall|fell|falling|gir gaya|accident|injury)\b/i.test(raw.duration)) {
+    if (!Array.isArray(raw.redFlags)) raw.redFlags = [];
+    raw.redFlags.push("Recent fall / physical impact trauma");
+  }
 
   const duration =
     detectedDur ||
-    (!isRawDurationDateOrTime && raw.duration && raw.duration !== "Not specified" ? raw.duration : null) ||
+    (!isInvalidDuration && raw.duration && raw.duration !== "Not specified" ? raw.duration : null) ||
     prevState.duration ||
-    "Not specified";
+    "Reported today";
 
   let probingQuestion = raw.probingQuestion || 'Ask the IP: "Could you please describe how you are feeling and what symptoms are troubling you most?"';
 
@@ -1309,6 +1537,16 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     if (prevCore.length > 15 && candidateCore.length > 15) {
       if (prevCore.includes(candidateCore) || candidateCore.includes(prevCore)) return true;
     }
+    // Semantic clinical topic duplication checks
+    const isBothAssociated = /\b(associated|companion|nausea.*dizzy|ulti.*chakkar)\b/i.test(prevQ) && /\b(associated|companion|nausea.*dizzy|ulti.*chakkar)\b/i.test(probingQuestion);
+    const isBothDuration = /\b(when did|how long|how many days|kab se|kitne din)\b/i.test(prevQ) && /\b(when did|how long|how many days|kab se|kitne din)\b/i.test(probingQuestion);
+    const isBothMedication = /\b(medicines?|dawai|painkillers?|paracetamol)\b/i.test(prevQ) && /\b(medicines?|dawai|painkillers?|paracetamol)\b/i.test(probingQuestion);
+    const isBothComorbidity = /\b(comorbidit|pre-existing|diabetes|bp|asthma|pehle se)\b/i.test(prevQ) && /\b(comorbidit|pre-existing|diabetes|bp|asthma|pehle se)\b/i.test(probingQuestion);
+    const isBothRadiation = /\b(radiat|spread|phail)\b/i.test(prevQ) && /\b(radiat|spread|phail)\b/i.test(probingQuestion);
+    const isBothDailyImpact = /\b(affect.*eat|khana.*peena|daily activities|chalne.*firne)\b/i.test(prevQ) && /\b(affect.*eat|khana.*peena|daily activities|chalne.*firne)\b/i.test(probingQuestion);
+    if (isBothAssociated || isBothDuration || isBothMedication || isBothComorbidity || isBothRadiation || isBothDailyImpact) {
+      return true;
+    }
     return false;
   });
 
@@ -1317,7 +1555,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     const alternativeQuestions = [
       {
         id: "associated_symptoms",
-        match: () => true,
+        match: () => !askedQuestionsList.some((q) => /\b(associated|companion|nausea.*dizzy|ulti.*chakkar)\b/i.test(q)),
         question:
           'Ask the IP: "Are you experiencing any other associated symptoms such as nausea, dizziness, sweating, or weakness?" (Hinglish: "Kya aapko ulti, chakkar, pasina, ya kamzori jaisi koi aur takleef bhi mehsoos ho rahi hai?")',
         options: [
@@ -1329,7 +1567,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       },
       {
         id: "pain_character_radiation",
-        match: () => /\b(pain|dard|ache|cramp|pressure)\b/i.test(allContext),
+        match: () => /\b(pain|dard|ache|cramp|pressure)\b/i.test(allContext) && !askedQuestionsList.some((q) => /\b(radiat|spread|phail)\b/i.test(q)),
         question:
           'Ask the IP: "Does this pain spread or radiate to any other part of your body, such as your back, arm, or jaw?" (Hinglish: "Kya yeh dard sharir ke kisi aur hisse jaise peeth, baazu ya jabde ki taraf phail raha hai?")',
         options: [
@@ -1341,7 +1579,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       },
       {
         id: "functional_daily_impact",
-        match: () => true,
+        match: () => !askedQuestionsList.some((q) => /\b(affect.*eat|khana.*peena|daily activities|chalne.*firne)\b/i.test(q)),
         question:
           'Ask the IP: "Has this condition affected your ability to eat, drink fluids, or sleep comfortably?" (Hinglish: "Kya is takleef ki wajah se khana peena ya sona mushkil ho raha hai?")',
         options: [
@@ -1353,7 +1591,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       },
       {
         id: "symptom_progression",
-        match: () => true,
+        match: () => !askedQuestionsList.some((q) => /\b(waves|cramps|continuously|lagataar|beech-beech)\b/i.test(q)),
         question:
           'Ask the IP: "Does this discomfort stay continuously at the same level, or does it come and go in waves?" (Hinglish: "Kya yeh takleef lagataar bani rehti hai, ya beech-beech me kam-zyada hoti hai?")',
         options: [
@@ -1365,7 +1603,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       },
       {
         id: "medication_history",
-        match: () => true,
+        match: () => !askedQuestionsList.some((q) => /\b(medicines?|dawai|painkillers?|paracetamol)\b/i.test(q)),
         question:
           'Ask the IP: "Have you taken any medicines, painkillers, or home remedies for this, and did they provide relief?" (Hinglish: "Kya aapne iske liye koi dawai ya gharelu upchaar liya hai, aur kya usse aaram mila?")',
         options: [
@@ -1377,13 +1615,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       },
       {
         id: "pre_existing_conditions",
-        match: () => true,
+        match: () => !askedQuestionsList.some((q) => /\b(pre-existing|diabetes|bp|asthma|pehle se|comorbidit)\b/i.test(q)),
         question:
-          'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, or asthma?" (Hinglish: "Kya aapko pehle se diabetes, high BP, ya asthma jaisi koi bimari hai?")',
+          'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, or asthma, and are you taking any regular medications for them?" (Hinglish: "Kya aapko pehle se diabetes, high BP, ya asthma jaisi koi bimari hai, aur kya aap koi regular dawai lete hain?")',
         options: [
           "History of high blood pressure (BP)",
           "History of diabetes / sugar",
-          "Asthma or breathing allergies",
+          "Asthma or respiratory condition",
           "No pre-existing health conditions",
         ],
       },
@@ -1396,10 +1634,22 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
         const prevC = getCoreQuestionText(prevQ);
         return prevC === core || (prevC.length > 15 && (prevC.includes(core) || core.includes(prevC)));
       });
-    }) || alternativeQuestions[0];
+    });
 
-    probingQuestion = pick.question;
-    raw.suggestedAnswers = pick.options;
+    if (pick) {
+      probingQuestion = pick.question;
+      raw.suggestedAnswers = pick.options;
+    } else {
+      // All topics already thoroughly asked: conclude questioning gracefully without repetition
+      raw.isReadyForSummary = true;
+      probingQuestion = 'Ask the IP: "We have carefully noted all your symptoms and medical details. Please confirm your exact location so I can direct you to the nearest facility or dispatch assistance." (Hinglish: "Humne aapki saari takleef aur lakshan note kar liye hain. Kripya apna sahi pata ya landmark batayein taaki sahi suvidha tak margdarshan kiya ja sake.")';
+      raw.suggestedAnswers = [
+        "Please guide me to the nearest healthcare facility",
+        "Need immediate emergency assistance",
+        "Connect me with the 104 tele-doctor",
+        "Will visit ESIC Hospital / Dispensary",
+      ];
+    }
   }
 
   // Provide progressive fallback if probing question is still empty
@@ -1486,17 +1736,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   const isDual = Boolean(isDualProtocol || raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
   const secondaryRef = secondaryReferral || raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
 
-  const userUtterances = [
-    cleanInput,
-    ...history
-      .filter((m) => m.sender === "user" || m.role === "user")
-      .map((m) => (typeof m.content === "string" ? m.content : m.text || "")),
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  const affirmativeCallerText = stripNegatedPhrases(userUtterances);
-
   const callerDeniesFever =
     /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|do\s+not\s+have\s+fever|without\s+fever|fever\s+nahi|bukhar\s+nahi|no\s+chills|no\s+body\s*aches?|without\s+chills|nehi|nahi|not\s+having\s+fever)\b/i.test(
       userUtterances
@@ -1541,6 +1780,26 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     }
   }
 
+  // If caller mentioned period / menstrual cramps, ensure condition is Dysmenorrhea / Menstrual Cramps
+  const isPeriodCramps = /\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|period cramps|periods cramps|periods ka dard|mahavari dard)\b/i.test(affirmativeCallerText);
+  if (isPeriodCramps) {
+    finalCondition = "Dysmenorrhea / Menstrual Cramps";
+  }
+
+  // Prevent false cardiac assignment: if caller NEVER spoke about chest/heart, strip any cardiac condition
+  const callerSpokeChest = /\b(chest|chhati|heart|angina|crushing|dil ka dard|left arm)\b/i.test(affirmativeCallerText);
+  if (!callerSpokeChest && (finalCondition.includes("Coronary") || finalCondition.includes("Chest Discomfort"))) {
+    if (isPeriodCramps) {
+      finalCondition = "Dysmenorrhea / Menstrual Cramps";
+    } else if (/\b(stomach|abdom|pet|gastric|cramp|colic)\b/i.test(affirmativeCallerText)) {
+      finalCondition = "Abdominal / Gastric Pain";
+    } else {
+      finalCondition = prevState.suspectedCondition && !prevState.suspectedCondition.includes("Coronary")
+        ? prevState.suspectedCondition
+        : "Clinical Assessment";
+    }
+  }
+
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
 
@@ -1548,6 +1807,22 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     (f) => {
       if (!f || typeof f !== "string") return false;
       const fLower = f.toLowerCase();
+      // Never allow duration in red flags!
+      if (
+        /\b(duration|since|days?|hours?|weeks?|months?|dino?|ghante?|yesterday|today|4-7 days|2-3 days|less than 2 hours)\b/i.test(fLower) ||
+        /^\d+\s*-\s*\d+\s*(?:days?|hours?|weeks?|months?)$/i.test(f.trim()) ||
+        /^duration:?\s*/i.test(f.trim())
+      ) {
+        return false;
+      }
+      // Never allow generic filler in red flags!
+      if (
+        fLower.includes("acute presentation") ||
+        fLower.includes("high severity reported") ||
+        fLower.includes("urgent ambulance transfer")
+      ) {
+        return false;
+      }
       if (
         fLower.includes("fever") ||
         fLower.includes("bukhar") ||
@@ -1605,6 +1880,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     addDetectedFlag("Heavy uncontrolled bleeding");
   }
 
+  const detectedComorbidity = raw.comorbidity || raw.comorbidities || extractComorbiditiesFromText(allContext, prevState.comorbidity || prevState.comorbidities);
+  const detectedAllergies = raw.allergies || raw.allergy || extractAllergiesFromText(allContext, prevState.allergies);
+  const detectedMedications = raw.medications || raw.medication || extractMedicationsFromText(allContext, prevState.medications || prevState.medication);
+
   return {
     probingQuestion,
     suggestedAnswers,
@@ -1616,8 +1895,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     referralReason,
     is_dual_protocol: isDual,
     call_referral_secondary: secondaryRef,
-    redFlagsDetected: filteredRedFlags,
+    redFlagsDetected: deduplicateRedFlags(filteredRedFlags),
     duration,
+    comorbidity: detectedComorbidity,
+    comorbidities: detectedComorbidity,
+    allergies: detectedAllergies,
+    medication: detectedMedications,
+    medications: detectedMedications,
     isReadyForSummary: Boolean(raw.isReadyForSummary || (history.length >= 6) || is104PhoneDoctor),
     clinicalSummary: sanitizeSymptomOrCondition(
       raw.clinicalSummary ||
@@ -1633,11 +1917,21 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
  */
 export function buildLocalDoctorConsultationFallback(userInput, history = [], prevState = {}) {
   const cleanInput = (userInput || "").toLowerCase().trim();
-  const historyText = history
+  const userMessages = history.filter(
+    (m) => m.sender === "user" || m.role === "user"
+  );
+  const userUtterances = userMessages
     .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
     .join(" ")
     .toLowerCase();
-  const effectiveInput = `${cleanInput} ${prevState.suspectedCondition || ""} ${prevState.symptom || ""} ${historyText}`.toLowerCase();
+  const allCallerText = `${cleanInput} ${userUtterances}`.trim().toLowerCase();
+  const affirmativeCallerText = stripNegatedPhrases(allCallerText);
+  const allContext = `${cleanInput} ${allCallerText} ${prevState.referralDestination || ""}`.toLowerCase();
+
+  // CRITICAL: effectiveInput must ONLY contain what the CALLER actually reported!
+  // Assistant bot questions must NEVER be included here, otherwise asking "do you have heart disease?"
+  // will falsely diagnose the caller with heart disease!
+  const effectiveInput = affirmativeCallerText;
 
   // Extract all questions already asked by the bot in this session
   const askedQuestions = history
@@ -1677,8 +1971,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   // 1. Combined Self-Harm / Traumatic Hemorrhage with Psychological Distress
   const isSelfHarmTrauma =
-    /\b(cut.*wrist|wrist.*cut|bleeding.*cut|cut.*hand|overdose|drank poison|poisoning|hanging|sleeping pills|nass kaat|khoon nikal)\b/i.test(cleanInput) ||
-    (/\b(cut|bleeding|wound|khoon)\b/i.test(cleanInput) && /\b(sad|depress|die|suicid|jaan|mar ja|alone|unwanted)\b/i.test(cleanInput));
+    /\b(cut.*wrist|wrist.*cut|overdose|drank poison|poisoning|hanging|sleeping pills|nass kaat|haath ki nas)\b/i.test(cleanInput) ||
+    (/\b(cut|bleeding|wound|khoon)\b/i.test(cleanInput) && /\b(sad|depress|die|suicid|jaan\s*(?:dene|dena)|mar ja|alone|unwanted|self[- ]?harm)\b/i.test(cleanInput));
 
   if (isSelfHarmTrauma) {
     const harmSteps = [
@@ -1828,92 +2122,197 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   }
 
-  // 2. Accident / Trauma Emergency
-  const isAccident =
-    /\b(accident|durghatna|chot|injury|cut|hit by|road accident|bike accident|car crash|fall from|machine accident|casualty|laceration|bleeding from cut)\b/i.test(
-      cleanInput
-    ) || (prevState.suspectedCondition || "").includes("Accident");
+  // 2. High-Risk Obstetric / Pregnancy Crisis Emergency
+  const isPregnancyEmergency = /\b(pregnant|pregnancy|garbhwati|hamla|pragnen\w*|expecting|trimester|foetus|fetus|water\s*broke|labor\s*pain|labour\s*pain)\b/i.test(effectiveInput);
+  if (isPregnancyEmergency) {
+    const isSeverePregnancy =
+      /\b(heavy\s*(?:vaginal\s*)?bleed\w*|sudden\s*bleed\w*|vaginal\s*bleed\w*|bleed\w*.*(?:severe|intense)\s*pain|water\s*broke|amniotic|active\s*labor|eclampsia|seizure|convulsion|severe\s*continuous\s*(?:abdominal|pelvic)\s*pain|unbearable\s*pain)\b/i.test(allContext) ||
+      /\b(pregnant with heavy|water broke|high blood pressure with severe)\b/i.test(cleanInput);
 
-  if (isAccident) {
-    const traumaSteps = [
-      {
-        id: "trauma_location_time",
-        condition:
-          !hasAsked(["kis jagah", "where did the accident", "exact location", "landmark"]) &&
-          !/\b(road|highway|factory|floor|street|colony|area|mins ago|hours ago|just now|landmark|guwahati|tinsukia|dibrugarh)\b/i.test(cleanInput),
-        question:
-          'Ask the IP: "Please stay as calm as possible, help is being organized. What is the exact location, road, or factory landmark of the accident?" (Hinglish: "Kripya shaant rahein, madad bheji ja rahi hai. Durghatna kis jagah, road ya factory me hui hai?")',
-        options: [
-          "Road / highway accident — happened just now (<15 mins)",
-          "Workplace / factory machine injury (<1 hour)",
-          "Fall from height at construction site",
-          "Vehicle collision on main road",
-        ],
-      },
-      {
-        id: "trauma_casualties",
-        condition:
-          !hasAsked(["kitne log", "how many casualties", "trapped", "behosh"]) &&
-          !/\b(1 worker|2 worker|\d+ worker|\d+ people|\d+ casualties|trapped|unconscious|single person)\b/i.test(cleanInput),
-        question:
-          'Ask the IP: "How many people or workers are injured?" (Hinglish: "Kul kitne log ya workers ghayal hain?")',
-        options: [
-          "1 person injured — conscious with severe pain",
-          "2 or more casualties — multiple people hurt",
-          "Victim is unconscious / not responding",
-          "Person trapped in vehicle / needs rescue",
-        ],
-      },
-      {
-        id: "trauma_bleeding_fracture",
-        condition:
-          !hasAsked(["khoon bah raha", "bleeding", "direct pressure", "fracture", "active spurting"]) &&
-          !/\b(applying pressure|pressure applied|tourniquet|bandaged)\b/i.test(cleanInput),
-        question:
-          'Ask the IP: "Is there active spurting bleeding from the wound? If yes, apply firm direct pressure with a clean cloth immediately." (Hinglish: "Kya ghaav se tez khoon beh raha hai? Agar haan toh turant saaf kapde se daba kar rakhein.")',
-        options: [
-          "Heavy bleeding — applying firm pressure now",
-          "Suspected fracture — unable to move limb",
-          "Head injury with scalp cut / bleeding",
-          "Minor bleeding, mostly bruises and shock",
-        ],
-      },
-      {
-        id: "trauma_dispatch",
-        condition: true,
-        question:
-          'Ask the IP: "108 Emergency Ambulance is being dispatched to your location. Can the ambulance reach your location directly?" (Hinglish: "108 Ambulance ko coordinate kiya ja raha hai. Kya ambulance seedhe aapki location tak pahunch sakti hai?")',
-        options: [
-          "Yes, ambulance can reach directly on road",
-          "Guiding ambulance from main entrance",
-          "Arranging immediate local vehicle to nearest hospital",
-          "Standing by with the injured person",
-        ],
-      },
-    ];
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const currentStep = traumaSteps.find((s) => s.condition) || traumaSteps[traumaSteps.length - 1];
+    const pregSeverity = isSeverePregnancy ? "High" : "Moderate";
+    const pregSeverityScore = isSeverePregnancy ? 10 : 6;
+    const pregReferral = isSeverePregnancy ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
 
     return {
-      probingQuestion: enforceSingleQuestion(currentStep.question),
-      suggestedAnswers: currentStep.options,
+      probingQuestion: enforceSingleQuestion(
+        'Ask the IP: "Are you pregnant and experiencing heavy vaginal bleeding, severe continuous abdominal/back pain, water breaking, or seizures / severe headache with high BP?" (Hinglish: "Kya pregnancy me tez khoon behna, pet me lagataar asahniya dard, paani ki thaili phatna, ya high BP ke saath daura/sir dard ho raha hai?")'
+      ),
+      suggestedAnswers: [
+        "Pregnant with heavy vaginal bleeding or severe continuous pain (Emergency)",
+        "Amniotic sac ruptured (water broke) / intense labor pains close together (Emergency)",
+        "High blood pressure with severe headache, vision changes, or seizures (Emergency)",
+        "Mild pregnancy cramps / nausea without bleeding, routine inquiry",
+      ],
+      suspectedCondition: "High-Risk Pregnancy / Obstetric Emergency",
+      isPsychiatric: false,
+      severity: pregSeverity,
+      severityScore: pregSeverityScore,
+      referralDestination: pregReferral,
+      referralReason: isSeverePregnancy
+        ? "High-risk obstetric emergency (heavy bleeding, active labor/water broke, or eclampsia) requiring immediate 108 Emergency Ambulance dispatch."
+        : "Pregnancy discomfort requires medical evaluation by an obstetrician.",
+      redFlagsDetected: isSeverePregnancy ? ["High-risk pregnancy complication / acute labor"] : ["Pregnancy symptom under evaluation"],
+      duration: prevState.duration || "Reported today",
+      isReadyForSummary: isSeverePregnancy ? true : history.length >= 2,
+      clinicalSummary: `Obstetric evaluation in progress. Severity: ${pregSeverity}. Referral: ${pregReferral}.`,
+    };
+  }
+
+  // 3. Senselessness / Unconsciousness / Fainting Emergency
+  const isSenselessOrUnconscious =
+    /\b(senseless\w*|unconscious\w*|behosh\w*|behoshi|faint\w*|blackout\w*|loss\s*of\s*consciousness|unresponsive|not\s*waking\s*up|collapsed\b)/i.test(effectiveInput) &&
+    !/\b(conscious|alert|hosh\s*me|awake)\b/i.test(cleanInput);
+  if (isSenselessOrUnconscious) {
+    const isSevereUnconscious =
+      /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|senseless|senselessness|not waking up|coma|head injury|seizure|convulsion)\b/i.test(allContext) &&
+      !/\b(fainted briefly|now awake|talking normally|dizzy only|conscious)\b/i.test(cleanInput);
+
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    const uncSeverity = isSevereUnconscious ? "High" : "Moderate";
+    const uncSeverityScore = isSevereUnconscious ? 10 : 6;
+    const uncReferral = isSevereUnconscious ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
+
+    return {
+      probingQuestion: enforceSingleQuestion(
+        'Ask the IP: "Is the person currently senseless, completely unresponsive and not waking up, or have they had a seizure/fit?" (Hinglish: "Kya marij abhi poori tarah behosh/senseless hai aur aawaz dene par bhi hosh me nahi aa raha, ya daura pada hai?")'
+      ),
+      suggestedAnswers: [
+        "Completely senseless / unresponsive and will not wake up (Emergency)",
+        "Unconscious after head injury or seizure / convulsion (Emergency)",
+        "Fainted briefly for a few seconds, but now awake and alert",
+        "Feeling dizzy or lightheaded, but fully conscious and talking",
+      ],
+      suspectedCondition: "Loss of Consciousness / Unresponsiveness",
+      isPsychiatric: false,
+      severity: uncSeverity,
+      severityScore: uncSeverityScore,
+      referralDestination: uncReferral,
+      referralReason: isSevereUnconscious
+        ? "Senselessness / unresponsive patient requires immediate 108 Emergency Ambulance dispatch."
+        : "Episode of fainting/dizziness requires casualty medical evaluation.",
+      redFlagsDetected: isSevereUnconscious ? ["Unresponsiveness / Complete loss of consciousness"] : ["Syncope episode reported"],
+      duration: prevState.duration || "< 1 hour",
+      isReadyForSummary: history.length >= 2,
+      clinicalSummary: `Unconsciousness evaluation in progress. Severity: ${uncSeverity}. Referral: ${uncReferral}.`,
+    };
+  }
+
+  // 4. Deep Cuts & Heavy Bleeding Emergency
+  const inputAffirmative = stripNegatedPhrases(cleanInput);
+  const isBleedOrCutDenied = /\b(no\s+cut|no\s+wound|no\s+bleed|bleeding\s*stopped|khoon\s*ruk\s*gaya|chot\s*nahi)\b/i.test(cleanInput);
+  const hasDeepCutOrBleed =
+    !isBleedOrCutDenied &&
+    (/\b(deep\s*cut|gaping\s*cut|deep\s*wound|deep\s*laceration|gehra\s*ghao|gehra\s*cut|severe\s*cut|heavy\s*bleed\w*|profuse\s*bleed\w*|uncontrolled\s*bleed\w*|continuous\s*bleed\w*|spurting|tez\s*khoon|bohot\s*khoon|khoon\s*nahi\s*ruk\s*raha)\b/i.test(effectiveInput) ||
+     (/\b(cut|laceration|wound|ghao)\b/i.test(effectiveInput) && /\b(bleed|blood|khoon)\b/i.test(effectiveInput)));
+
+  if (hasDeepCutOrBleed) {
+    const isLifeThreateningBleed =
+      /\b(heavy\s*active\s*spurting|deep\s*gaping|spurting|arterial|uncontrolled|cannot\s*stop|not\s*stopping|soaking|profuse|massive)\b/i.test(allContext) &&
+      !/\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut|stopped with firm pressure)\b/i.test(cleanInput);
+
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    const cutSeverity = isLifeThreateningBleed ? "High" : "Moderate";
+    const cutSeverityScore = isLifeThreateningBleed ? 10 : 6;
+    let cutReferral = isLifeThreateningBleed ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
+
+    return {
+      probingQuestion: enforceSingleQuestion(
+        'Ask the IP: "How deep is the cut, and is blood spurting or soaking through cloths continuously despite firm direct pressure?" (Hinglish: "Ghaav kitna gehra hai, aur kya saaf kapde se dabane ke bawajood lagatar tez khoon beh raha hai?")'
+      ),
+      suggestedAnswers: [
+        "Heavy active spurting bleeding — cannot stop with cloth (Emergency)",
+        "Deep gaping cut exposing fat or muscle, continuous bleeding (Severe)",
+        "Deep cut, but bleeding has slowed / stopped with firm pressure",
+        "Superficial cut / minor scrape with mild bleeding",
+      ],
+      suspectedCondition: "Deep Cut / Active Bleeding",
+      isPsychiatric: false,
+      severity: cutSeverity,
+      severityScore: cutSeverityScore,
+      referralDestination: cutReferral,
+      referralReason: isLifeThreateningBleed
+        ? "Deep cut with uncontrolled hemorrhage / spurting bleeding requires immediate 108 Emergency Ambulance dispatch."
+        : "Wound requires medical evaluation, dressing, and tetanus prophylaxis at nearest dispensary.",
+      redFlagsDetected: isLifeThreateningBleed ? ["Uncontrolled spurting hemorrhage / Deep gaping wound"] : ["Laceration injury reported"],
+      duration: prevState.duration || "Fresh injury (< 2 hours)",
+      isReadyForSummary: history.length >= 2,
+      clinicalSummary: `Wound assessment in progress. Clinical severity: ${cutSeverity}. Referral: ${cutReferral}.`,
+    };
+  }
+
+  // 5. Accident / High-Impact Trauma Casualty Emergency
+  const isAccidentDenied = /\b(no\s+accident|not\s+an\s+accident|no\s+injury|not\s+injured|without\s+injury|accident\s+nahi|durghatna\s+nahi)\b/i.test(cleanInput);
+  if (isAccidentDenied && (prevState.suspectedCondition || "").includes("Accident")) {
+    prevState.suspectedCondition = "";
+  }
+
+  const isAccident =
+    !isAccidentDenied &&
+    (/\b(accident|durghatna|car\s*crash|bike\s*accident|road\s*accident|hit\s*by|fall\s*from\s*(?:height|roof|building|tree|stairs)|machine\s*accident|machinery\s*accident|industrial\s*injury)\b/i.test(
+      inputAffirmative
+    ) || ((prevState.suspectedCondition || "").includes("Accident") && !isAccidentDenied));
+
+  if (isAccident) {
+    const isLifeThreateningTrauma =
+      /\b(severe crash|severe vehicular|trapped in vehicle|fall from (?:roof|building|height)|head injury.*unconscious|bone deformity|visible bone|open fracture|unable to move|amputation|crushed\s*limb|third degree burn|head trauma|fracture|broken bone|bleeding heavily|deep cut)\b/i.test(allContext) ||
+      /\b(severe vehicular crash|trapped in vehicle|emergency\)|head injury|bone deformity)\b/i.test(cleanInput);
+
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    const traumaSeverity = isLifeThreateningTrauma ? "High" : "Moderate";
+    const traumaSeverityScore = isLifeThreateningTrauma ? 10 : 6;
+    let traumaReferral = isLifeThreateningTrauma ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
+    let traumaReason = isLifeThreateningTrauma
+      ? "Acute severe catastrophic trauma casualty requiring immediate 108 Emergency Ambulance dispatch."
+      : "Manageable minor accident trauma; visit nearest ESIS Dispensary for doctor evaluation.";
+
+    return {
+      probingQuestion: enforceSingleQuestion(
+        'Ask the IP: "Was it a high-speed vehicle crash or fall from height with severe head trauma, bone deformity/fracture, heavy bleeding, or trapped victim?" (Hinglish: "Kya yeh tez takkar ya unchai se girne ka gambhir haadsa hai jisme sar par chot, haddi tutna/tedhi hona, tez khoon ya behoshi hui hai?")'
+      ),
+      suggestedAnswers: [
+        "Severe vehicular crash / fall from height with head injury or bone deformity (Emergency)",
+        "Trapped in vehicle or unable to move due to unbearable trauma (Emergency)",
+        "Minor collision or slip, fully alert with local bruising and swelling",
+        "Minor scrape from low-speed slip, stable and walking normally",
+      ],
       suspectedCondition: "Occupational Trauma / Acute Accident",
       isPsychiatric: false,
-      severity: "High",
-      severityScore: 9,
-      referralDestination: "108 Ambulance",
-      referralReason: "Acute accident / trauma incident requiring immediate location details and 108 emergency dispatch.",
-      redFlagsDetected: ["Acute accident / trauma reported"],
+      severity: traumaSeverity,
+      severityScore: traumaSeverityScore,
+      referralDestination: traumaReferral,
+      referralReason: traumaReason,
+      redFlagsDetected: isLifeThreateningTrauma ? ["Major catastrophic trauma casualty / Fracture deformity"] : ["Minor injury reported"],
       duration: "Fresh accident / trauma (<2 hours)",
-      isReadyForSummary: history.length >= 2,
-      clinicalSummary: "Accident / trauma reported. Immediate location coordination and 108 Ambulance dispatch advised.",
+      isReadyForSummary: isLifeThreateningTrauma ? true : history.length >= 2,
+      clinicalSummary: `Trauma assessment in progress. Clinical severity: ${traumaSeverity}. Referral: ${traumaReferral}.`,
     };
   }
 
   // 3. Cardiac / Chest Pain Emergency
-  const isCardiac =
-    /\b(chest pain|chhati me dard|seene me dard|heart attack|angina|crushing pain|baayein haath)\b/i.test(cleanInput) ||
-    (prevState.suspectedCondition || "").includes("Coronary");
+  const hasChestPainDenial = /\b(no\s+chest\s+pain|seene\s*me\s*dard\s*nahi|chhati\s*dard\s*nahi|not\s+chest\s+pain)\b/i.test(cleanInput);
+  if (hasChestPainDenial && (prevState.suspectedCondition || "").includes("Coronary")) {
+    prevState.suspectedCondition = "";
+  }
+
+  const callerSpokeCardiac = /\b(chest pain|chhati me dard|seene me dard|heart attack|angina|crushing chest|crushing pain in chest|baayein haath me dard)\b/i.test(affirmativeCallerText);
+  const isCardiac = !hasChestPainDenial && callerSpokeCardiac;
 
   if (isCardiac) {
     const cardiacSteps = [
@@ -1969,19 +2368,120 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
     const currentStep = cardiacSteps.find((s) => s.condition) || cardiacSteps[cardiacSteps.length - 1];
 
+    const isLifeThreateningCardiac =
+      /\b(crushing|radiating|left arm|baayein haath|sweat|pasina|gasping|unconscious)\b/i.test(allContext) &&
+      !/\b(burning|acidity|gas|sharp|stinging|mild|tolerable)\b/i.test(cleanInput);
+
+    const cardiacSeverity = isLifeThreateningCardiac ? "High" : "Moderate";
+    const cardiacSeverityScore = isLifeThreateningCardiac ? 9 : 6;
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    let cardiacReferral = isLifeThreateningCardiac ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
+
     return {
       probingQuestion: enforceSingleQuestion(currentStep.question),
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Suspected Acute Coronary Syndrome",
       isPsychiatric: false,
-      severity: "High",
-      severityScore: 9,
-      referralDestination: "108 Ambulance",
-      referralReason: "High-risk chest pain symptoms requiring emergency cardiac evaluation and 108 Ambulance transport.",
-      redFlagsDetected: ["Suspected Acute Coronary Syndrome"],
+      severity: cardiacSeverity,
+      severityScore: cardiacSeverityScore,
+      referralDestination: cardiacReferral,
+      referralReason: isLifeThreateningCardiac
+        ? "High-risk crushing chest pain symptoms requiring emergency cardiac evaluation and 108 Ambulance transport."
+        : "Chest pain requires medical review at hospital casualty.",
+      redFlagsDetected: isLifeThreateningCardiac ? ["Suspected Acute Coronary Syndrome"] : ["Chest discomfort reported"],
       duration: prevState.duration || "< 2 hours",
       isReadyForSummary: history.length >= 2,
-      clinicalSummary: "Patient presents with acute chest pain symptoms. Priority 108 Ambulance dispatch advised.",
+      clinicalSummary: `Cardiac evaluation in progress. Severity: ${cardiacSeverity}. Referral: ${cardiacReferral}.`,
+    };
+  }
+
+  // 6. Severe Breathlessness / Respiratory Distress Emergency
+  const isBreathingDenied = /\b(no\s+(?:breathing|breathless|shortness of breath|dyspnea)|saans\s*me\s*takleef\s*nahi|saans\s*nahi\s*phool\s*rahi)\b/i.test(cleanInput);
+  if (isBreathingDenied && (prevState.suspectedCondition || "").includes("Respiratory")) {
+    prevState.suspectedCondition = "";
+  }
+  const hasBreathlessness =
+    !isBreathingDenied &&
+    /\b(breathless\w*|difficulty\s*breath\w*|trouble\s*breath\w*|shortness\s*of\s*breath|saans\s*lene\s*me|saans\s*phool|gasp\w*|wheez\w*|stridor|asthma\s*attack|choking)\b/i.test(effectiveInput);
+
+  if (hasBreathlessness) {
+    const isSevereBreathing =
+      /\b(gasping\s*for\s*air|unable\s*to\s*speak\s*in\s*full\s*sentences|cannot\s*speak|cannot\s*talk|blue\s*lips|cyanosis|struggling\s*for\s*breath|suffocating|choking)\b/i.test(allContext) ||
+      /\b(yes,\s*gasping|gasping|emergency\)|unable to speak|blue lips)\b/i.test(cleanInput);
+
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    const breathSeverity = isSevereBreathing ? "High" : "Moderate";
+    const breathSeverityScore = isSevereBreathing ? 10 : 6;
+    let breathReferral = isSevereBreathing ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
+    let breathReason = isSevereBreathing
+      ? "Severe respiratory distress with gasping or inability to speak in full sentences requires immediate 108 Emergency Ambulance dispatch."
+      : "Respiratory difficulty requires clinical evaluation and nebulization/medication at dispensary.";
+
+    return {
+      probingQuestion: enforceSingleQuestion(
+        'Ask the IP: "Are you struggling to breathe, gasping for air, unable to speak in full sentences, or have bluish lips/fingertips?" (Hinglish: "Kya aapko saans lene mein bahut takleef ho rahi hai, saans phool rahi hai jisse bolna mushkil hai, ya hoth neele pad rahe hain?")'
+      ),
+      suggestedAnswers: [
+        "Yes, gasping for air and cannot speak in full sentences (Emergency)",
+        "Severe asthma attack / acute wheezing struggle (Emergency)",
+        "Moderate breathing discomfort, but able to speak sentences",
+        "Mild breathlessness with coughing, stable while resting",
+      ],
+      suspectedCondition: "Acute Respiratory Distress / Dyspnea",
+      isPsychiatric: false,
+      severity: breathSeverity,
+      severityScore: breathSeverityScore,
+      referralDestination: breathReferral,
+      referralReason: breathReason,
+      redFlagsDetected: isSevereBreathing ? ["Severe Respiratory Distress / Gasping for air"] : ["Dyspnea / Breathlessness reported"],
+      duration: prevState.duration || "< 2 hours",
+      isReadyForSummary: history.length >= 2,
+      clinicalSummary: `Respiratory evaluation in progress. Clinical severity: ${breathSeverity}. Referral: ${breathReferral}.`,
+    };
+  }
+
+  // 7. Snake Bite Envenomation Emergency (Critical life-threatening emergency requiring Anti-Snake Venom (ASV))
+  const isSnakeBiteEmergency = /\b(snake\s*bite|saap\s*(?:ne\s*)?kaat|saanp\s*(?:ne\s*)?kaat|envenomation|snakebite)\b/i.test(effectiveInput);
+  if (isSnakeBiteEmergency) {
+    const hasReportedLocationOrSwelling = /\b(leg|foot|hand|arm|finger|ankle|pair|haath|swelling|sujan|pain|dard)\b/i.test(effectiveInput);
+
+    const snakeSeverity = "High";
+    const snakeSeverityScore = 10;
+    const snakeReferral = "108 Ambulance";
+    const snakeReason = "Snake bite is a critical life-threatening emergency requiring immediate 108 Emergency Ambulance dispatch for anti-snake venom (ASV) and casualty resuscitation.";
+
+    const probingQ = hasReportedLocationOrSwelling
+      ? 'Ask the IP: "Keep the bitten limb completely still below heart level and do not tie a tight tourniquet. Are you experiencing rapid swelling, numbness, or breathing difficulty while the 108 Ambulance is being alerted?" (Hinglish: "Kaate huye hisse ko hilayein nahi aur dil ke level se neeche rakhein, koi kassi patti na baandhein. 108 Ambulance bulayi ja rahi hai. Kya tezi se sujan, sunnta ya saans lene me takleef ho rahi hai?")'
+      : 'Ask the IP: "Snake bite is a life-threatening medical emergency. Which part of your body was bitten, and is there swelling or fang marks? 108 Ambulance is being alerted immediately." (Hinglish: "Saanp ka kaatna gambhir emergency hai. Sharir ke kis hisse par kaata hai aur kya sujan ya daant ke nishan hain? 108 Ambulance turant bheji ja rahi hai.")';
+
+    const snakeOptions = [
+      "Bite on leg / foot with swelling and pain (Ambulance dispatched)",
+      "Bite on hand / arm with spreading numbness (Ambulance dispatched)",
+      "Difficulty breathing / dizziness after bite (Emergency)",
+      "Bite marks visible, keeping limb still and calm",
+    ];
+
+    return {
+      probingQuestion: enforceSingleQuestion(probingQ),
+      suggestedAnswers: snakeOptions,
+      suspectedCondition: "Snake Bite",
+      isPsychiatric: false,
+      severity: snakeSeverity,
+      severityScore: snakeSeverityScore,
+      referralDestination: snakeReferral,
+      referralReason: snakeReason,
+      redFlagsDetected: ["Snake bite envenomation / Neurotoxic-hemotoxic risk"],
+      duration: prevState.duration || "Reported today (< 2 hours)",
+      isReadyForSummary: true, // Emergency: immediately ready, do not delay ambulance dispatch!
+      clinicalSummary: "Snake bite reported. Immediate 108 Emergency Ambulance dispatch required for Anti-Snake Venom (ASV) and casualty stabilization.",
     };
   }
 
@@ -2001,7 +2501,121 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   // Build progressive disease-adaptive probing question tailored to the exact complaint
   let currentStep;
 
-  if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(effectiveInput)) {
+  // Dedicated Dysmenorrhea / Period Cramps & Pelvic Pain Branch
+  if (/\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|periods cramps|period cramps|periods ka dard|mahavari dard)\b/i.test(effectiveInput)) {
+    conditionLabel = "Dysmenorrhea / Menstrual Cramps";
+
+    const isPainManageable = /\b(manageable|can move|can walk|moving around|theek hai|chal pa|bearable|tolerable|not severe|ghoom sakti)\b/i.test(cleanInput) ||
+      /\b(manageable|can move|can walk|moving around|bearable|tolerable)\b/i.test(affirmativeCallerText);
+
+    const hasAskedMobilityOrBleeding = hasAsked(["stand", "walk", "intense", "chalne", "khade", "bleeding", "heavy flow", "clot", "thakke", "manageable"]);
+    const hasAskedMedicationOrRemedy = hasAsked(["meftal", "paracetamol", "dawai", "hot water", "sikai", "thaili", "remedy", "tablet", "medicine"]);
+    const hasAskedAssociatedOrRedFlags = hasAsked(["fever", "bukhar", "vomit", "ulti", "faint", "behosh", "pre-existing", "bp", "sugar"]);
+
+    if (!hasAskedMobilityOrBleeding && !isPainManageable) {
+      currentStep = {
+        title: "Cramp Severity & Bleeding Assessment",
+        question: 'Ask the IP: "Is the menstrual cramp pain manageable allowing you to move around, or is it so severe that you cannot stand or walk? Also, are you experiencing unusually heavy bleeding or large blood clots?" (Hinglish: "Kya periods ka dard control mein hai jisse aap chal-phir pa rahi hain, ya dard bahut zyada hai? Aur kya bleeding normal se zyada ya bade thakke aa rahe hain?")',
+        options: [
+          "Pain is manageable, able to walk and move around",
+          "Severe cramp pain, unable to stand or perform routine work",
+          "Very heavy bleeding with large clots and weakness",
+          "Moderate lower belly cramps and lower back ache",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAskedMedicationOrRemedy) {
+      currentStep = {
+        title: "Medication & Home Comfort Measures",
+        question: 'Ask the IP: "Have you taken any pain reliever (such as Meftal-Spas or Paracetamol) or applied a warm water heating bag on your lower abdomen?" (Hinglish: "Kya aapne dard ke liye koi dawai jaise Meftal-Spas ya Paracetamol li hai, ya garam paani ki thaili se sikai ki hai?")',
+        options: [
+          "Used warm water heating bag with partial comfort",
+          "Taken antispasmodic / pain relief tablet (Meftal-Spas)",
+          "Have not taken any medication or pain reliever yet",
+          "Took medicine but cramps are still persisting",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAskedAssociatedOrRedFlags) {
+      currentStep = {
+        title: "Associated Gynecological & Systemic Symptoms",
+        question: 'Ask the IP: "Do you have any severe vomiting, high fever, dizziness, or any pre-existing health conditions?" (Hinglish: "Kya saath mein ulti, tez bukhar ya behoshi jaisa lag raha hai, aur kya pehle se koi bimari hai?")',
+        options: [
+          "No vomiting or fever, only menstrual cramps",
+          "Mild nausea and weakness, but no fever",
+          "High fever with severe pelvic pain",
+          "Feeling dizzy and faint when standing up",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Clinical Referral & Home Guidance",
+        question: 'Ask the IP: "Please rest in a comfortable position and stay well hydrated with warm fluids. Would you like a tele-consultation with a doctor on 104, or guidance to the nearest ESIS Dispensary during OPD hours?" (Hinglish: "Aaram karein aur gunguna paani ya soup piyein. Kya aap 104 helpline par doctor se phone par baat karna chahti hain ya nazdeeki ESIS dispensary jana chahti hain?")',
+        options: [
+          "Connect with 104 Health Helpline for tele-doctor advice",
+          "Will visit ESIS Dispensary during regular OPD hours",
+          "Symptoms are under control with rest and fluids",
+          "Require doctor tele-consultation on phone",
+        ],
+        severity: "Moderate",
+      };
+    }
+  }
+
+  // Dedicated Ophthalmic / Eye Complaint Evaluation Branch
+  else if (/\b(eye|eyes|aankh|aankhein|vision|swollen eye|red eye|eye pain|conjunctivitis|cornea|watering eye|photophobia|light hurts|blurr\w* vision)\b/i.test(effectiveInput)) {
+    conditionLabel = "Ophthalmic Distress / Red Eye Evaluation";
+    if (!hasAsked(["vision", "dikhai", "clear", "blur", "roshni"]) && !/\b(vision.*(?:clear|normal)|dikhai.*theek)\b/i.test(cleanInput)) {
+      currentStep = {
+        title: "Visual Acuity & Vision Check",
+        question: 'Ask the IP: "Is the vision clear in that eye, or are you having any blurriness, sudden loss of vision, or halos around lights?" (Hinglish: "Kya aankh se saaf dikh raha hai ya dhundhlapan, kam dikhna ya roshni ke aas-paas ghera dikh raha hai?")',
+        options: [
+          "Vision is completely clear, only redness and irritation",
+          "Mild blurriness with tearing and light sensitivity",
+          "Sudden significant drop or loss of vision (Urgent)",
+          "Seeing rainbow halos or dark spots",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["chot", "injury", "dust", "chemical", "foreign body", "dhool", "kuch gira"])) {
+      currentStep = {
+        title: "Eye Trauma & Foreign Object Assessment",
+        question: 'Ask the IP: "Did any dust, insect, chemical splash, or physical injury hit the eye?" (Hinglish: "Kya aankh me koi dhool, keeda, chemical ya koi chot lagi hai?")',
+        options: [
+          "No injury or foreign object, just redness and pain",
+          "Dust or tiny particle fell into the eye",
+          "Chemical splash / soap / sanitizer went into eye",
+          "Minor scratch or eye rubbing strain",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["discharge", "keechad", "paani", "sticky", "tearing"])) {
+      currentStep = {
+        title: "Eye Discharge & Secretion Check",
+        question: 'Ask the IP: "Is there yellow/green sticky discharge or crusting on the eyelashes, or continuous watery tearing?" (Hinglish: "Kya aankh se peela/chchipchipa keechad nikal raha hai ya lagatar paani beh raha hai?")',
+        options: [
+          "Watery tearing and sensitivity to light",
+          "Yellowish sticky discharge sticking eyelids together",
+          "Mild grittiness, feeling like sand in the eye",
+          "No discharge, only red and swollen eyelid",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Ophthalmic Care & Drop Assessment",
+        question: 'Ask the IP: "Have you washed the eye with clean cool water or put any eye drops, and does bright light hurt?" (Hinglish: "Kya aapne aankh ko saaf thande paani se dhoya hai ya koi drop daali hai, aur kya tez roshni se dard hota hai?")',
+        options: [
+          "Washed with cool water; light is hurting (photophobia)",
+          "Put lubricant / cooling eye drops with slight relief",
+          "Have not put any drops or medication yet",
+          "Pain is tolerable, eyelid is swollen",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(snake|bite|sting|insect|saap|kutta|dog bite|animal bite|kat liya|dank)\b/i.test(effectiveInput)) {
     conditionLabel = "Suspected Snake / Animal Bite Envenomation";
     if (!hasAsked(["kahan", "where on your body", "kis hisse"])) {
       currentStep = {
@@ -2040,7 +2654,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "High",
       };
     }
-  } else if (/\b(chest pain|chhati|heart|crushing|pressure in chest|left arm)\b/i.test(effectiveInput)) {
+  } else if (!hasChestPainDenial && /\b(chest pain|chhati me dard|seene me dard|heart attack|angina|crushing chest|crushing pain in chest|pressure in chest|baayein haath me dard)\b/i.test(effectiveInput)) {
     conditionLabel = "Suspected Acute Coronary Syndrome";
     if (!hasAsked(["radiating", "left arm", "jaw", "baayein haath"])) {
       currentStep = {
@@ -2086,9 +2700,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         title: "Severe Breathing Emergency Evaluation",
         question: 'Ask the IP: "Is the difficulty in breathing so severe that you are gasping for air, skin or lips turning blue, or unable to speak in full sentences?" (Hinglish: "Kya saans lene me itni zyada takleef hai ki aap haanf rahe hain, honth/tvacha neeli pad rahi hai, ya poori baat ek baar me nahi bol pa rahe?")',
         options: [
+          "Yes, gasping for air and cannot speak in full sentences (Emergency)",
+          "Lips or skin look bluish / struggling for every breath (Emergency)",
           "No, I can speak normally but feel breathless",
-          "Yes, gasping for air and cannot speak in full sentences",
-          "Lips or skin look bluish / struggling for every breath",
           "Manageable breathlessness with cough and congestion",
         ],
         severity: "High",
@@ -2139,7 +2753,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         options: [
           "High fever with chills and shivering, breathing is manageable",
           "No, I can speak normally but feel breathless",
-          "Severe breathing difficulty, gasping for air",
+          "Severe breathing difficulty, gasping for air (Emergency)",
           "High fever with severe body ache and headache",
         ],
         severity: "High",
@@ -2157,6 +2771,46 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
+  } else if (/\b(allerg(?:y|ic|ies)|allergic to|allergy hai|rash|khujli|itching|daane|hives|urticaria|reaction|soojan|swelling of (?:lips|face|eyes|throat)|anaphylaxis)\b/i.test(effectiveInput)) {
+    conditionLabel = "Allergic Reaction / Dermatological Distress";
+    if (!hasAsked(["triggered", "wajah", "reaction", "chehre", "lips", "swelling", "bcz of what", "cause", "kis wajah"])) {
+      currentStep = {
+        title: "Allergy Trigger & Reaction Check",
+        question: 'Ask the IP: "What triggered this allergy (such as a specific medicine, food item, insect sting, or dust), and are you having any swelling of the lips, face, or difficulty breathing?" (Hinglish: "Yeh allergy kis wajah se hui — kisi dawai, khane ki cheez, keede ke kaatne ya dhool se, aur kya honth ya chehre par sujan ya saans lene me takleef hai?")',
+        options: [
+          "Reaction to a specific medication / painkiller",
+          "Food allergy reaction (peanuts / seafood / milk / spices)",
+          "Insect sting / bite or environmental dust exposure",
+          "Swelling of lips, tongue, or difficulty breathing (Urgent)",
+          "Mild itchy skin rash without swelling",
+        ],
+        severity: /\b(lips|tongue|throat|breath|anaphylaxis|soojan|swelling)\b/i.test(effectiveInput) ? "High" : "Moderate",
+      };
+    } else if (!hasAsked(["dawai", "cetirizine", "avil", "medicine", "antihistamine"])) {
+      currentStep = {
+        title: "Allergy Medication Check",
+        question: 'Ask the IP: "Have you taken any antiallergic medicine (like Cetirizine, Levocet, or Avil) or applied any lotion for this reaction?" (Hinglish: "Kya aapne is allergy ke liye koi dawai jaise Cetirizine ya Avil li hai, ya koi malham lagaya hai?")',
+        options: [
+          "Took Cetirizine / Avil, waiting for relief",
+          "Have not taken any antiallergic medication yet",
+          "Applied soothing lotion / calamine",
+          "Took medicine earlier, but itching and rash spreading",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Onset & Spread",
+        question: 'Ask the IP: "When did this reaction start, and is it rapidly spreading across your body?" (Hinglish: "Yeh reaction kab shuru hua aur kya yeh pooray sharir par tezi se phail raha hai?")',
+        options: [
+          "Started within the last 1-2 hours and spreading fast",
+          "Started earlier today, localized to one area",
+          "Persisting for 2 to 3 days with intense itching",
+          "Mild reaction, stable and not spreading",
+        ],
+        severity: "Moderate",
+      };
+    }
   } else if (/\b(vomit|ulti|nausea|loose motion|dast|diarrhea|food poison|pet kharab)\b/i.test(effectiveInput)) {
     conditionLabel = "Acute Gastroenteritis / Dehydration Risk";
     if (!hasAsked(["kitni baar", "how many times", "frequency", "episodes"])) {
@@ -2168,6 +2822,18 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Watery loose motions 3 to 4 times with weakness",
           "Mild nausea with stomach upset after food",
           "Vomited once or twice, able to drink water",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["dawai", "medicine", "ondansetron", "domperidone", "antacid"])) {
+      currentStep = {
+        title: "Medication & Hydration Intake Check",
+        question: 'Ask the IP: "Have you taken any medication for vomiting (like Ondansetron/Domperidone) or antacid, and are you able to sip ORS?" (Hinglish: "Kya aapne ulti ke liye koi dawai jaise Ondansetron ya antacid li hai, aur kya ORS ya paani pee pa rahe hain?")',
+        options: [
+          "Taking ORS; have not taken anti-emetic pill",
+          "Took vomiting medicine (Ondansetron / antacid)",
+          "Cannot retain any medicine or liquids (vomiting out)",
+          "Have not taken any medication yet",
         ],
         severity: "Moderate",
       };
@@ -2274,7 +2940,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
-  } else if (/\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped|sleeped|slept from|car|bike|vehicle|auto|bus|accident|scooty|injury|chot|hit)\b/i.test(effectiveInput)) {
+  } else if (!isAccidentDenied && /\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped|sleeped|slept from|car|bike|vehicle|auto|bus|accident|scooty|injury|chot|hit)\b/i.test(effectiveInput)) {
     conditionLabel = "Traumatic Fall / Accident Injury Assessment";
     if (!hasAsked(["hit your head", "sar par chot", "limbs", "hisse me dard", "where are you hurt", "kahan chot", "where on your body"])) {
       currentStep = {
@@ -2352,10 +3018,88 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
+  } else if (/\b(hand|hands|wrist|wrists|finger|fingers|palm|thumb|haath\b|hath\b|kalai\b|leg|legs|knee|knees|ankle|ankles|foot|feet|pair\b|taang\b|thigh|calf|calves|arm|arms|elbow|shoulder|bone|joint|joints|jod\b|back pain|kamar)\b/i.test(effectiveInput)) {
+    const isUpperLimb = /\b(hand|wrist|finger|palm|thumb|haath|kalai|arm|elbow|shoulder)\b/i.test(effectiveInput);
+    if (/\b(wrist|kalai)\b/i.test(effectiveInput) && /\b(hand|haath)\b/i.test(effectiveInput)) {
+      conditionLabel = "Hand & Wrist Pain";
+    } else if (/\b(wrist|kalai)\b/i.test(effectiveInput)) {
+      conditionLabel = "Pain in Wrist Area";
+    } else if (/\b(hand|haath|finger)\b/i.test(effectiveInput)) {
+      conditionLabel = "Pain in Hand";
+    } else if (/\b(arm|shoulder|elbow)\b/i.test(effectiveInput)) {
+      conditionLabel = "Arm & Shoulder Pain";
+    } else if (/\b(knee|ghutna)\b/i.test(effectiveInput)) {
+      conditionLabel = "Knee Pain";
+    } else {
+      conditionLabel = "Limb & Musculoskeletal Pain";
+    }
+
+    if (!hasAsked(["walk", "bear weight", "vajan", "chalne", "chal", "hilane", "move", "weight", "grip", "fingers"])) {
+      currentStep = isUpperLimb
+        ? {
+            title: "Limb Movement & Severity Assessment",
+            question: 'Ask the IP: "Could you please tell me if you are able to move your wrist and fingers, or is there swelling, deformity, or severe pain on movement?" (Hinglish: "Kya aap apni kalai aur ungliyan hila pa rahe hain, ya sujan aur hilane me tez dard hai?")',
+            options: [
+              "Cannot move wrist or fingers due to severe pain",
+              "Severe swelling and sharp pain when moving",
+              "Moderate pain, can move fingers slightly",
+              "Mild discomfort, movement is manageable",
+            ],
+            severity: /cannot move|sharp pain|severe swelling/i.test(cleanInput) ? "High" : "Moderate",
+          }
+        : {
+            title: "Mobility & Weight Bearing Assessment",
+            question: 'Ask the IP: "Are you able to walk and bear weight on your leg, or is there swelling, bruising, or severe pain on movement?" (Hinglish: "Kya aap pair par vajan daal kar chal pa rahe hain, ya sujan aur hilane me tez dard hai?")',
+            options: [
+              "Cannot bear weight or walk at all",
+              "Severe swelling and sharp pain on movement",
+              "Can walk with a limp / mild support",
+              "Mild soreness, able to walk slowly",
+            ],
+            severity: /cannot bear weight|sharp pain|severe swelling/i.test(cleanInput) ? "High" : "Moderate",
+          };
+    } else if (!hasAsked(["injury", "twist", "chot", "moch", "accident", "fall"])) {
+      currentStep = {
+        title: "Mechanism of Pain & Injury Screening",
+        question: 'Ask the IP: "Did this pain start after a sudden twist, heavy work, lifting, or a fall/injury?" (Hinglish: "Kya yeh dard kisi moch, girne, bhari vajan uthane ya chot lagne ke baad shuru hua?")',
+        options: [
+          "Sudden twist or sprain while working/walking",
+          "Recent fall or blunt impact",
+          "Gradual aching pain without any injury",
+          "Muscle cramp after prolonged standing/physical work",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["numbness", "tingling", "sunn", "jhanjhanahat", "weakness"])) {
+      currentStep = {
+        title: "Neurological & Circulation Assessment",
+        question: 'Ask the IP: "Is there any numbness, tingling sensation, coldness, or radiating pain down the leg or foot?" (Hinglish: "Kya pair me sunn-pan, jhanjhanahat ya thanda padne jaisa lag raha hai?")',
+        options: [
+          "Numbness and tingling reaching the toes/foot",
+          "Radiating sharp pain from hip down to leg",
+          "Swelling and local tenderness only",
+          "No numbness, only muscle soreness",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Musculoskeletal Pain Impact & Medication",
+        question: 'Ask the IP: "Have you taken any pain reliever, or applied ice/warm fomentation, and did it provide relief?" (Hinglish: "Kya aapne dard ke liye koi davai li ya sikai ki hai, aur kya usse aaram mila?")',
+        options: [
+          "Took painkiller, but pain is still severe",
+          "Applied balm/fomentation with mild relief",
+          "Have not taken any medicines yet",
+          "Need doctor examination and prescription",
+        ],
+        severity: "Moderate",
+      };
+    }
   } else {
     // General Medical Complaint - Progressive 3-stage clinical inquiry
     conditionLabel = prevState.suspectedCondition || "General Medical Evaluation";
-    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"])) {
+    const alreadyDescribedSymptom = /\b(pain|dard|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|chest|stomach|chot|swelling)\b/i.test(cleanInput);
+    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"]) && !alreadyDescribedSymptom) {
       currentStep = {
         title: "Main Complaint & Specific Symptoms",
         question: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")',
@@ -2403,6 +3147,19 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         ],
         severity: "Moderate",
       };
+    } else if (!hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"])) {
+      currentStep = {
+        title: "Comorbidity & Ongoing Medication Check",
+        question:
+          'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, asthma, or heart disease, and are you taking any regular medications for them?" (Hinglish: "Kya aapko pehle se high BP, diabetes/sugar, asthma ya dil ki koi bimari hai, aur kya aap koi regular dawai lete hain?")',
+        options: [
+          "History of High BP / taking BP medicine",
+          "History of Diabetes / on sugar medication",
+          "History of Asthma / using inhaler",
+          "No pre-existing health conditions or regular medicines",
+        ],
+        severity: "Moderate",
+      };
     } else {
       currentStep = {
         title: "Medical History & Pehchan Card",
@@ -2418,12 +3175,40 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     }
   }
 
+  const isPsychFallback = Boolean(
+    prevState.isPsychiatric ||
+    /\b(suicid\w*|mar ja\w*|depress\w*|anxiety\b|ghabrahat\b|mental health|tele-manas|14416|udaas\b|hopeless)\b/i.test(effectiveInput)
+  );
+
   const isSevere =
     currentStep.severity === "High" ||
     /emergency|fracture|dvt|blood|vomit blood|unconscious|rigors|severe|chest pain|chhati|poison|snake|bite/i.test(cleanInput) ||
     prevState.severity === "High";
 
-  const severity = isSevere ? "High" : /mild|no pain/i.test(cleanInput) ? "Mild" : "Moderate";
+  // If conversation has reached turn 5-7 without breaking flow and comorbidity hasn't been asked yet
+  const hasAskedComorbidityAlready = hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"]);
+  const userTurnsCountFallback = history.filter((m) => m.role === "user" || m.sender === "user").length;
+  if (!isSevere && (userTurnsCountFallback >= 5 || botCount >= 5) && !hasAskedComorbidityAlready && !isPsychFallback && !isAccident) {
+    currentStep = {
+      title: "Comorbidity & Ongoing Medication Check",
+      question:
+        'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, asthma, or heart disease, and are you taking any regular medications for them?" (Hinglish: "Kya aapko pehle se high BP, diabetes/sugar, asthma ya dil ki koi bimari hai, aur kya aap koi regular dawai lete hain?")',
+      options: [
+        "History of High BP / taking BP medicine",
+        "History of Diabetes / on sugar medication",
+        "History of Asthma / using inhaler",
+        "No pre-existing health conditions or regular medicines",
+      ],
+      severity: "Moderate",
+    };
+  }
+
+  const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(effectiveInput, isSevere ? 9 : 5, { symptom_notes: cleanInput }, prevState);
+  const isLifeThreateningCrisis = ambulanceFallbackCheck.is108;
+
+  // STRICT RULE: If the case is NOT a genuine life-and-death emergency, DO NOT score it 9!
+  const severity = isLifeThreateningCrisis ? "High" : (isSevere && !isLifeThreateningCrisis ? "Moderate" : /mild|no pain/i.test(cleanInput) ? "Mild" : "Moderate");
+  const severityScore = isLifeThreateningCrisis ? 9 : (severity === "High" ? 7 : severity === "Moderate" ? 6 : 3);
 
   let referralDestination;
   let referralReason;
@@ -2432,17 +3217,14 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   const fallbackDispensaryStatus = getDispensaryOperatingStatus();
   const isNacoHIV = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease)\b/i.test(effectiveInput);
-  const isPsychFallback = Boolean(
-    prevState.isPsychiatric ||
-    /\b(suicid\w*|mar ja\w*|depress\w*|anxiety\b|ghabrahat\b|mental health|tele-manas|14416|udaas\b|hopeless)\b/i.test(effectiveInput)
-  );
 
-  // Check off-hours (between 4:00 PM and 10:00 AM)
+  // Check IST time:
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
   const hour = istDate.getHours();
   const currentMinutes = hour * 60 + istDate.getMinutes();
-  const isOffHours = currentMinutes >= 960 || currentMinutes < 600;
+  const isNightAfter10PM = hour >= 22 || hour < 6; // 10:00 PM to 6:00 AM IST
+  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM IST
 
   const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(effectiveInput);
   const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(effectiveInput);
@@ -2452,10 +3234,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     isSevere ||
     /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(effectiveInput);
 
-  const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(effectiveInput, isSevere ? 9 : 5, { symptom_notes: cleanInput }, prevState);
-  if (ambulanceFallbackCheck.is108) {
+  if (isLifeThreateningCrisis) {
     referralDestination = "108 Ambulance";
-    referralReason = ambulanceFallbackCheck.reason || "Acute emergency requiring immediate ambulance dispatch.";
+    referralReason = ambulanceFallbackCheck.reason || "Acute life-and-death emergency requiring immediate 108 Ambulance dispatch.";
     secondaryReferral = "ESIC Hospital";
     isDualProtocol = false;
   } else if (isPsychFallback) {
@@ -2478,6 +3259,23 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     referralReason = "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI guidelines.";
     secondaryReferral = "ESIC Hospital";
     isDualProtocol = false;
+  } else if (conditionLabel === "Dysmenorrhea / Menstrual Cramps") {
+    if (isNightAfter10PM || isOffHours || !fallbackDispensaryStatus.isOpen) {
+      referralDestination = "104 Health Helpline";
+      referralReason = "Night hours (after 10:00 PM): Manageable menstrual cramps (dysmenorrhea). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+      secondaryReferral = "ESIC Hospital";
+    } else {
+      referralDestination = "ESIS Dispensary";
+      referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS dispensary during regular OPD hours for doctor evaluation and antispasmodic medicines.";
+      secondaryReferral = "104 Health Helpline";
+    }
+    isDualProtocol = false;
+  } else if (isNightAfter10PM) {
+    // Night hours (after 10:00 PM) manageable case -> 104 Health Helpline
+    referralDestination = "104 Health Helpline";
+    referralReason = "Night hours (after 10:00 PM): Condition is manageable. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+    secondaryReferral = "ESIC Hospital";
+    isDualProtocol = false;
   } else if (isOffHours || !fallbackDispensaryStatus.isOpen) {
     referralDestination = "104 Health Helpline";
     referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
@@ -2490,7 +3288,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     isDualProtocol = false;
   } else if (fallbackDispensaryStatus.isOpen && severity !== "High") {
     referralDestination = "ESIS Dispensary";
-    referralReason = "Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines (10:00 AM – 4:00 PM).";
+    referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
     secondaryReferral = "104 Health Helpline";
     isDualProtocol = false;
   } else {
@@ -2505,12 +3303,15 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   }
 
   const fallbackUserTurns = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
-  if (fallbackUserTurns < 3 && !isSevere) {
+  if (fallbackUserTurns < 3 && !isLifeThreateningCrisis) {
     referralDestination = null;
     referralReason = null;
   }
 
   const duration = nlp.detectedDuration || prevState.duration || "Reported today";
+  const fallbackComorbidity = extractComorbiditiesFromText(effectiveInput, prevState.comorbidity || prevState.comorbidities);
+  const fallbackAllergies = extractAllergiesFromText(effectiveInput, prevState.allergies);
+  const fallbackMedications = extractMedicationsFromText(effectiveInput, prevState.medications || prevState.medication);
 
   let probingText = currentStep.question;
   if (!probingText.startsWith("Ask the IP:")) {
@@ -2526,13 +3327,18 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     suspectedCondition: conditionLabel,
     isPsychiatric: isPsychFallback,
     severity,
-    severityScore: severity === "High" ? 9 : severity === "Moderate" ? 6 : 3,
+    severityScore,
     referralDestination,
     referralReason,
     is_dual_protocol: isDualProtocol,
     call_referral_secondary: secondaryReferral,
     redFlagsDetected: isSevere ? ["Acute presentation / high severity reported"] : [],
     duration,
+    comorbidity: fallbackComorbidity,
+    comorbidities: fallbackComorbidity,
+    allergies: fallbackAllergies,
+    medication: fallbackMedications,
+    medications: fallbackMedications,
     isReadyForSummary: history.length >= 6 || isSevere,
     clinicalSummary: `Patient presents with ${conditionLabel}. Evaluated severity: ${severity}. Duration: ${duration}. Recommended Routing: ${referralDestination}.`,
   };

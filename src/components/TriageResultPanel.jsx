@@ -31,8 +31,9 @@ import {
 import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
-import { summarizeRedFlags, getDispensaryOperatingStatus } from "../lib/triageEngine";
+import { summarizeRedFlags, getDispensaryOperatingStatus, deduplicateRedFlags, extractCallerReportedProblems } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
+import { getCachedCases } from "../lib/clientCache";
 import { MapWrapper } from "./map/MapWrapper";
 import { ASSAM_DISTRICTS } from "../lib/districts";
 import {
@@ -332,6 +333,8 @@ export const TriageResultPanel = ({
   onUpdatePincode,
   onRunTriageWithPincode,
   onDirectiveChange,
+  callerHistory = [],
+  onForwardSuccess,
 }) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
@@ -472,6 +475,8 @@ export const TriageResultPanel = ({
     }
   };
 
+  const [drawerSearchQuery, setDrawerSearchQuery] = useState("");
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -518,6 +523,48 @@ export const TriageResultPanel = ({
   const [forwardedStatus, setForwardedStatus] = useState(null);
 
   useEffect(() => {
+    const caseRef = result?.case_ref || result?.case_id || result?.id;
+    if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
+      setForwardedStatus({
+        shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (result.forwarded_to?.includes("104") ? "104 Health Helpline" : (result.forwarded_to?.includes("108") ? "108 Ambulance" : result.forwarded_to))) || "Facility",
+        teamName: result.forwarded_to || "ESIS Dispensary",
+        dispatchId: result.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
+        timestamp: result.forwarded_at || new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (caseRef) {
+      try {
+        const stored = typeof window !== "undefined"
+          ? (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))
+          : null;
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.is_forwarded) {
+            setForwardedStatus({
+              shortName: parsed.forwarded_short_name || "Facility",
+              teamName: parsed.forwarded_to || "ESIS Dispensary",
+              dispatchId: parsed.dispatch_id,
+              timestamp: parsed.forwarded_at,
+            });
+            return;
+          }
+        }
+
+        const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
+        if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
+          setForwardedStatus({
+            shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
+            teamName: cached.forwarded_to || "ESIS Dispensary",
+            dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
+            timestamp: cached.forwarded_at,
+          });
+          return;
+        }
+      } catch (e) {}
+    }
+
     setForwardedStatus(null);
   }, [result]);
 
@@ -627,6 +674,21 @@ export const TriageResultPanel = ({
     }));
   }, [effectiveRawFacs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen, isWeekend]);
 
+  const modalDrawerFacilities = useMemo(() => {
+    let list = dynamicFacilities || [];
+    if (drawerSearchQuery.trim()) {
+      const q = drawerSearchQuery.toLowerCase();
+      list = list.filter(
+        (f) =>
+          (f.name && f.name.toLowerCase().includes(q)) ||
+          (f.district && f.district.toLowerCase().includes(q)) ||
+          (f.address && f.address.toLowerCase().includes(q)) ||
+          (f.pincode && String(f.pincode).toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [dynamicFacilities, drawerSearchQuery]);
+
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
       `${f.name}, ${f.address}. Directions: ${f.maps_url}`
@@ -653,24 +715,42 @@ export const TriageResultPanel = ({
     const callerText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.caller_spoken_text || ""} ${callerChat}`.toLowerCase().trim();
     const isSafe = /\b(safe|surakshit|no,?\s*i am safe|i am safe|not suicidal|no self.?harm|theek hoon)\b/i.test(callerText);
 
-    return summarizeRedFlags(raw, callerText, isSafe);
+    return deduplicateRedFlags(summarizeRedFlags(raw, callerText, isSafe));
   }, [t, result]);
 
-  const primaryComplaint =
-    t.primary_complaint ||
-    result?.ekms_ai_context?.triageState?.suspectedCondition ||
-    result?.ekms_ai_context?.triageState?.condition ||
-    result?.ekms_ai_context?.triageState?.symptom ||
-    (t.is_psychiatric ? "Emotional Distress / Mental Health Support" : "Primary Clinical Assessment");
+  const callerProblems = useMemo(() => {
+    return extractCallerReportedProblems({
+      result,
+      callerIntake,
+      t,
+    });
+  }, [result, callerIntake, t]);
+
+  const primaryComplaint = useMemo(() => {
+    if (callerProblems.length > 0) {
+      return callerProblems.join(" · ");
+    }
+    return (
+      t.primary_complaint ||
+      result?.ekms_ai_context?.triageState?.suspectedCondition ||
+      result?.ekms_ai_context?.triageState?.condition ||
+      result?.ekms_ai_context?.triageState?.symptom ||
+      (t.is_psychiatric ? "Emotional Distress / Mental Health Support" : "Primary Clinical Assessment")
+    );
+  }, [callerProblems, t, result]);
 
   const assessedSeverity =
     t.assessed_severity ||
     (t.urgency_score >= 8 ? "High" : t.urgency_score >= 5 ? "Moderate" : "Mild");
-  const durationText =
+  let rawDuration =
     t.duration ||
     result?.intake?.duration ||
     result?.ekms_ai_context?.triageState?.duration ||
     "Reported today";
+  if (/\b(fall|fell|falling|accident|injury|trauma|pain|chot|gir gaya|impact)\b/i.test(rawDuration)) {
+    rawDuration = "Reported today";
+  }
+  const durationText = rawDuration;
   const severityAndDuration = assessedSeverity.includes("(")
     ? `${assessedSeverity} · ${durationText}`
     : `${assessedSeverity} (${t.urgency_score || 5}/10) · ${durationText}`;
@@ -784,9 +864,20 @@ export const TriageResultPanel = ({
                 <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">
                   Chief Complaint
                 </span>
-                <span className="font-bold text-foreground text-sm">
-                  {primaryComplaint}
-                </span>
+                {callerProblems && callerProblems.length > 1 ? (
+                  <div className="space-y-1 mt-0.5">
+                    {callerProblems.map((prob, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5 font-bold text-foreground text-xs sm:text-sm">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        <span>{prob}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="font-bold text-foreground text-sm">
+                    {primaryComplaint}
+                  </span>
+                )}
               </div>
 
               <div className="rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-border shadow-2xs">
@@ -1035,7 +1126,11 @@ export const TriageResultPanel = ({
               activeDirective={activeDirective}
               allRedFlags={allRedFlags}
               callerIntake={callerIntake}
-              onForwardSuccess={setForwardedStatus}
+              callerHistory={callerHistory}
+              onForwardSuccess={(statusData) => {
+                setForwardedStatus(statusData);
+                onForwardSuccess?.(statusData);
+              }}
             />
           </div>
         </div>
@@ -1098,9 +1193,6 @@ export const TriageResultPanel = ({
             <div className="flex items-center gap-2">
               <MapIcon className="h-4 w-4 text-primary shrink-0" />
               <span className="font-bold text-foreground">Assam Health Map</span>
-              <span className="hidden sm:inline-block text-[10px] text-muted-foreground font-medium">
-                (Dark Inverted Mask · Real-time Proximity)
-              </span>
             </div>
 
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1181,6 +1273,7 @@ export const TriageResultPanel = ({
           <div className="h-[340px] sm:h-[380px] w-full relative bg-[#0a1128]">
             <MapWrapper
               ref={mapRef}
+              theme="light"
               facilities={dynamicFacilities}
               filters={{
                 mapLayer,
@@ -1264,15 +1357,6 @@ export const TriageResultPanel = ({
                             {f.facility_tag}
                           </span>
 
-                          {f.is_exact_pincode ? (
-                            <span className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
-                              🎯 Local Area Match
-                            </span>
-                          ) : f.is_nearby_pincode ? (
-                            <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                              📍 Nearby Facility
-                            </span>
-                          ) : null}
                           {(f.is_dispensary || isDispensary(f)) && isWeekend && (
                             <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
                               Closed on Weekends (OPD Mon–Fri 10AM–4PM)
@@ -1289,20 +1373,6 @@ export const TriageResultPanel = ({
                             </span>
                           )}
                         </div>
-
-                        {/* Focus on map quick button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            focusFacilityOnMap(f);
-                          }}
-                          className="inline-flex items-center gap-1 rounded bg-secondary/80 hover:bg-primary hover:text-white px-2 py-0.5 text-[10px] font-bold text-foreground transition-colors cursor-pointer"
-                          title="Focus marker on Assam Map"
-                        >
-                          <MapPin className="h-3 w-3" />
-                          <span>Show on Map</span>
-                        </button>
                       </div>
 
                       <p className="flex items-center gap-2 text-sm font-bold text-foreground">
@@ -1315,19 +1385,15 @@ export const TriageResultPanel = ({
                       )}
 
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {f.distance_km != null && (
-                            <span className="inline-flex items-center gap-1 rounded bg-secondary/80 border border-border/70 px-1.5 py-0.5 text-foreground font-semibold">
-                              <Navigation className="h-3 w-3 text-primary shrink-0" />
-                              {f.distance_km === 0 || f.is_exact_pincode ? "0 km" : `${Number(f.distance_km).toFixed(1)} km`}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {f.district && (
+                            <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-medium">
+                              {f.district}
                             </span>
                           )}
-                          <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-semibold">
-                            {f.facility_type}
-                          </span>
-                          {f.district && (
-                            <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                              {f.district}
+                          {(f.pincode || (f.address && f.address.match(/\b(78\d{4})\b/)?.[1])) && (
+                            <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-mono font-medium">
+                              PIN: {f.pincode || f.address.match(/\b(78\d{4})\b/)?.[1]}
                             </span>
                           )}
                           {f.phone && (
@@ -1410,20 +1476,17 @@ export const TriageResultPanel = ({
 
       {/* FULL-SCREEN / LARGE VIEW MODAL FOR ASSAM MAP (PORTALED TO DOCUMENT.BODY OVER ENTIRE WEBSITE) */}
       {isMapExpanded && mounted && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[99999] flex flex-col w-screen h-screen min-w-[100vw] min-h-[100vh] bg-[#0a1128]/98 p-3 sm:p-5 backdrop-blur-lg animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[99999] flex flex-col w-screen h-screen min-w-[100vw] min-h-[100vh] bg-slate-100/98 dark:bg-slate-950/98 p-3 sm:p-4 lg:p-5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
           {/* Modal Header Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-white shadow-xl mb-3 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl px-4 py-3 text-slate-800 dark:text-slate-100 shadow-sm mb-3 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-xs">
                 <MapIcon className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-white leading-tight">
-                  Assam Health Network Map — Large View
+                <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                  Assam Health Map — Large View
                 </h3>
-                <p className="text-xs text-slate-300">
-                  Interactive Leaflet map with dark masked Assam boundary &amp; real-time facility proximity
-                </p>
               </div>
             </div>
 
@@ -1433,7 +1496,7 @@ export const TriageResultPanel = ({
               <select
                 value={selectedDistrictFilter}
                 onChange={(e) => handleDistrictSelect(e.target.value)}
-                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:border-blue-500 shadow-2xs"
+                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 shadow-2xs"
               >
                 <option value="all">All Assam Districts</option>
                 {ASSAM_DISTRICTS.map((d) => (
@@ -1444,14 +1507,14 @@ export const TriageResultPanel = ({
               </select>
 
               {/* Minimal vs Detailed Layer Buttons */}
-              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-800 p-0.5 shadow-2xs">
+              <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5 shadow-2xs">
                 <button
                   type="button"
                   onClick={() => setMapLayer("minimal")}
-                  className={`rounded px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
                     mapLayer === "minimal"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-300 hover:text-white"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   Minimal
@@ -1459,10 +1522,10 @@ export const TriageResultPanel = ({
                 <button
                   type="button"
                   onClick={() => setMapLayer("detailed")}
-                  className={`rounded px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
                     mapLayer === "detailed"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-300 hover:text-white"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   Detailed (Google)
@@ -1473,10 +1536,10 @@ export const TriageResultPanel = ({
               <button
                 type="button"
                 onClick={() => setIsPinModeActive((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-2xs border ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-2xs border ${
                   isPinModeActive
-                    ? "bg-rose-600 text-white border-rose-400 animate-pulse"
-                    : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
+                    ? "bg-rose-600 text-white border-rose-500 animate-pulse"
+                    : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                 }`}
               >
                 <Crosshair className="h-3.5 w-3.5" />
@@ -1487,7 +1550,7 @@ export const TriageResultPanel = ({
               <button
                 type="button"
                 onClick={() => fullScreenMapRef.current?.resetView()}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer shadow-2xs"
+                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer shadow-2xs"
                 title="Reset View"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1498,7 +1561,7 @@ export const TriageResultPanel = ({
               <button
                 type="button"
                 onClick={() => setIsMapExpanded(false)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer shadow-md"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-800 dark:hover:bg-slate-700 text-white px-3.5 py-1.5 text-xs font-bold transition-colors cursor-pointer shadow-xs"
               >
                 <X className="h-4 w-4" />
                 <span>Close (Esc)</span>
@@ -1509,14 +1572,15 @@ export const TriageResultPanel = ({
           {/* Modal Main Body */}
           <div className="flex-1 flex flex-col lg:flex-row gap-3 min-h-0 overflow-hidden">
             {/* Map Canvas */}
-            <div className="flex-1 h-full rounded-xl overflow-hidden border border-slate-700 relative bg-[#0a1128] shadow-2xl">
+            <div className="flex-1 h-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 relative bg-[#0a1128] shadow-sm">
               {isPinModeActive && (
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg animate-bounce">
-                  📍 Click anywhere inside Assam to drop location pin
+                  📍 Click anywhere inside Assam to drop location pin &amp; recalculate
                 </div>
               )}
               <MapWrapper
                 ref={fullScreenMapRef}
+                theme="light"
                 facilities={dynamicFacilities}
                 filters={{
                   mapLayer,
@@ -1533,41 +1597,136 @@ export const TriageResultPanel = ({
             </div>
 
             {/* Right Side Facility Drawer (in full-screen mode) */}
-            <div className="hidden lg:flex w-80 sm:w-96 flex-col bg-slate-900/95 border border-slate-800 rounded-xl p-3.5 text-white overflow-hidden shadow-2xl">
-              <div className="border-b border-slate-800 pb-2.5 mb-2.5">
-                <h4 className="text-sm font-bold text-white flex items-center justify-between">
-                  <span>Nearest Facilities</span>
-                  <span className="text-[11px] font-mono text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-800">
-                    {dynamicFacilities.length} total
+            <div className="hidden lg:flex w-80 sm:w-96 xl:w-[410px] flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-slate-800 dark:text-slate-100 overflow-hidden shadow-sm shrink-0">
+              {/* Drawer Header & Count */}
+              <div className="border-b border-slate-200 dark:border-slate-800 pb-3 mb-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-blue-600" />
+                    <span>Healthcare Facilities</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 font-bold">
+                    {modalDrawerFacilities.length} shown
                   </span>
-                </h4>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Click any facility below to fly &amp; inspect on map
-                </p>
+                </div>
+
+                {/* Inline Drawer Search Input */}
+                <div className="relative mt-2.5">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={drawerSearchQuery}
+                    onChange={(e) => setDrawerSearchQuery(e.target.value)}
+                    placeholder="Search name, district, or PIN..."
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-blue-500 transition-colors"
+                  />
+                  {drawerSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setDrawerSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               </div>
 
+              {/* Scrollable Facility Cards in Drawer */}
               <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                {dynamicFacilities.map((f, i) => (
-                  <div
-                    key={f.id || f.name + i}
-                    onClick={() => focusFacilityOnMap(f)}
-                    className="p-3 rounded-lg border border-slate-800 bg-slate-800/60 hover:bg-slate-800 hover:border-blue-500/60 transition-all cursor-pointer shadow-sm text-xs space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-bold text-white truncate max-w-[200px]">{f.name}</span>
-                      {f.distance_km != null && (
-                        <span className="text-emerald-400 font-bold font-mono text-[10.5px]">
-                          {f.distance_km === 0 || f.is_exact_pincode ? "0 km" : `${Number(f.distance_km).toFixed(1)} km`}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-slate-400 text-[11px] line-clamp-2">{f.address}</p>
-                    <div className="flex items-center justify-between text-[10.5px] text-slate-400 pt-1 border-t border-slate-700/50">
-                      <span>{f.district || "Assam"}</span>
-                      <span className="text-blue-400 font-semibold hover:underline">Fly to marker ↗</span>
-                    </div>
+                {modalDrawerFacilities.length === 0 ? (
+                  <div className="p-4 text-center text-slate-400 text-xs">
+                    No facilities found matching your criteria.
                   </div>
-                ))}
+                ) : (
+                  modalDrawerFacilities.map((f, i) => {
+                    const cleanDisplayAddress = f.address
+                      ? f.address
+                          .replace(/\b(pin|pincode)?\s*[-:,]?\s*78\d{4}\b/gi, "")
+                          .replace(/,\s*,/g, ",")
+                          .replace(/\s*,\s*$/g, "")
+                          .trim()
+                      : "";
+
+                    const isSelectedOnMap = selectedFacilityForMap?.id === f.id || selectedFacilityForMap?.name === f.name;
+
+                    return (
+                      <div
+                        key={f.id || f.name + i}
+                        onClick={() => focusFacilityOnMap(f)}
+                        className={`rounded-xl border p-3.5 transition-all duration-200 cursor-pointer shadow-2xs space-y-2 ${
+                          isSelectedOnMap
+                            ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30"
+                            : "border-slate-200/90 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 hover:border-blue-400/60 hover:shadow-xs"
+                        }`}
+                      >
+                        {/* Badges row matching homepage */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
+                              {f.facility_tag}
+                            </span>
+
+                            {(f.is_dispensary || isDispensary(f)) && isWeekend && (
+                              <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
+                                Closed on Weekends
+                              </span>
+                            )}
+                            {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
+                              <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                                OPD: Mon–Fri 10AM–4PM
+                              </span>
+                            )}
+                            {(f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f)) && (
+                              <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
+                                Open · 24x7 Casualty
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Facility Name */}
+                        <p
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            focusFacilityOnMap(f);
+                          }}
+                          className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                        >
+                          <Building2 className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                          <span className="leading-snug">{f.name}</span>
+                        </p>
+
+                        {/* Clean Address */}
+                        {cleanDisplayAddress && (
+                          <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 line-clamp-2">
+                            {cleanDisplayAddress}
+                          </p>
+                        )}
+
+                        {/* Footer row: District, Pincode, and Phone */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/80 dark:border-slate-700/60 text-[10.5px]">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {f.district && (
+                              <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-medium">
+                                {f.district}
+                              </span>
+                            )}
+                            {(f.pincode || (f.address && f.address.match(/\b(78\d{4})\b/)?.[1])) && (
+                              <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-mono font-medium">
+                                PIN: {f.pincode || f.address.match(/\b(78\d{4})\b/)?.[1]}
+                              </span>
+                            )}
+                          </div>
+
+                          {f.phone && (
+                            <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{f.phone}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>

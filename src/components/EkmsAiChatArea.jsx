@@ -209,7 +209,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
         severity: newState.severity,
         severityScore: newState.severityScore,
         duration: newState.duration,
-        medication: newState.medication,
+        comorbidity: newState.comorbidity || newState.comorbidities,
+        comorbidities: newState.comorbidities || newState.comorbidity,
+        allergies: newState.allergies,
+        medication: newState.medication || newState.medications,
+        medications: newState.medications || newState.medication,
         associated: newState.redFlagsDetected,
         redFlagsDetected: newState.redFlagsDetected,
         referralDestination: newState.referralDestination,
@@ -328,7 +332,11 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
             : (data.severityScore || (data.severity === "High" ? 9 : data.severity === "Moderate" ? 6 : 3)),
         redFlagsDetected: Array.from(new Set([...(curState.redFlagsDetected || []), ...(data.redFlagsDetected || [])])),
         duration: nlp.detectedDuration || data.duration || curState.duration,
-        medication: data.medication || curState.medication,
+        comorbidity: data.comorbidity || data.comorbidities || curState.comorbidity || curState.comorbidities,
+        comorbidities: data.comorbidities || data.comorbidity || curState.comorbidities || curState.comorbidity,
+        allergies: data.allergies || nlp.detectedAllergies || curState.allergies,
+        medication: data.medication || data.medications || nlp.detectedMedications || curState.medication,
+        medications: data.medications || data.medication || nlp.detectedMedications || curState.medications,
         clinicalSummary: data.clinicalSummary || curState.clinicalSummary,
         referralDestination: effectiveReferral,
         referralReason: effectiveReason,
@@ -477,21 +485,27 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   let effectiveSeverityLabel = null;
   let effectiveSeverityLevel = "Routine";
 
+  const userTurnsCount = messages.filter((m) => m && (m.sender === "user" || m.role === "user")).length;
+  const isProbedEnough = userTurnsCount >= 3 || Boolean(triageResult);
+
   if (triageUrgency) {
     effectiveSeverityLabel = triageScore != null ? `${triageUrgency} ${triageScore}/10` : triageUrgency;
     effectiveSeverityLevel = triageUrgency;
-  } else if (clinicalState.severity && messages.length > 0) {
+  } else if (clinicalState.severity && messages.length > 0 && isProbedEnough) {
     effectiveSeverityLabel = clinicalState.severity;
     effectiveSeverityLevel = clinicalState.severity;
   }
 
   let effectiveReferral = null;
-  if (activeDirective?.badge) {
-    effectiveReferral = activeDirective.badge;
-  } else if (triage?.call_referral_primary || triage?.referral_destination) {
-    effectiveReferral = triage.call_referral_primary || triage.referral_destination;
-  } else if (clinicalState.referralDestination) {
-    effectiveReferral = formatReferralDestination(clinicalState.referralDestination);
+  // Referral badge appears ONLY after 3-4 probing questions or upon formal triage completion
+  if (isProbedEnough && messages.length > 0) {
+    if (activeDirective?.badge) {
+      effectiveReferral = activeDirective.badge;
+    } else if (triage?.call_referral_primary || triage?.referral_destination) {
+      effectiveReferral = triage.call_referral_primary || triage.referral_destination;
+    } else if (clinicalState.referralDestination) {
+      effectiveReferral = formatReferralDestination(clinicalState.referralDestination);
+    }
   }
 
   return (

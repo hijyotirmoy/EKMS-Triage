@@ -4,7 +4,14 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } f
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { normalizeDistrict } from "@/lib/districts";
-import { deriveSubType, sanitizeCoordinates } from "@/lib/geo";
+import {
+  deriveSubType,
+  sanitizeCoordinates,
+  isEsicHospital,
+  isGovtDistrictHospital,
+  isDispensary,
+  isTieUp,
+} from "@/lib/geo";
 
 const AssamMap = forwardRef(function AssamMap(
   {
@@ -16,6 +23,7 @@ const AssamMap = forwardRef(function AssamMap(
     onDistrictSelect,
     selectedFacility = null,
     onMapReady,
+    theme = "light",
   },
   ref
 ) {
@@ -200,7 +208,7 @@ const AssamMap = forwardRef(function AssamMap(
         }
       });
 
-      // Dark Mask Polygon: Pure 100% solid dark blue (#0a1128)
+      // Dark Mask Polygon: Pure 100% solid dark blue (#0a1128) covering outside Assam
       const maskPoly = L.polygon([worldCoords, ...holes], {
         stroke: false,
         fillColor: "#0a1128",
@@ -259,7 +267,7 @@ const AssamMap = forwardRef(function AssamMap(
     } catch (e) {
       console.error("Mask rendering error:", e);
     }
-  }, [geoJsonData, onDistrictSelect]);
+  }, [geoJsonData, onDistrictSelect, theme]);
 
   // 4. Highlight Selected District Polygon & Zoom to District
   useEffect(() => {
@@ -303,7 +311,7 @@ const AssamMap = forwardRef(function AssamMap(
       const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
       map.flyTo([26.2006, 92.9376], isMobile ? 6.5 : 7.2);
     }
-  }, [filters?.district, filters?.searchQuery, geoJsonData]);
+  }, [filters?.district, filters?.searchQuery, geoJsonData, theme, targetLocation]);
 
   // 5. Render Facility Markers & Target Location
   useEffect(() => {
@@ -359,48 +367,85 @@ const AssamMap = forwardRef(function AssamMap(
 
       const rawType = (hosp.type || hosp.facility_type || "NHM").toUpperCase();
       const subType = hosp.subType || deriveSubType(hosp.name || "", rawType);
+      const nameUpper = (hosp.name || "").toUpperCase();
 
       let badgeTheme = "chc";
-      let markerTheme = "marker-chc";
-      let flagColor = "#10b981"; // CHC green
+      let markerTheme = "marker-dispensary";
+      let flagColor = "#059669"; // ESIS Dispensary (Emerald)
+      let typeLabel = "ESIS Dispensary";
 
-      if (rawType === "ESIC" || subType.includes("ESIC") || subType.includes("ESIS")) {
-        if (subType.includes("Tie-Up") || subType.includes("Tie Up")) {
-          badgeTheme = "esic-yellow";
-          markerTheme = "marker-esic-yellow";
-          flagColor = "#e19b03";
-        } else if (subType.includes("Hospital")) {
-          badgeTheme = "esic-blue";
-          markerTheme = "marker-esic-blue";
-          flagColor = "#3b82f6";
-        } else {
-          badgeTheme = "esic-red";
-          markerTheme = "marker-esic-red";
-          flagColor = "#ef4444";
-        }
+      if (rawType.includes("108") || nameUpper.includes("108") || nameUpper.includes("AMBULANCE")) {
+        badgeTheme = "esic-red";
+        markerTheme = "marker-108";
+        flagColor = "#dc2626"; // 108 Ambulance (Red)
+        typeLabel = "108 Ambulance";
+      } else if (
+        isEsicHospital(hosp) ||
+        nameUpper.includes("ESIC HOSPITAL") ||
+        (rawType === "ESIC" && subType.includes("Hospital")) ||
+        hosp.is_hospital
+      ) {
+        badgeTheme = "esic-amber";
+        markerTheme = "marker-esic-hospital";
+        flagColor = "#d97706"; // ESIC Hospital (Amber)
+        typeLabel = "ESIC Hospital";
+      } else if (
+        isTieUp(hosp) ||
+        nameUpper.includes("TIE UP") ||
+        nameUpper.includes("TIE-UP") ||
+        subType.includes("Tie-Up") ||
+        subType.includes("Tie Up") ||
+        rawType.includes("TIE") ||
+        hosp.is_tie_up
+      ) {
+        badgeTheme = "esic-cyan";
+        markerTheme = "marker-tieup";
+        flagColor = "#0891b2"; // Tie-Up Hospital (Cyan)
+        typeLabel = "Tie-Up Hospital";
+      } else if (
+        isGovtDistrictHospital(hosp) ||
+        subType === "DH" ||
+        subType.includes("District Hospital") ||
+        nameUpper.includes("CIVIL HOSPITAL") ||
+        nameUpper.includes("DISTRICT HOSPITAL") ||
+        rawType.includes("CIVIL") ||
+        rawType.includes("DISTRICT")
+      ) {
+        badgeTheme = "esic-blue";
+        markerTheme = "marker-dh";
+        flagColor = "#2563eb"; // Govt District Hospital (Blue)
+        typeLabel = "Govt District Hospital";
+      } else if (
+        isDispensary(hosp) ||
+        nameUpper.includes("DISPENSARY") ||
+        subType.includes("Dispensary") ||
+        subType.includes("ESIS") ||
+        rawType.includes("DISPENSARY") ||
+        hosp.is_dispensary
+      ) {
+        badgeTheme = "chc";
+        markerTheme = "marker-dispensary";
+        flagColor = "#059669"; // ESIS Dispensary (Emerald)
+        typeLabel = "ESIS Dispensary";
+      } else if (subType === "PHC" || subType.includes("Primary") || nameUpper.includes("PHC")) {
+        badgeTheme = "phc";
+        markerTheme = "marker-phc";
+        flagColor = "#0284c7"; // PHC (Sky Blue)
+        typeLabel = "Primary Health Centre";
       } else {
-        if (subType === "DH" || subType.includes("District Hospital")) {
-          badgeTheme = "dh";
-          markerTheme = "marker-dh";
-          flagColor = "#a855f7";
-        } else if (subType === "SDH" || subType.includes("Sub")) {
-          badgeTheme = "sdh";
-          markerTheme = "marker-sdh";
-          flagColor = "#1f2937";
-        } else if (subType === "PHC" || subType.includes("Primary")) {
-          badgeTheme = "phc";
-          markerTheme = "marker-phc";
-          flagColor = "#38bdf8";
-        }
+        badgeTheme = "sdh";
+        markerTheme = "marker-sdh";
+        flagColor = "#0d9488"; // SDH / CHC (Teal)
+        typeLabel = "Community Health Centre";
       }
 
-      const svgIcon = `<svg viewBox="0 0 100 100" width="36" height="36"><path d="M 25 15 L 95 35 L 25 55 Z" fill="${flagColor}"/><rect x="21" y="12" width="8" height="85" rx="3" fill="${flagColor}"/></svg>`;
+      const svgIcon = `<svg viewBox="0 0 100 100" width="36" height="36" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.25));"><path d="M 25 15 L 95 35 L 25 55 Z" fill="${flagColor}"/><rect x="21" y="12" width="8" height="85" rx="3" fill="${flagColor}"/></svg>`;
 
       const customIcon = L.divIcon({
         html: `
           <div class="custom-marker ${markerTheme}" style="position: relative; display: flex; align-items: center; justify-content: flex-start; background: transparent; border: none; overflow: visible;">
             ${svgIcon}
-            <div class="facility-label" style="color: ${flagColor};">${hosp.name}</div>
+            <div class="facility-label" style="color: ${flagColor}; border-left: 2.5px solid ${flagColor};">${hosp.name}</div>
           </div>
         `,
         className: "",
@@ -411,35 +456,31 @@ const AssamMap = forwardRef(function AssamMap(
 
       const marker = L.marker([lat, lng], { icon: customIcon });
 
-      const displayId = hosp.displayId || (rawType === "ESIC" ? `E${idx + 1}` : `N${idx + 1}`);
-
       marker.bindPopup(`
         <div class="custom-popup p-1 font-sans text-xs">
           <div class="flex items-center gap-1.5 mb-1.5 font-bold text-sm text-slate-900">
-            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono border ${badgeTheme}">${displayId}</span>
-            <span>${hosp.name}</span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeTheme}">${typeLabel}</span>
+            <span class="truncate max-w-[200px]">${hosp.name}</span>
           </div>
           <p class="text-slate-600 mb-1"><strong>District:</strong> ${hosp.district || "Assam"}</p>
           ${hosp.block ? `<p class="text-slate-600 mb-1"><strong>Block:</strong> ${hosp.block}</p>` : ""}
           ${hosp.address ? `<p class="text-slate-600 mb-1"><strong>Address:</strong> ${hosp.address}</p>` : ""}
-          ${hosp.pincode ? `<p class="text-slate-600 mb-1"><strong>Pincode:</strong> ${hosp.pincode}</p>` : ""}
-          ${
-            hosp.distance_km != null
-              ? `<p class="text-slate-700 font-semibold mb-1"><strong>Distance:</strong> ${hosp.distance_km === 0 ? "0 km" : `${Number(hosp.distance_km).toFixed(1)} km`}</p>`
-              : ""
-          }
+          ${hosp.phone ? `<p class="text-slate-700 font-semibold mb-1"><strong>Phone:</strong> ${hosp.phone}</p>` : ""}
           ${
             hosp.gmap || hosp.maps_url
-              ? `<a href="${hosp.gmap || hosp.maps_url}" target="_blank" rel="noopener noreferrer" class="text-blue-600 font-semibold hover:underline inline-block mt-1">Directions (Google Maps) ↗</a>`
+              ? `<a href="${hosp.gmap || hosp.maps_url}" target="_blank" rel="noopener noreferrer" class="text-blue-600 font-bold hover:underline inline-block mt-1">Directions (Google Maps) ↗</a>`
               : ""
           }
         </div>
       `);
 
       markerGroup.addLayer(marker);
-      const fid = hosp.id || hosp.name;
-      if (fid) {
-        markersMapRef.current.set(fid, marker);
+      if (hosp.id) {
+        markersMapRef.current.set(String(hosp.id), marker);
+      }
+      if (hosp.name) {
+        markersMapRef.current.set(String(hosp.name), marker);
+        markersMapRef.current.set(String(hosp.name).toLowerCase().trim(), marker);
       }
     });
 
@@ -531,9 +572,12 @@ const AssamMap = forwardRef(function AssamMap(
 
     const openTargetPopup = () => {
       let targetMarker = null;
-      const fid = facility.id || facility.name;
-      if (fid && markersMapRef.current.has(fid)) {
-        targetMarker = markersMapRef.current.get(fid);
+      if (facility.id && markersMapRef.current.has(String(facility.id))) {
+        targetMarker = markersMapRef.current.get(String(facility.id));
+      } else if (facility.name && markersMapRef.current.has(String(facility.name))) {
+        targetMarker = markersMapRef.current.get(String(facility.name));
+      } else if (facility.name && markersMapRef.current.has(String(facility.name).toLowerCase().trim())) {
+        targetMarker = markersMapRef.current.get(String(facility.name).toLowerCase().trim());
       }
 
       if (!targetMarker) {
@@ -541,8 +585,8 @@ const AssamMap = forwardRef(function AssamMap(
           if (!targetMarker) {
             const mLatLng = marker.getLatLng();
             if (
-              Math.abs(mLatLng.lat - lat) < 0.001 &&
-              Math.abs(mLatLng.lng - lng) < 0.001
+              Math.abs(mLatLng.lat - lat) < 0.002 &&
+              Math.abs(mLatLng.lng - lng) < 0.002
             ) {
               targetMarker = marker;
             }
@@ -555,7 +599,10 @@ const AssamMap = forwardRef(function AssamMap(
       }
     };
 
+    // Open immediately and upon flight completion
+    openTargetPopup();
     map.once("moveend", openTargetPopup);
+    setTimeout(openTargetPopup, 400);
     setTimeout(openTargetPopup, 850);
   };
 

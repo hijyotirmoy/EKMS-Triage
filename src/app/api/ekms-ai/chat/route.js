@@ -1,26 +1,27 @@
 import { NextResponse } from "next/server";
-import { processDoctorConsultationTurn } from "@/lib/doctorChatEngine";
+import { processDoctorConsultationTurn, buildLocalDoctorConsultationFallback } from "@/lib/doctorChatEngine";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request) {
+  let inputPrompt = "";
+  let history = [];
+  let state = {};
+
   try {
     const body = await request.json();
-    const inputPrompt = body.prompt || body.message;
+    inputPrompt = body.prompt || body.message;
 
     if (!inputPrompt || typeof inputPrompt !== "string" || inputPrompt.trim().length === 0) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    const {
-      history = [],
-      sessionId = "session-" + Date.now(),
-      currentClinicalState = {},
-      currentTriage = {},
-    } = body;
+    history = body.history || [];
+    const currentClinicalState = body.currentClinicalState || {};
+    const currentTriage = body.currentTriage || {};
 
-    const state = {
+    state = {
       ...currentTriage,
       ...currentClinicalState,
     };
@@ -41,6 +42,10 @@ export async function POST(request) {
       differentialDiagnosis: doctorResult.differentialDiagnosis,
       severity: doctorResult.severity,
       severityScore: doctorResult.severityScore,
+      duration: doctorResult.duration,
+      allergies: doctorResult.allergies,
+      medication: doctorResult.medication,
+      medications: doctorResult.medications,
       redFlagsDetected: doctorResult.redFlagsDetected,
       referralDestination: doctorResult.referralDestination,
       referralReason: doctorResult.referralReason,
@@ -54,7 +59,8 @@ export async function POST(request) {
         condition: doctorResult.suspectedCondition,
         severity: doctorResult.severity,
         duration: doctorResult.duration,
-        medication: doctorResult.medication,
+        allergies: doctorResult.allergies,
+        medication: doctorResult.medication || doctorResult.medications,
         associated: doctorResult.redFlagsDetected,
         referralDestination: doctorResult.referralDestination,
         isPsychiatric: doctorResult.isPsychiatric,
@@ -63,34 +69,73 @@ export async function POST(request) {
     });
   } catch (err) {
     console.error("Doctor Chat API error:", err);
-    return NextResponse.json({
-      probingQuestion: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
-      agentScript: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
-      answer: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
-      options: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
-      suggestedAnswers: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
-      suspectedCondition: "Clinical Evaluation",
-      severity: "Moderate",
-      severityScore: 5,
-      redFlagsDetected: [],
-      referralDestination: "104 Health Helpline",
-      referralReason: "Connect with 104 Health Helpline for tele-doctor consultation.",
-      isPsychiatric: false,
-      is_dual_protocol: false,
-      call_referral_secondary: "ESIC Hospital",
-      clinicalSummary: "Clinical consultation in progress.",
-      isReadyForSummary: false,
-      triageSummary: {
-        symptom: "Reported symptoms",
-        condition: "Clinical Evaluation",
+    try {
+      const fallback = buildLocalDoctorConsultationFallback(inputPrompt, history, state);
+      return NextResponse.json({
+        probingQuestion: fallback.probingQuestion,
+        agentScript: fallback.probingQuestion,
+        answer: fallback.probingQuestion,
+        options: fallback.suggestedAnswers,
+        suggestedAnswers: fallback.suggestedAnswers,
+        suspectedCondition: fallback.suspectedCondition,
+        severity: fallback.severity,
+        severityScore: fallback.severity === "High" ? 9 : 5,
+        duration: fallback.duration || "Reported today",
+        allergies: fallback.allergies || "None",
+        medication: fallback.medication || fallback.medications || "None",
+        medications: fallback.medications || fallback.medication || "None",
+        redFlagsDetected: fallback.redFlagsDetected || [],
+        referralDestination: fallback.referralDestination,
+        referralReason: fallback.referralReason,
+        isPsychiatric: fallback.isPsychiatric,
+        is_dual_protocol: fallback.is_dual_protocol || false,
+        call_referral_secondary: fallback.call_referral_secondary || null,
+        clinicalSummary: fallback.clinicalSummary || "Clinical consultation in progress.",
+        isReadyForSummary: fallback.isReadyForSummary || false,
+        triageSummary: {
+          symptom: state.symptom || fallback.suspectedCondition,
+          condition: fallback.suspectedCondition,
+          severity: fallback.severity,
+          duration: fallback.duration || "Reported today",
+          allergies: fallback.allergies || "None",
+          medication: fallback.medication || fallback.medications || "None",
+          associated: fallback.redFlagsDetected || [],
+          referralDestination: fallback.referralDestination,
+          isPsychiatric: fallback.isPsychiatric,
+        },
+        decision: { condition: fallback.suspectedCondition },
+      }, { status: 200 });
+    } catch (fallbackErr) {
+      console.error("Local fallback fatal error:", fallbackErr);
+      return NextResponse.json({
+        probingQuestion: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+        agentScript: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+        answer: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya lakshan hain?")',
+        options: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
+        suggestedAnswers: ["Pain in chest / breathing trouble", "Injury / wound / severe pain", "Stomach ache / nausea / fever", "Dizziness / general weakness"],
+        suspectedCondition: "Clinical Evaluation",
         severity: "Moderate",
-        duration: "Reported today",
-        medication: "None",
-        associated: [],
+        severityScore: 5,
+        redFlagsDetected: [],
         referralDestination: "104 Health Helpline",
+        referralReason: "Connect with 104 Health Helpline for tele-doctor consultation.",
         isPsychiatric: false,
-      },
-      decision: { condition: "Clinical Evaluation" },
-    }, { status: 200 });
+        is_dual_protocol: false,
+        call_referral_secondary: "ESIC Hospital",
+        clinicalSummary: "Clinical consultation in progress.",
+        isReadyForSummary: false,
+        triageSummary: {
+          symptom: "Reported symptoms",
+          condition: "Clinical Evaluation",
+          severity: "Moderate",
+          duration: "Reported today",
+          medication: "None",
+          associated: [],
+          referralDestination: "104 Health Helpline",
+          isPsychiatric: false,
+        },
+        decision: { condition: "Clinical Evaluation" },
+      }, { status: 200 });
+    }
   }
 }

@@ -511,8 +511,17 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
         : 9999;
     const isNearbyPinArea = isExactPin || (pinDiff <= 5 && cleanFacPin.startsWith(callerPin.slice(0, 4)));
 
-    if (isExactPin || (isNearbyPinArea && pinDiff === 0)) {
-      dist = 0;
+    let finalDist = dist;
+    if (finalDist !== null && finalDist !== undefined) {
+      if (finalDist <= 0.1) {
+        // Realistic local proximity in same postal delivery area rather than 0 KM
+        finalDist = isExactPin ? 0.8 : 1.2;
+      }
+    } else {
+      if (isExactPin) finalDist = 0.8;
+      else if (pinDiff <= 2) finalDist = 2.4;
+      else if (pinDiff <= 5) finalDist = 5.0;
+      else finalDist = 9999;
     }
 
     const isSameDistrict = Boolean(
@@ -526,7 +535,7 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
 
     return {
       ...f,
-      distance_km: dist != null ? dist : (isExactPin ? 0 : 9999),
+      distance_km: finalDist,
       is_exact_pincode: isExactPin,
       is_nearby_pincode: isNearbyPinArea,
       is_same_district: isSameDistrict,

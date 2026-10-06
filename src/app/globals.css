@@ -166,17 +166,17 @@
   cursor: crosshair !important;
 }
 
-/* District Name Tooltips - Clean Black Text with Dynamic Sizing */
+/* District Name Tooltips - Clean Black Text with Dynamic Sizing & Light Halo */
 .district-label-tooltip {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  color: #000000 !important;
+  color: #0f172a !important;
   font-size: 11px;
-  font-weight: 700 !important;
+  font-weight: 800 !important;
   letter-spacing: 0.5px !important;
   text-transform: uppercase !important;
-  text-shadow: none !important;
+  text-shadow: 0 0 4px #ffffff, 0 0 6px #ffffff, 0 0 8px #ffffff !important;
   pointer-events: none !important;
   white-space: nowrap !important;
   transition: font-size 0.15s ease;
@@ -195,27 +195,28 @@
 
 /* Hospital Name Labels on the RIGHT SIDE of flag marker */
 .facility-label {
-  display: none;
+  display: block !important;
   position: absolute;
   left: 100%;
   top: 35%;
   transform: translateY(-50%);
   margin-left: 6px;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16) !important;
+  padding: 1px 6px !important;
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
   pointer-events: none;
-  text-shadow: 1px 1px 0 #ffffff, -1px -1px 0 #ffffff, 1px -1px 0 #ffffff, -1px 1px 0 #ffffff, 0 1px 3px rgba(255, 255, 255, 0.9);
   z-index: 1000;
 }
 
-.show-marker-labels .facility-label,
 .custom-marker:hover .facility-label {
   display: block !important;
+  z-index: 1010;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
 }
 
 /* Leaflet Popup Styling */
@@ -223,7 +224,7 @@
   background: #ffffff !important;
   color: #0f172a !important;
   border-radius: 14px !important;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2) !important;
   padding: 4px !important;
 }
 
@@ -235,8 +236,10 @@
 .esic-red { background-color: #fee2e2; color: #991b1b; border-color: #fca5a5; }
 .esic-blue { background-color: #dbeafe; color: #1e40af; border-color: #93c5fd; }
 .esic-yellow { background-color: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.esic-amber { background-color: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.esic-cyan { background-color: #cffafe; color: #155e75; border-color: #67e8f9; }
 .chc { background-color: #d1fae5; color: #065f46; border-color: #6ee7b7; }
 .phc { background-color: #e0f2fe; color: #0369a1; border-color: #7dd3fc; }
 .sdh { background-color: #e2e8f0; color: #334155; border-color: #94a3b8; }
-.dh { background-color: #f3e8ff; color: #6b21a8; border-color: #d8b4fe; }
+.dh { background-color: #dbeafe; color: #1e40af; border-color: #93c5fd; }
 
