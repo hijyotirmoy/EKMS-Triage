@@ -627,7 +627,7 @@
     "id": "fac-1790305930459-8",
     "latitude": 26.3460939020646,
     "block": "NA",
-    "address": "Lakhinagar, P.O � Haiborgaon, Dist.- Nagaon, Pin - 782002",
+    "address": "Lakhinagar, P.O - Haiborgaon, Dist.- Nagaon, Pin - 782002",
     "active": true,
     "longitude": 92.6678194739802,
     "site_code": "NA",
@@ -1330,7 +1330,7 @@
   {
     "id": "fac-1790305930459-23",
     "block": "NA",
-    "address": "2 No. Mathgharia, Banikanta Path, P.O � Noonmati, Pin�781020, Dist-Kamrup (M)",
+    "address": "2 No. Mathgharia, Banikanta Path, P.O - Noonmati, Pin - 781020, Dist-Kamrup (M)",
     "facility_type": "Dispensary",
     "name": "ESIS Dispensary, Guwahati Refinery",
     "scheme": "ESIS",
@@ -1531,7 +1531,7 @@
     "facility_type": "Dispensary",
     "block": "NA",
     "latitude": 26.5722970104188,
-    "address": "Bishnupur, P.O � Kanaighat, P.S � Numaligarh, District � Golaghat, Pin - 785699",
+    "address": "Bishnupur, P.O - Kanaighat, P.S - Numaligarh, District - Golaghat, Pin - 785699",
     "name": "ESIS Dispensary, Numaligarh",
     "scheme": "ESIS"
   },

@@ -133,11 +133,11 @@ export async function POST(request) {
       nearest_facilities = rankNearestFacilities(
         resolved_location,
         facilities,
-        6,
+        50,
         isSevere && !isPsychiatricCase
       );
     } catch {
-      nearest_facilities = facilities.slice(0, 6);
+      nearest_facilities = facilities;
     }
 
     const isPsychCase =

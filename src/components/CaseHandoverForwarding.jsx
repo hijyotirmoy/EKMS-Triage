@@ -492,27 +492,25 @@ export function CaseHandoverForwarding({
       return;
     }
 
-    try {
-      const stored = typeof window !== "undefined"
-        ? ((caseTarget && (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))) ||
-           sessionStorage.getItem("ekms_active_case_forwarded") ||
-           localStorage.getItem("ekms_active_case_forwarded"))
-        : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.is_forwarded) {
-          setSentStatus({
-            teamName: parsed.forwarded_to || "ESIS Dispensary",
-            shortName: parsed.forwarded_short_name || "Facility",
-            dispatchId: parsed.dispatch_id || `DISP-${String(caseTarget || "SENT").slice(-6)}`,
-            timestamp: parsed.forwarded_at ? formatTriageDate(parsed.forwarded_at) : "Recently",
-            location: "",
-          });
-          return;
+    if (typeof window !== "undefined" && caseTarget) {
+      try {
+        const stored =
+          sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) ||
+          localStorage.getItem(`ekms_forwarded_${caseTarget}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.is_forwarded && (parsed.case_ref === caseTarget || parsed.dispatch_id)) {
+            setSentStatus({
+              teamName: parsed.forwarded_to || "ESIS Dispensary",
+              shortName: parsed.forwarded_short_name || "Facility",
+              dispatchId: parsed.dispatch_id || `DISP-${String(caseTarget || "SENT").slice(-6)}`,
+              timestamp: parsed.forwarded_at ? formatTriageDate(parsed.forwarded_at) : "Recently",
+              location: "",
+            });
+            return;
+          }
         }
-      }
 
-      if (caseTarget) {
         const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseTarget) || String(c.id) === String(caseTarget));
         if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
           setSentStatus({
@@ -522,9 +520,12 @@ export function CaseHandoverForwarding({
             timestamp: cached.forwarded_at ? formatTriageDate(cached.forwarded_at) : "Recently",
             location: cached.intake?.landmark || "",
           });
+          return;
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
+
+    setSentStatus(null);
   }, [result, caseRef]);
 
   const selectedTeam =

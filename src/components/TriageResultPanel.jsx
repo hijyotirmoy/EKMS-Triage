@@ -6,7 +6,6 @@ import {
   AlertOctagon,
   Building2,
   Copy,
-  ExternalLink,
   Loader2,
   MapPin,
   MessageSquare,
@@ -44,7 +43,24 @@ import {
   isGovtDistrictHospital,
   getFacilityCategoryLabel,
   rankNearestFacilities,
+  calculateHaversineDistanceKm,
+  calculateRoadDistanceKm,
 } from "../lib/geo";
+
+const formatApproxKm = (dist) => {
+  if (dist == null || isNaN(dist)) return null;
+  const num = Number(dist);
+  return num < 10 ? num.toFixed(1) : Math.round(num);
+};
+
+const getFacilityPincode = (f) => {
+  if (f?.pincode && /^\d{6}$/.test(String(f.pincode).trim())) {
+    return String(f.pincode).trim();
+  }
+  const match = f?.address && f.address.match(/\b(78\d{4})\b/);
+  return match ? match[1] : null;
+};
+
 
 export const ACTION_DIRECTIVES = {
   CALL_108: {
@@ -331,6 +347,7 @@ export const TriageResultPanel = ({
   callerIntake,
   currentAgent,
   onUpdatePincode,
+  onUpdateLocation,
   onRunTriageWithPincode,
   onDirectiveChange,
   callerHistory = [],
@@ -343,6 +360,7 @@ export const TriageResultPanel = ({
   const s = urgencyStyle(t.urgency_level);
 
   const [searchPincode, setSearchPincode] = useState("");
+  const [largeViewSearchPin, setLargeViewSearchPin] = useState("");
   const [searchedFacilities, setSearchedFacilities] = useState(null);
   const [searchedLocation, setSearchedLocation] = useState(null);
   const [isSearchingFacilities, setIsSearchingFacilities] = useState(false);
@@ -357,19 +375,68 @@ export const TriageResultPanel = ({
   const [droppedPinLocation, setDroppedPinLocation] = useState(null);
   const [selectedDistrictFilter, setSelectedDistrictFilter] = useState("all");
 
+  // Reset search and pin state on new case
+  useEffect(() => {
+    setSearchedFacilities(null);
+    setSearchedLocation(null);
+    setDroppedPinLocation(null);
+    setIsPinModeActive(false);
+    setSearchPincode("");
+    setLargeViewSearchPin("");
+  }, [result?.case_ref, result?.case_id, result?.id]);
+
   const handleFacilitySearch = async (targetQuery) => {
-    const query = String(targetQuery ?? searchPincode).trim();
+    const raw = targetQuery !== undefined ? targetQuery : (largeViewSearchPin || searchPincode);
+    const query = String(raw || "").trim();
     if (!query) {
       return toast.error("Please enter a 6-digit Assam PIN code or District");
     }
+
+    // Immediately clear any prior dropped pin and deactivate pin mode
+    setDroppedPinLocation(null);
+    setIsPinModeActive(false);
+    setSelectedDistrictFilter("all");
+    setSearchPincode(query);
+    setLargeViewSearchPin(query);
+    setDrawerSearchQuery(""); // Clear drawer text filter so all nearest facilities of new PIN are displayed
 
     setIsSearchingFacilities(true);
     try {
       const isSevere = t.urgency_level === "Emergency" || t.call_108;
       const isPin = /^\d{6}$/.test(query);
-      const url = isPin
-        ? `/api/facilities/nearest?pincode=${encodeURIComponent(query)}&severe=${isSevere}`
-        : `/api/facilities/nearest?district=${encodeURIComponent(query)}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+
+      // Geocode using exact same method as EKMS Map: OpenStreetMap Nominatim (${query}, Assam, India)
+      let geoLat = null;
+      let geoLon = null;
+      try {
+        const nomRes = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            query + ", Assam, India"
+          )}&limit=1`
+        );
+        if (nomRes.ok) {
+          const nomData = await nomRes.json();
+          if (nomData && nomData.length > 0 && nomData[0].lat && nomData[0].lon) {
+            const pLat = parseFloat(nomData[0].lat);
+            const pLon = parseFloat(nomData[0].lon);
+            if (pLat >= 24.0 && pLat <= 28.5 && pLon >= 89.5 && pLon <= 96.5) {
+              geoLat = pLat;
+              geoLon = pLon;
+            }
+          }
+        }
+      } catch (nomErr) {
+        // Fallback to internal dataset
+      }
+
+      let url = "";
+      if (geoLat != null && geoLon != null) {
+        url = `/api/facilities/nearest?lat=${geoLat}&lon=${geoLon}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+      } else if (isPin) {
+        url = `/api/facilities/nearest?pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+      } else {
+        url = `/api/facilities/nearest?district=${encodeURIComponent(query)}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+      }
 
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch facilities");
@@ -377,9 +444,32 @@ export const TriageResultPanel = ({
 
       setSearchedFacilities(data.nearest_facilities || []);
       setSearchedLocation(data.resolved_location || null);
+      setVisibleFacilityCount(6);
+      setDrawerVisibleCount(6);
 
-      if (onUpdatePincode) {
-        onUpdatePincode(isPin ? query : (data.resolved_location?.pincode || query));
+      // Only pass 6-digit numeric string to pincode; place names go to city / town!
+      const validPin = isPin
+        ? query
+        : (data.resolved_location?.pincode && /^\d{6}$/.test(String(data.resolved_location.pincode).trim())
+            ? String(data.resolved_location.pincode).trim()
+            : null);
+      const placeCity = !isPin ? query : (data.resolved_location?.city || null);
+      const placeDistrict = data.resolved_location?.district || (!isPin ? query : null);
+
+      if (onUpdateLocation) {
+        onUpdateLocation({
+          pincode: validPin,
+          city: placeCity,
+          district: placeDistrict,
+        });
+      } else if (onUpdatePincode && validPin) {
+        onUpdatePincode(validPin);
+      }
+
+      if (data.resolved_location?.latitude != null && data.resolved_location?.longitude != null) {
+        const coords = [Number(data.resolved_location.latitude), Number(data.resolved_location.longitude)];
+        mapRef.current?.flyTo(coords, 11);
+        fullScreenMapRef.current?.flyTo(coords, 11);
       }
 
       if (data.nearest_facilities?.length > 0) {
@@ -413,14 +503,15 @@ export const TriageResultPanel = ({
       effectiveLoc.longitude != null &&
       !effectiveLoc.isNoLocation
     ) {
+      const pinPart = effectiveLoc.pincode ? `PIN: ${effectiveLoc.pincode}` : "";
+      const distPart = effectiveLoc.district || "";
+      const displayName = [distPart, pinPart].filter(Boolean).join(" · ") || effectiveLoc.matched || "Target Location";
+
       return {
         lat: Number(effectiveLoc.latitude),
         lng: Number(effectiveLoc.longitude),
         radius: 15,
-        name:
-          effectiveLoc.matched?.replace(/\b(78\d{4})\b/g, "").replace(/\(\s*\)/g, "").trim() ||
-          effectiveLoc.pincode ||
-          "Caller Location",
+        name: displayName,
       };
     }
     return null;
@@ -433,22 +524,49 @@ export const TriageResultPanel = ({
     setIsSearchingFacilities(true);
     try {
       const isSevere = t.urgency_level === "Emergency" || t.call_108;
-      const url = `/api/facilities/nearest?lat=${pinLoc.lat}&lon=${pinLoc.lng}&severe=${isSevere}`;
+      const url = `/api/facilities/nearest?lat=${pinLoc.lat}&lon=${pinLoc.lng}&is_drop_pin=true&severe=${isSevere}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setSearchedFacilities(data.nearest_facilities || []);
-        setSearchedLocation(
-          data.resolved_location || {
-            latitude: pinLoc.lat,
-            longitude: pinLoc.lng,
-            matched: pinLoc.name,
-            pincode: null,
-            district: null,
-            method: "coordinates",
-            isNoLocation: false,
-          }
-        );
+        setVisibleFacilityCount(6);
+        setDrawerVisibleCount(6);
+
+        const resolved = data.resolved_location || {
+          latitude: pinLoc.lat,
+          longitude: pinLoc.lng,
+          matched: pinLoc.name,
+          pincode: pinLoc.pincode || null,
+          city: pinLoc.city || pinLoc.name || null,
+          district: pinLoc.district || null,
+          method: "dropped_pin",
+          isNoLocation: false,
+          isDroppedPin: true,
+        };
+
+        setSearchedLocation(resolved);
+
+        // Put place name into City / town, and ONLY a valid 6-digit numeric postal code into Pincode!
+        const resolvedPin = (resolved.pincode && /^\d{6}$/.test(String(resolved.pincode).trim()))
+          ? String(resolved.pincode).trim()
+          : (pinLoc.pincode && /^\d{6}$/.test(String(pinLoc.pincode).trim()) ? String(pinLoc.pincode).trim() : null);
+
+        const placeCity =
+          (resolved.city && resolved.city !== "." ? resolved.city : null) ||
+          (pinLoc.city && !pinLoc.city.startsWith("Dropped Pin") ? pinLoc.city : null) ||
+          (pinLoc.name && !pinLoc.name.startsWith("Dropped Pin") ? pinLoc.name : null);
+        const placeDistrict = resolved.district || pinLoc.district || null;
+
+        if (onUpdateLocation) {
+          onUpdateLocation({
+            pincode: resolvedPin,
+            city: placeCity,
+            district: placeDistrict,
+          });
+        } else if (onUpdatePincode && resolvedPin) {
+          onUpdatePincode(resolvedPin);
+        }
+
         toast.success(`Dropped pin set to "${pinLoc.name}"! Found ${data.nearest_facilities?.length || 0} facilities.`);
       }
     } catch (err) {
@@ -495,6 +613,8 @@ export const TriageResultPanel = ({
 
   useEffect(() => {
     if (isMapExpanded) {
+      const activePin = searchPincode || effectiveLoc?.pincode || (effectiveLoc?.district && effectiveLoc.district !== "all" ? effectiveLoc.district : "") || "";
+      if (activePin) setLargeViewSearchPin(activePin);
       const timer = setTimeout(() => {
         fullScreenMapRef.current?.invalidateSize();
       }, 250);
@@ -505,7 +625,7 @@ export const TriageResultPanel = ({
       }, 200);
       return () => clearTimeout(timer);
     }
-  }, [isMapExpanded]);
+  }, [isMapExpanded, searchPincode, effectiveLoc?.pincode, effectiveLoc?.district]);
 
   const effectiveRawFacs =
     searchedFacilities !== null ? searchedFacilities : (Array.isArray(facs) ? facs : []);
@@ -520,9 +640,22 @@ export const TriageResultPanel = ({
   const secondaryDirective =
     ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
 
+  const [visibleFacilityCount, setVisibleFacilityCount] = useState(6);
+  const [drawerVisibleCount, setDrawerVisibleCount] = useState(6);
+
+  // Reset pagination to 6 when search / filter / pin / directive changes
+  useEffect(() => {
+    setVisibleFacilityCount(6);
+    setDrawerVisibleCount(6);
+  }, [searchPincode, droppedPinLocation, manualDirectiveId, effectiveLoc?.district, effectiveLoc?.pincode]);
+
+  useEffect(() => {
+    setDrawerVisibleCount(6);
+  }, [drawerSearchQuery]);
+
   const [forwardedStatus, setForwardedStatus] = useState(() => {
+    const caseRef = result?.case_ref || result?.case_id || result?.id;
     if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
-      const caseRef = result?.case_ref || result?.case_id || result?.id;
       return {
         shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (result.forwarded_to?.includes("104") ? "104 Health Helpline" : (result.forwarded_to?.includes("108") ? "108 Ambulance" : result.forwarded_to))) || "Facility",
         teamName: result.forwarded_to || "ESIS Dispensary",
@@ -530,16 +663,14 @@ export const TriageResultPanel = ({
         timestamp: result.forwarded_at || new Date().toISOString(),
       };
     }
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && caseRef) {
       try {
-        const caseRef = result?.case_ref || result?.case_id || result?.id;
         const stored =
-          (caseRef && (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))) ||
-          sessionStorage.getItem("ekms_active_case_forwarded") ||
-          localStorage.getItem("ekms_active_case_forwarded");
+          sessionStorage.getItem(`ekms_forwarded_${caseRef}`) ||
+          localStorage.getItem(`ekms_forwarded_${caseRef}`);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.is_forwarded) {
+          if (parsed.is_forwarded && (parsed.case_ref === caseRef || parsed.dispatch_id)) {
             return {
               shortName: parsed.forwarded_short_name || "Facility",
               teamName: parsed.forwarded_to || "ESIS Dispensary",
@@ -565,15 +696,14 @@ export const TriageResultPanel = ({
       return;
     }
 
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && caseRef) {
       try {
         const stored =
-          (caseRef && (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))) ||
-          sessionStorage.getItem("ekms_active_case_forwarded") ||
-          localStorage.getItem("ekms_active_case_forwarded");
+          sessionStorage.getItem(`ekms_forwarded_${caseRef}`) ||
+          localStorage.getItem(`ekms_forwarded_${caseRef}`);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.is_forwarded) {
+          if (parsed.is_forwarded && (parsed.case_ref === caseRef || parsed.dispatch_id)) {
             setForwardedStatus({
               shortName: parsed.forwarded_short_name || "Facility",
               teamName: parsed.forwarded_to || "ESIS Dispensary",
@@ -584,25 +714,21 @@ export const TriageResultPanel = ({
           }
         }
 
-        if (caseRef) {
-          const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
-          if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
-            setForwardedStatus({
-              shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
-              teamName: cached.forwarded_to || "ESIS Dispensary",
-              dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
-              timestamp: cached.forwarded_at,
-            });
-            return;
-          }
+        const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
+        if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
+          setForwardedStatus({
+            shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
+            teamName: cached.forwarded_to || "ESIS Dispensary",
+            dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
+            timestamp: cached.forwarded_at,
+          });
+          return;
         }
       } catch (e) {}
     }
 
-    // Only clear if result is explicitly cleared/null
-    if (!result) {
-      setForwardedStatus(null);
-    }
+    // Default to null if this case is not specifically forwarded
+    setForwardedStatus(null);
   }, [result]);
 
   useEffect(() => {
@@ -624,9 +750,58 @@ export const TriageResultPanel = ({
 
   // Dynamically organize facilities with clear categorization badges and all 4 facility types
   const dynamicFacilities = useMemo(() => {
-    const effectiveFacs = effectiveRawFacs;
+    const rawList = effectiveRawFacs || [];
+    if (!rawList || rawList.length === 0) return [];
 
-    if (!effectiveFacs || effectiveFacs.length === 0) return [];
+    const effectiveFacs = rawList.map((f) => {
+      let calcDist = f.distance_km;
+      if (
+        droppedPinLocation &&
+        droppedPinLocation.lat != null &&
+        droppedPinLocation.lng != null &&
+        f.latitude != null &&
+        f.longitude != null
+      ) {
+        calcDist = calculateRoadDistanceKm(
+          Number(droppedPinLocation.lat),
+          Number(droppedPinLocation.lng),
+          Number(f.latitude),
+          Number(f.longitude)
+        );
+      } else if (
+        searchedLocation &&
+        searchedLocation.latitude != null &&
+        searchedLocation.longitude != null &&
+        f.latitude != null &&
+        f.longitude != null
+      ) {
+        calcDist = calculateRoadDistanceKm(
+          Number(searchedLocation.latitude),
+          Number(searchedLocation.longitude),
+          Number(f.latitude),
+          Number(f.longitude)
+        );
+      } else if (
+        calcDist == null &&
+        effectiveLoc &&
+        effectiveLoc.latitude != null &&
+        effectiveLoc.longitude != null &&
+        !effectiveLoc.isNoLocation &&
+        f.latitude != null &&
+        f.longitude != null
+      ) {
+        calcDist = calculateRoadDistanceKm(
+          Number(effectiveLoc.latitude),
+          Number(effectiveLoc.longitude),
+          Number(f.latitude),
+          Number(f.longitude)
+        );
+      }
+      return {
+        ...f,
+        distance_km: calcDist != null ? Math.round(calcDist * 10) / 10 : f.distance_km,
+      };
+    });
 
     const getTag = (f) => {
       if (f.facility_tag) return f.facility_tag;
@@ -634,17 +809,17 @@ export const TriageResultPanel = ({
     };
 
     const getCategoryStyle = (f) => {
-      if (isEsicHospital(f)) {
-        return "bg-amber-500/15 border-amber-500/40 text-amber-900 dark:text-amber-300 font-bold";
-      }
-      if (isGovtDistrictHospital(f)) {
-        return "bg-blue-500/15 border-blue-500/40 text-blue-900 dark:text-blue-300 font-bold";
-      }
       if (isDispensary(f)) {
-        return "bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-300 font-bold";
+        return "bg-rose-500/15 border-rose-500/40 text-rose-800 dark:text-rose-300 font-bold";
+      }
+      if (isEsicHospital(f)) {
+        return "bg-blue-500/15 border-blue-500/40 text-blue-800 dark:text-blue-300 font-bold";
       }
       if (isTieUp(f)) {
-        return "bg-cyan-500/15 border-cyan-500/40 text-cyan-900 dark:text-cyan-300 font-bold";
+        return "bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-amber-300 font-bold";
+      }
+      if (isGovtDistrictHospital(f)) {
+        return "bg-purple-500/15 border-purple-500/40 text-purple-800 dark:text-purple-300 font-bold";
       }
       return "bg-secondary/80 border-border/70 text-foreground/90 font-bold";
     };
@@ -662,19 +837,22 @@ export const TriageResultPanel = ({
 
     if (manualDirectiveId === "TIE_UP_FACILITY" || activeDirective.id === "TIE_UP_FACILITY") {
       const tieUps = effectiveFacs.filter(isTieUp).sort(byDistance);
-      const nonTieUps = effectiveFacs.filter((f) => !isTieUp(f)).sort(byDistance);
-      orderedFacs = [...tieUps, ...nonTieUps].slice(0, 6);
+      const topTieUp = tieUps[0];
+      const rest = effectiveFacs.filter((f) => f !== topTieUp).sort(byDistance);
+      orderedFacs = topTieUp ? [topTieUp, ...rest] : rest;
     } else if (manualDirectiveId === "DIST_HOSPITAL" || activeDirective.id === "DIST_HOSPITAL") {
       const distHosps = effectiveFacs.filter(isGovtDistrictHospital).sort(byDistance);
-      const others = effectiveFacs.filter((f) => !isGovtDistrictHospital(f)).sort(byDistance);
-      orderedFacs = [...distHosps, ...others].slice(0, 6);
+      const topDistHosp = distHosps[0];
+      const rest = effectiveFacs.filter((f) => f !== topDistHosp).sort(byDistance);
+      orderedFacs = topDistHosp ? [topDistHosp, ...rest] : rest;
     } else if (manualDirectiveId === "ESIC_HOSPITAL" || activeDirective.id === "ESIC_HOSPITAL") {
       const esicHosps = effectiveFacs.filter(isEsicHospital).sort(byDistance);
-      const others = effectiveFacs.filter((f) => !isEsicHospital(f)).sort(byDistance);
-      orderedFacs = [...esicHosps, ...others].slice(0, 6);
+      const topEsicHosp = esicHosps[0];
+      const rest = effectiveFacs.filter((f) => f !== topEsicHosp).sort(byDistance);
+      orderedFacs = topEsicHosp ? [topEsicHosp, ...rest] : rest;
     } else if (manualDirectiveId === "ESIS_DISPENSARY" || activeDirective.id === "ESIS_DISPENSARY") {
       if (isWeekend) {
-        // On weekends, dispensaries are closed. Prioritize at least 4 open facilities (hospitals / tie-ups) first
+        // On weekends, dispensaries are closed. Prioritize open facilities (hospitals / tie-ups) first
         const openFacs = effectiveFacs.filter(isOpenFacility).sort(byDistance);
         const closedDispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
         const minOpen = Math.max(4, openFacs.length >= 4 ? 4 : openFacs.length);
@@ -682,15 +860,16 @@ export const TriageResultPanel = ({
           ...openFacs.slice(0, minOpen),
           ...closedDispensaries,
           ...openFacs.slice(minOpen),
-        ].slice(0, Math.max(6, minOpen + closedDispensaries.length));
+        ];
       } else {
-        const dispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
-        const others = effectiveFacs.filter((f) => !isDispensary(f)).sort(byDistance);
-        orderedFacs = [...dispensaries, ...others].slice(0, 6);
+        const sortedDispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
+        const topDispensary = sortedDispensaries[0];
+        const rest = effectiveFacs.filter((f) => f !== topDispensary).sort(byDistance);
+        orderedFacs = topDispensary ? [topDispensary, ...rest] : rest;
       }
     } else {
       if (isWeekend) {
-        // On weekends, prioritize at least 4 open facilities (hospitals & tie-up facilities) first
+        // On weekends, prioritize open facilities first
         const openFacs = effectiveFacs.filter(isOpenFacility).sort(byDistance);
         const closedDispensaries = effectiveFacs.filter(isDispensary).sort(byDistance);
         const minOpen = Math.max(4, openFacs.length >= 4 ? 4 : openFacs.length);
@@ -698,23 +877,45 @@ export const TriageResultPanel = ({
           ...openFacs.slice(0, minOpen),
           ...closedDispensaries,
           ...openFacs.slice(minOpen),
-        ].slice(0, Math.max(6, minOpen + closedDispensaries.length));
+        ];
       } else {
         orderedFacs = [...effectiveFacs].sort(byDistance);
       }
     }
 
-    return orderedFacs.map((f) => ({
+    const seenKeys = new Set();
+    const dedupedFacs = [];
+    for (const f of orderedFacs) {
+      const key = f.id || `${f.name}-${f.latitude}-${f.longitude}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        dedupedFacs.push(f);
+      }
+    }
+
+    return dedupedFacs.map((f) => ({
       ...f,
       facility_tag: getTag(f),
       category_style: getCategoryStyle(f),
     }));
-  }, [effectiveRawFacs, manualDirectiveId, activeDirective.id, dispensaryStatus.isOpen, isWeekend]);
+  }, [
+    effectiveRawFacs,
+    manualDirectiveId,
+    activeDirective.id,
+    dispensaryStatus.isOpen,
+    isWeekend,
+    droppedPinLocation,
+    effectiveLoc,
+  ]);
 
   const modalDrawerFacilities = useMemo(() => {
     let list = dynamicFacilities || [];
     if (drawerSearchQuery.trim()) {
-      const q = drawerSearchQuery.toLowerCase();
+      const q = drawerSearchQuery.toLowerCase().trim();
+      // If drawerSearchQuery is a 6-digit pin matching searched pin, don't filter out nearest results
+      if (/^\d{6}$/.test(q) && (searchPincode === q || largeViewSearchPin === q)) {
+        return list;
+      }
       list = list.filter(
         (f) =>
           (f.name && f.name.toLowerCase().includes(q)) ||
@@ -724,7 +925,7 @@ export const TriageResultPanel = ({
       );
     }
     return list;
-  }, [dynamicFacilities, drawerSearchQuery]);
+  }, [dynamicFacilities, drawerSearchQuery, searchPincode, largeViewSearchPin]);
 
   const dispatchSms = (f) => {
     navigator.clipboard?.writeText(
@@ -1210,31 +1411,17 @@ export const TriageResultPanel = ({
             <h3 className="text-base sm:text-lg font-bold text-foreground">
               {isFacilityRequired
                 ? "Nearest Facilities Directory"
-                : "Nearest Facilities to Caller"}
+                : "Nearest Facilities Directory"}
             </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isFacilityRequired ? (
-                <>
-                  Prioritized for in-person visit:{" "}
-                  <span className="font-bold text-foreground">
-                    {activeDirective.badge}
-                  </span>
-                </>
-              ) : (
-                <>
-                  Primary directive is tele-consultation (
-                  <span className="font-bold text-foreground">
-                    {activeDirective.badge}
-                  </span>
-                  ) · Nearest facilities if in-person visit is needed
-                </>
-              )}
-            </p>
           </div>
           {effectiveLoc && (
             <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-foreground/80 shadow-2xs">
               <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span>{effectiveLoc.isNoLocation ? "No Location Provided" : effectiveLoc.matched?.replace(/\b(78\d{4})\b/g, "").replace(/\(\s*\)/g, "").replace(/\s+/g, " ").trim()}</span>
+              <span>
+                {effectiveLoc.isNoLocation
+                  ? "No Location Provided"
+                  : [effectiveLoc.district, effectiveLoc.pincode].filter(Boolean).join(" · ") || effectiveLoc.matched || "Assam"}
+              </span>
             </div>
           )}
         </div>
@@ -1301,7 +1488,7 @@ export const TriageResultPanel = ({
                     ? "bg-rose-600 text-white border-rose-500 animate-pulse"
                     : "bg-background border-border/80 text-foreground hover:bg-secondary hover:border-primary/50"
                 }`}
-                title="Drop custom pin on map to set caller location"
+                title="Drop custom pin on map to set location"
               >
                 <Crosshair className="h-3 w-3" />
                 <span>{isPinModeActive ? "Click on Map" : "Drop Pin"}</span>
@@ -1333,7 +1520,7 @@ export const TriageResultPanel = ({
           {/* Active Drop Pin Hint Banner */}
           {isPinModeActive && (
             <div className="bg-rose-500/15 border-b border-rose-500/30 px-3 py-1.5 text-center text-xs font-bold text-rose-700 dark:text-rose-300 animate-in fade-in">
-              📍 Drop Pin Active: Click anywhere inside Assam to set the caller&apos;s custom location and recalculate distances!
+              📍 Drop Pin Active: Click anywhere inside Assam to set a custom location and recalculate distances!
             </div>
           )}
 
@@ -1342,7 +1529,8 @@ export const TriageResultPanel = ({
             <MapWrapper
               ref={mapRef}
               theme="light"
-              facilities={dynamicFacilities}
+              isLargeView={false}
+              facilities={dynamicFacilities.slice(0, visibleFacilityCount)}
               filters={{
                 mapLayer,
                 district: effectiveLoc?.district || "all",
@@ -1396,10 +1584,12 @@ export const TriageResultPanel = ({
         {dynamicFacilities?.length ? (
           <>
             <ul className="mt-3 space-y-3">
-              {dynamicFacilities.map((f, i) => {
+              {dynamicFacilities.slice(0, visibleFacilityCount).map((f, i) => {
                 const cleanDisplayAddress = f.address
                   ? f.address
+                      .replace(/[\uFFFD\u00BF\u00EF\u00BF\u00BD]+/g, " - ")
                       .replace(/\b(pin|pincode)?\s*[-:,]?\s*78\d{4}\b/gi, "")
+                      .replace(/\s*-\s*-\s*/g, " - ")
                       .replace(/,\s*,/g, ",")
                       .replace(/\s*,\s*$/g, "")
                       .trim()
@@ -1459,9 +1649,9 @@ export const TriageResultPanel = ({
                               {f.district}
                             </span>
                           )}
-                          {(f.pincode || (f.address && f.address.match(/\b(78\d{4})\b/)?.[1])) && (
+                          {getFacilityPincode(f) && (
                             <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-mono font-medium">
-                              PIN: {f.pincode || f.address.match(/\b(78\d{4})\b/)?.[1]}
+                              {getFacilityPincode(f)}
                             </span>
                           )}
                           {f.phone && (
@@ -1469,17 +1659,14 @@ export const TriageResultPanel = ({
                           )}
                         </div>
 
-                        {f.maps_url && (
-                          <a
-                            href={f.maps_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                        {(f.distance_km != null || f.maps_url) && (
+                          <span
+                            className="inline-flex items-center text-[11.5px] font-bold text-slate-700 dark:text-slate-300"
                           >
-                            <span>Google Maps</span>
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
+                            {f.distance_km != null
+                              ? `Approx ${formatApproxKm(f.distance_km)} KM`
+                              : "Approx -- KM"}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1487,6 +1674,21 @@ export const TriageResultPanel = ({
                 );
               })}
             </ul>
+
+            {visibleFacilityCount < dynamicFacilities.length && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setVisibleFacilityCount((prev) => prev + 6)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary px-6 py-2.5 text-xs font-bold transition-all duration-150 shadow-2xs hover:shadow-xs cursor-pointer active:scale-95"
+                >
+                  <span>Load More</span>
+                  <span className="text-[10px] opacity-75 font-mono">
+                    ({dynamicFacilities.length - visibleFacilityCount} remaining)
+                  </span>
+                </button>
+              </div>
+            )}
           </>
         ) : (
           /* Interactive Search Card when no pincode/location was provided */
@@ -1552,14 +1754,47 @@ export const TriageResultPanel = ({
                 <MapIcon className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                  Assam Health Map — Large View
-                </h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                    Assam Health Map — Large View
+                  </h3>
+                </div>
               </div>
             </div>
 
             {/* Modal Toolbar Controls */}
             <div className="flex flex-wrap items-center gap-2">
+              {/* Search Location / PIN code in Large Map View */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (largeViewSearchPin.trim()) {
+                    handleFacilitySearch(largeViewSearchPin.trim());
+                  }
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={largeViewSearchPin}
+                    onChange={(e) => setLargeViewSearchPin(e.target.value)}
+                    placeholder="Enter PIN (e.g. 782410) or District..."
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-blue-500 w-48 sm:w-56"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSearchingFacilities || !largeViewSearchPin.trim()}
+                  className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer shadow-2xs flex items-center gap-1 shrink-0 disabled:opacity-50"
+                  title="Search facilities near this PIN code"
+                >
+                  {isSearchingFacilities ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                  <span>Search</span>
+                </button>
+              </form>
+
               {/* District Filter Dropdown */}
               <select
                 value={selectedDistrictFilter}
@@ -1649,7 +1884,8 @@ export const TriageResultPanel = ({
               <MapWrapper
                 ref={fullScreenMapRef}
                 theme="light"
-                facilities={dynamicFacilities}
+                isLargeView={true}
+                facilities={modalDrawerFacilities}
                 filters={{
                   mapLayer,
                   district: selectedDistrictFilter !== "all" ? selectedDistrictFilter : (effectiveLoc?.district || "all"),
@@ -1674,29 +1910,8 @@ export const TriageResultPanel = ({
                     <span>Healthcare Facilities</span>
                   </h4>
                   <span className="text-[11px] font-mono text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 font-bold">
-                    {modalDrawerFacilities.length} shown
+                    {Math.min(drawerVisibleCount, modalDrawerFacilities.length)} of {modalDrawerFacilities.length} shown
                   </span>
-                </div>
-
-                {/* Inline Drawer Search Input */}
-                <div className="relative mt-2.5">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={drawerSearchQuery}
-                    onChange={(e) => setDrawerSearchQuery(e.target.value)}
-                    placeholder="Search name, district, or PIN..."
-                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-8 pr-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-blue-500 transition-colors"
-                  />
-                  {drawerSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setDrawerSearchQuery("")}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -1707,93 +1922,119 @@ export const TriageResultPanel = ({
                     No facilities found matching your criteria.
                   </div>
                 ) : (
-                  modalDrawerFacilities.map((f, i) => {
-                    const cleanDisplayAddress = f.address
-                      ? f.address
-                          .replace(/\b(pin|pincode)?\s*[-:,]?\s*78\d{4}\b/gi, "")
-                          .replace(/,\s*,/g, ",")
-                          .replace(/\s*,\s*$/g, "")
-                          .trim()
-                      : "";
+                  <>
+                    {modalDrawerFacilities.slice(0, drawerVisibleCount).map((f, i) => {
+                      const cleanDisplayAddress = f.address
+                        ? f.address
+                            .replace(/[\uFFFD\u00BF\u00EF\u00BF\u00BD]+/g, " - ")
+                            .replace(/\b(pin|pincode)?\s*[-:,]?\s*78\d{4}\b/gi, "")
+                            .replace(/\s*-\s*-\s*/g, " - ")
+                            .replace(/,\s*,/g, ",")
+                            .replace(/\s*,\s*$/g, "")
+                            .trim()
+                        : "";
 
-                    const isSelectedOnMap = selectedFacilityForMap?.id === f.id || selectedFacilityForMap?.name === f.name;
+                      const isSelectedOnMap = selectedFacilityForMap?.id === f.id || selectedFacilityForMap?.name === f.name;
 
-                    return (
-                      <div
-                        key={f.id || f.name + i}
-                        onClick={() => focusFacilityOnMap(f)}
-                        className={`rounded-xl border p-3.5 transition-all duration-200 cursor-pointer shadow-2xs space-y-2 ${
-                          isSelectedOnMap
-                            ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30"
-                            : "border-slate-200/90 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 hover:border-blue-400/60 hover:shadow-xs"
-                        }`}
-                      >
-                        {/* Badges row matching homepage */}
-                        <div className="flex flex-wrap items-center justify-between gap-1.5">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
-                              {f.facility_tag}
-                            </span>
-
-                            {(f.is_dispensary || isDispensary(f)) && isWeekend && (
-                              <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
-                                Closed on Weekends
-                              </span>
-                            )}
-                            {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
-                              <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                                OPD: Mon–Fri 10AM–4PM
-                              </span>
-                            )}
-                            {(f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f)) && (
-                              <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
-                                Open · 24x7 Casualty
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Facility Name */}
-                        <p
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            focusFacilityOnMap(f);
-                          }}
-                          className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      return (
+                        <div
+                          key={f.id || f.name + i}
+                          onClick={() => focusFacilityOnMap(f)}
+                          className={`rounded-xl border p-3.5 transition-all duration-200 cursor-pointer shadow-2xs space-y-2 ${
+                            isSelectedOnMap
+                              ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/30"
+                              : "border-slate-200/90 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 hover:border-blue-400/60 hover:shadow-xs"
+                          }`}
                         >
-                          <Building2 className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
-                          <span className="leading-snug">{f.name}</span>
-                        </p>
-
-                        {/* Clean Address */}
-                        {cleanDisplayAddress && (
-                          <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 line-clamp-2">
-                            {cleanDisplayAddress}
-                          </p>
-                        )}
-
-                        {/* Footer row: District, Pincode, and Phone */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/80 dark:border-slate-700/60 text-[10.5px]">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {f.district && (
-                              <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-medium">
-                                {f.district}
+                          {/* Badges row matching homepage */}
+                          <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`rounded-md border px-2 py-0.5 text-[10.5px] ${f.category_style || "bg-secondary/80 border-border/70 text-foreground/90 font-bold"}`}>
+                                {f.facility_tag}
                               </span>
-                            )}
-                            {(f.pincode || (f.address && f.address.match(/\b(78\d{4})\b/)?.[1])) && (
-                              <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-mono font-medium">
-                                PIN: {f.pincode || f.address.match(/\b(78\d{4})\b/)?.[1]}
-                              </span>
-                            )}
+
+                              {(f.is_dispensary || isDispensary(f)) && isWeekend && (
+                                <span className="rounded-full bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-300">
+                                  Closed on Weekends
+                                </span>
+                              )}
+                              {(f.is_dispensary || isDispensary(f)) && !isWeekend && (
+                                <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+                                  OPD: Mon–Fri 10AM–4PM
+                                </span>
+                              )}
+                              {(f.is_hospital || isHospital(f) || f.is_tie_up || isTieUp(f)) && (
+                                <span className="rounded-full bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:text-blue-300">
+                                  Open · 24x7 Casualty
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          {f.phone && (
-                            <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{f.phone}</span>
+                          {/* Facility Name */}
+                          <p
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              focusFacilityOnMap(f);
+                            }}
+                            className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                          >
+                            <Building2 className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <span className="leading-snug">{f.name}</span>
+                          </p>
+
+                          {/* Clean Address */}
+                          {cleanDisplayAddress && (
+                            <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 line-clamp-2">
+                              {cleanDisplayAddress}
+                            </p>
                           )}
+
+                          {/* Footer row: District, Pincode, Approx KM, and Phone */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/80 dark:border-slate-700/60 text-[10.5px]">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {f.district && (
+                                <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-medium">
+                                  {f.district}
+                                </span>
+                              )}
+                              {getFacilityPincode(f) && (
+                                <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-mono font-medium">
+                                  {getFacilityPincode(f)}
+                                </span>
+                              )}
+                              {f.distance_km != null && (
+                                <span
+                                  className="inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-700 dark:text-slate-300 font-bold"
+                                >
+                                  Approx {formatApproxKm(f.distance_km)} KM
+                                </span>
+                              )}
+                            </div>
+
+                            {f.phone && (
+                              <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{f.phone}</span>
+                            )}
+                          </div>
                         </div>
+                      );
+                    })}
+
+                    {drawerVisibleCount < modalDrawerFacilities.length && (
+                      <div className="pt-2 pb-1 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setDrawerVisibleCount((prev) => prev + 6)}
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 py-2.5 text-xs font-bold transition-all duration-150 cursor-pointer active:scale-95 shadow-2xs"
+                        >
+                          <span>Load More</span>
+                          <span className="text-[10px] opacity-75 font-mono">
+                            ({modalDrawerFacilities.length - drawerVisibleCount} remaining)
+                          </span>
+                        </button>
                       </div>
-                    );
-                  })
+                    )}
+                  </>
                 )}
               </div>
             </div>

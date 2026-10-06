@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Building2,
-  Navigation,
   Search,
   Upload,
   Download,
@@ -483,17 +482,6 @@ export const FacilityDirectory = ({ meta, onImported }) => {
                   )}
                   {f.phone && (
                     <span className="mono text-muted-foreground/80 text-[10px]">{f.phone}</span>
-                  )}
-                  {f.latitude && f.longitude && (
-                    <a
-                      href={`https://www.google.com/maps/dir/?api=1&destination=${f.latitude},${f.longitude}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-auto text-primary/80 transition-colors duration-200 hover:text-primary"
-                      title="Open Google Maps direction"
-                    >
-                      <Navigation className="h-3.5 w-3.5" />
-                    </a>
                   )}
                 </div>
               </div>

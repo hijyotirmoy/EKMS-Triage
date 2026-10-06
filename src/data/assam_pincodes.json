@@ -1,0 +1,3890 @@
+{
+  "781001": {
+    "lat": 26.186653,
+    "lng": 91.74566,
+    "district": "KAMRUP METRO",
+    "office": "Uzanbazar S.O"
+  },
+  "781002": {
+    "lat": 26.1887256,
+    "lng": 91.7456568,
+    "district": "KAMRUP METRO",
+    "office": "IBC Guwahati P.O"
+  },
+  "781003": {
+    "lat": 26.185083,
+    "lng": 91.764931,
+    "district": "KAMRUP METRO",
+    "office": "Silpukhuri S.O"
+  },
+  "781004": {
+    "lat": 26.19526,
+    "lng": 91.76467,
+    "district": "KAMRUP METRO",
+    "office": "Kharguli S.O"
+  },
+  "781005": {
+    "lat": 26.150582,
+    "lng": 91.784803,
+    "district": "KAMRUP METRO",
+    "office": "Japorigog B.O"
+  },
+  "781006": {
+    "lat": 26.1887778,
+    "lng": 91.7456389,
+    "district": "KAMRUP METRO",
+    "office": "Assam Sachivalaya S.O"
+  },
+  "781007": {
+    "lat": 26.173167,
+    "lng": 91.763972,
+    "district": "KAMRUP METRO",
+    "office": "Ulubari S.O"
+  },
+  "781008": {
+    "lat": 26.176708,
+    "lng": 91.750278,
+    "district": "KAMRUP METRO",
+    "office": "Rehabari S.O"
+  },
+  "781009": {
+    "lat": 26.1718333,
+    "lng": 91.7326944,
+    "district": "KAMRUP METRO",
+    "office": "Bharalumukh S.O"
+  },
+  "781010": {
+    "lat": 26.16062,
+    "lng": 91.70948,
+    "district": "KAMRUP METRO",
+    "office": "Kamakhya S.O"
+  },
+  "781011": {
+    "lat": 26.173972,
+    "lng": 91.725074,
+    "district": "KAMRUP METRO",
+    "office": "Debgotanagar B.O"
+  },
+  "781012": {
+    "lat": 26.164919,
+    "lng": 91.688104,
+    "district": "KAMRUP METRO",
+    "office": "Dehangarigaon B.O"
+  },
+  "781013": {
+    "lat": 26.1425278,
+    "lng": 91.665,
+    "district": "KAMRUP METRO",
+    "office": "Jalukbari S.O"
+  },
+  "781014": {
+    "lat": 26.1552222,
+    "lng": 91.6647222,
+    "district": "KAMRUP METRO",
+    "office": "Guwahati University H.O"
+  },
+  "781015": {
+    "lat": 26.105278,
+    "lng": 91.592192,
+    "district": "KAMRUP METRO",
+    "office": "Bongra B.O"
+  },
+  "781016": {
+    "lat": 26.1633,
+    "lng": 91.74657,
+    "district": "KAMRUP METRO",
+    "office": "Gopinathnagar S.O"
+  },
+  "781017": {
+    "lat": 26.12961,
+    "lng": 91.622577,
+    "district": "KAMRUP METRO",
+    "office": "Dharapur B.O"
+  },
+  "781018": {
+    "lat": 26.1475,
+    "lng": 91.7430556,
+    "district": "KAMRUP METRO",
+    "office": "Binovanagar S.O"
+  },
+  "781019": {
+    "lat": 26.1409167,
+    "lng": 91.7628056,
+    "district": "KAMRUP METRO",
+    "office": "Kahilipara S.O"
+  },
+  "781020": {
+    "lat": 26.1833,
+    "lng": 91.8,
+    "district": "",
+    "office": "Noonmati"
+  },
+  "781021": {
+    "lat": 26.1838611,
+    "lng": 91.7868611,
+    "district": "KAMRUP METRO",
+    "office": "Bamunimaidan S.O"
+  },
+  "781022": {
+    "lat": 26.1212778,
+    "lng": 91.8217778,
+    "district": "KAMRUP METRO",
+    "office": "Khanapara S.O"
+  },
+  "781023": {
+    "lat": 26.11625,
+    "lng": 91.71915,
+    "district": "KAMRUP METRO",
+    "office": "Jorabat B.O"
+  },
+  "781024": {
+    "lat": 26.167822,
+    "lng": 91.778953,
+    "district": "KAMRUP METRO",
+    "office": "Gitanagar B.O"
+  },
+  "781025": {
+    "lat": 26.150795,
+    "lng": 91.73272,
+    "district": "KAMRUP METRO",
+    "office": "Dhirenpara B.O"
+  },
+  "781026": {
+    "lat": 26.18054,
+    "lng": 91.82509,
+    "district": "KAMRUP METRO",
+    "office": "Bonda B.O"
+  },
+  "781027": {
+    "lat": 26.1532,
+    "lng": 91.85334,
+    "district": "KAMRUP METRO",
+    "office": "Amsinggaon E (S  85) B.O"
+  },
+  "781028": {
+    "lat": 26.1178333,
+    "lng": 91.7969722,
+    "district": "KAMRUP METRO",
+    "office": "Beltola S.O"
+  },
+  "781029": {
+    "lat": 26.112413,
+    "lng": 91.798442,
+    "district": "RI BHOI",
+    "office": "Pillangkata B.O"
+  },
+  "781030": {
+    "lat": 26.2098,
+    "lng": 91.74197,
+    "district": "KAMRUP",
+    "office": "Dopdar B.O"
+  },
+  "781031": {
+    "lat": 26.185836,
+    "lng": 91.687333,
+    "district": "KAMRUP",
+    "office": "Collegenagar B.O"
+  },
+  "781032": {
+    "lat": 26.15969,
+    "lng": 91.76777,
+    "district": "KAMRUP METRO",
+    "office": "Indrapur S.O"
+  },
+  "781034": {
+    "lat": 26.14179,
+    "lng": 91.74232,
+    "district": "KAMRUP METRO",
+    "office": "Odalbakra S.O"
+  },
+  "781035": {
+    "lat": 26.1160833,
+    "lng": 91.7083333,
+    "district": "KAMRUP METRO",
+    "office": "Garchuk S.O"
+  },
+  "781036": {
+    "lat": 26.15101,
+    "lng": 91.79836,
+    "district": "KAMRUP METRO",
+    "office": "Hengrabari S.O"
+  },
+  "781037": {
+    "lat": 26.13384,
+    "lng": 91.82502,
+    "district": "KAMRUP METRO",
+    "office": "Panjabari S.O"
+  },
+  "781038": {
+    "lat": 26.1291389,
+    "lng": 91.7871389,
+    "district": "KAMRUP METRO",
+    "office": "Hatigaon Chariali S.O"
+  },
+  "781039": {
+    "lat": 26.1803056,
+    "lng": 91.6816389,
+    "district": "KAMRUP",
+    "office": "I I T S.O"
+  },
+  "781040": {
+    "lat": 26.1203667,
+    "lng": 91.7507642,
+    "district": "KAMRUP METRO",
+    "office": "Sawkuchi S.O"
+  },
+  "781071": {
+    "lat": 26.168349,
+    "lng": 91.828551,
+    "district": "Kamrup Metropolitan",
+    "office": "Narengi S.O"
+  },
+  "781101": {
+    "lat": 26.262831,
+    "lng": 91.695941,
+    "district": "KAMRUP",
+    "office": "Baralabari B.O"
+  },
+  "781102": {
+    "lat": 26.24878,
+    "lng": 91.524043,
+    "district": "KAMRUP",
+    "office": "Bagta B.O"
+  },
+  "781103": {
+    "lat": 26.163943,
+    "lng": 91.3401,
+    "district": "KAMRUP",
+    "office": "Bamundi B.O"
+  },
+  "781104": {
+    "lat": 26.1455,
+    "lng": 91.3418,
+    "district": "KAMRUP",
+    "office": "Bargaon B.O"
+  },
+  "781120": {
+    "lat": 26.0802,
+    "lng": 91.5596,
+    "district": "KAMRUP",
+    "office": "Mataikhar B.O"
+  },
+  "781121": {
+    "lat": 26.2036,
+    "lng": 91.4716,
+    "district": "KAMRUP",
+    "office": "Dumunichowki B.O"
+  },
+  "781122": {
+    "lat": 26.100661,
+    "lng": 91.505191,
+    "district": "KAMRUP",
+    "office": "Futuri B.O"
+  },
+  "781123": {
+    "lat": 25.97347,
+    "lng": 91.229021,
+    "district": "KAMRUP",
+    "office": "Gohalkona B.O"
+  },
+  "781124": {
+    "lat": 26.049819,
+    "lng": 91.392379,
+    "district": "KAMRUP",
+    "office": "Balapukhuri B.O"
+  },
+  "781125": {
+    "lat": 26.089718,
+    "lng": 91.539365,
+    "district": "KAMRUP",
+    "office": "Amranga B.O"
+  },
+  "781126": {
+    "lat": 26.1627,
+    "lng": 91.2114,
+    "district": "NALBARI",
+    "office": "Bhangnamari B.O"
+  },
+  "781127": {
+    "lat": 25.2627,
+    "lng": 92.181706,
+    "district": "KAMRUP",
+    "office": "Badlabazar B.O"
+  },
+  "781128": {
+    "lat": 26.0901,
+    "lng": 91.3101,
+    "district": "KAMRUP METRO",
+    "office": "Agchia B.O"
+  },
+  "781129": {
+    "lat": 26.0678,
+    "lng": 91.3928,
+    "district": "KAMRUP",
+    "office": "Samuka B.O"
+  },
+  "781130": {
+    "lat": 25.95,
+    "lng": 91.15,
+    "district": "",
+    "office": "Amranga"
+  },
+  "781131": {
+    "lat": 26.188778,
+    "lng": 91.745639,
+    "district": "RI BHOI",
+    "office": "Patharkhmah B.O"
+  },
+  "781132": {
+    "lat": 26.188778,
+    "lng": 91.745639,
+    "district": "KAMRUP",
+    "office": "Bhagawatipara B.O"
+  },
+  "781133": {
+    "lat": 26.153358,
+    "lng": 91.645241,
+    "district": "KAMRUP",
+    "office": "Dagaon S.O."
+  },
+  "781134": {
+    "lat": 26.073611,
+    "lng": 91.428611,
+    "district": "KAMRUP",
+    "office": "Amtala B.O"
+  },
+  "781135": {
+    "lat": 25.606178,
+    "lng": 91.099566,
+    "district": "KAMRUP",
+    "office": "Damalchos B.O"
+  },
+  "781136": {
+    "lat": 26.2302,
+    "lng": 91.7102,
+    "district": "KAMRUP",
+    "office": "Dekachang B.O"
+  },
+  "781137": {
+    "lat": 26.11065,
+    "lng": 91.343776,
+    "district": "KAMRUP",
+    "office": "Alikash B.O"
+  },
+  "781138": {
+    "lat": 26.1804,
+    "lng": 91.0839,
+    "district": "NALBARI",
+    "office": "Narua B.O"
+  },
+  "781141": {
+    "lat": 26.188777,
+    "lng": 91.745638,
+    "district": "KAMRUP",
+    "office": "Choudhurykhat B.O"
+  },
+  "781150": {
+    "lat": 26.202339,
+    "lng": 91.817905,
+    "district": "KAMRUP METRO",
+    "office": "Gobardhan B.O"
+  },
+  "781171": {
+    "lat": 26.167155,
+    "lng": 91.831075,
+    "district": "KAMRUP METRO",
+    "office": "Udayan Vihar S.O"
+  },
+  "781301": {
+    "lat": 26.323504,
+    "lng": 91.01027,
+    "district": "BARPETA",
+    "office": "Thakurbazar S.O"
+  },
+  "781302": {
+    "lat": 26.25715,
+    "lng": 91.13097,
+    "district": "BARPETA",
+    "office": "Barghol B.O"
+  },
+  "781303": {
+    "lat": 26.2349,
+    "lng": 91.2118,
+    "district": "NALBARI",
+    "office": "Batsar B.O"
+  },
+  "781304": {
+    "lat": 26.2326,
+    "lng": 91.2033,
+    "district": "NALBARI",
+    "office": "Barnibari B.O"
+  },
+  "781305": {
+    "lat": 26.27945,
+    "lng": 91.15628,
+    "district": "BARPETA",
+    "office": "Bhogdia B.O"
+  },
+  "781306": {
+    "lat": 26.2419,
+    "lng": 91.2001,
+    "district": "NALBARI",
+    "office": "Amani B.O"
+  },
+  "781307": {
+    "lat": 26.36995,
+    "lng": 91.2239,
+    "district": "BARPETA",
+    "office": "Karaguri B.O"
+  },
+  "781308": {
+    "lat": 26.313819,
+    "lng": 91.002173,
+    "district": "BARPETA",
+    "office": "Baghbar B.O"
+  },
+  "781309": {
+    "lat": 26.30024,
+    "lng": 91.07257,
+    "district": "BARPETA",
+    "office": "Palhaji B.O"
+  },
+  "781310": {
+    "lat": 26.2053,
+    "lng": 91.202,
+    "district": "NALBARI",
+    "office": "Bagurihati B.O"
+  },
+  "781311": {
+    "lat": 26.329139,
+    "lng": 91.01025,
+    "district": "BARPETA",
+    "office": "Bhairaguri B.O"
+  },
+  "781312": {
+    "lat": 26.444778,
+    "lng": 91.438,
+    "district": "NALBARI",
+    "office": "Bamunbari B.O"
+  },
+  "781313": {
+    "lat": 26.2856,
+    "lng": 90.5742,
+    "district": "BARPETA",
+    "office": "Balabhitha B.O"
+  },
+  "781314": {
+    "lat": 26.329139,
+    "lng": 91.01025,
+    "district": "BARPETA",
+    "office": "Baradi B.O"
+  },
+  "781315": {
+    "lat": 26.329139,
+    "lng": 91.01025,
+    "district": "BARPETA",
+    "office": "Kalapani Bazar B.O"
+  },
+  "781316": {
+    "lat": 26.428528,
+    "lng": 90.969361,
+    "district": "BARPETA",
+    "office": "Sukmanah B.O"
+  },
+  "781317": {
+    "lat": 26.486686,
+    "lng": 90.886194,
+    "district": "BARPETA",
+    "office": "Amguri B.O"
+  },
+  "781318": {
+    "lat": 26.2953,
+    "lng": 91.0432,
+    "district": "BARPETA",
+    "office": "Salbari B.O"
+  },
+  "781319": {
+    "lat": 26.2131,
+    "lng": 90.5215,
+    "district": "BARPETA",
+    "office": "Ghugubari B.O"
+  },
+  "781320": {
+    "lat": 26.6424,
+    "lng": 91.0925,
+    "district": "BAKSA",
+    "office": "Salbari S.O"
+  },
+  "781321": {
+    "lat": 26.273,
+    "lng": 90.5113,
+    "district": "BARPETA",
+    "office": "Chandmama B.O"
+  },
+  "781325": {
+    "lat": 26.484616,
+    "lng": 91.17299,
+    "district": "BARPETA",
+    "office": "Amdah B.O"
+  },
+  "781326": {
+    "lat": 26.3024,
+    "lng": 91.1412,
+    "district": "BARPETA",
+    "office": "Bamunkuchi B.O"
+  },
+  "781327": {
+    "lat": 26.4154,
+    "lng": 91.1148,
+    "district": "BAKSA",
+    "office": "Anchali B.O"
+  },
+  "781328": {
+    "lat": 26.3637,
+    "lng": 91.1032,
+    "district": "BARPETA",
+    "office": "Charnabazar B.O"
+  },
+  "781329": {
+    "lat": 26.2942,
+    "lng": 91.11806,
+    "district": "BARPETA",
+    "office": "Akaya B.O"
+  },
+  "781330": {
+    "lat": 26.329139,
+    "lng": 91.01025,
+    "district": "BAKSA",
+    "office": "Koklabari B.O"
+  },
+  "781333": {
+    "lat": 26.2809,
+    "lng": 91.2549,
+    "district": "BAKSA",
+    "office": "Bennabari B.O"
+  },
+  "781334": {
+    "lat": 26.444778,
+    "lng": 91.438,
+    "district": "NALBARI",
+    "office": "Bhadra B.O"
+  },
+  "781335": {
+    "lat": 26.309594,
+    "lng": 91.30545,
+    "district": "NALBARI",
+    "office": "Khatabari BO"
+  },
+  "781336": {
+    "lat": 26.4778,
+    "lng": 91.2333,
+    "district": "",
+    "office": "Chandkuchi"
+  },
+  "781337": {
+    "lat": 26.2618,
+    "lng": 91.4642,
+    "district": "NALBARI",
+    "office": "Barkhanajan B.O"
+  },
+  "781338": {
+    "lat": 26.2243,
+    "lng": 91.1746,
+    "district": "NALBARI",
+    "office": "Lakhopur B.O"
+  },
+  "781339": {
+    "lat": 26.2078,
+    "lng": 91.279425,
+    "district": "NALBARI",
+    "office": "Arikuchi B.O"
+  },
+  "781340": {
+    "lat": 26.2637,
+    "lng": 91.263,
+    "district": "NALBARI",
+    "office": "Bakuajari B.O"
+  },
+  "781341": {
+    "lat": 26.226425,
+    "lng": 91.263225,
+    "district": "NALBARI",
+    "office": "Burinagar B.O"
+  },
+  "781343": {
+    "lat": 26.308213,
+    "lng": 91.284833,
+    "district": "BAKSA",
+    "office": "Amingaon Chowk B.O"
+  },
+  "781344": {
+    "lat": 26.342,
+    "lng": 91.2947,
+    "district": "BAKSA",
+    "office": "Angardhowa B.O"
+  },
+  "781345": {
+    "lat": 26.5333,
+    "lng": 91.3333,
+    "district": "",
+    "office": "Balilessa"
+  },
+  "781346": {
+    "lat": 26.3129,
+    "lng": 91.2106,
+    "district": "BAKSA",
+    "office": "Dahkaunia B.O"
+  },
+  "781347": {
+    "lat": 26.218033,
+    "lng": 91.2829,
+    "district": "NALBARI",
+    "office": "Arangmow B.O"
+  },
+  "781348": {
+    "lat": 26.2202,
+    "lng": 91.2636,
+    "district": "NALBARI",
+    "office": "Bagalsroad Chowk B.O"
+  },
+  "781349": {
+    "lat": 26.3322,
+    "lng": 91.2846,
+    "district": "NALBARI",
+    "office": "Nizsantipur B.O"
+  },
+  "781350": {
+    "lat": 26.123,
+    "lng": 94.123,
+    "district": "NALBARI",
+    "office": "Balisatra B.O"
+  },
+  "781351": {
+    "lat": 26.254767,
+    "lng": 91.2287,
+    "district": "NALBARI",
+    "office": "Baridatara B.O"
+  },
+  "781352": {
+    "lat": 26.329139,
+    "lng": 91.01025,
+    "district": "BARPETA",
+    "office": "Kayakuchi Bazar B.O"
+  },
+  "781353": {
+    "lat": 26.2734,
+    "lng": 91.1927,
+    "district": "NALBARI",
+    "office": "Niz Pakowa B.O"
+  },
+  "781354": {
+    "lat": 26.188778,
+    "lng": 91.745639,
+    "district": "KAMRUP",
+    "office": "Bardal B.O"
+  },
+  "781355": {
+    "lat": 26.2638,
+    "lng": 91.2638,
+    "district": "NALBARI",
+    "office": "Baramchari B.O"
+  },
+  "781360": {
+    "lat": 26.29315,
+    "lng": 91.275982,
+    "district": "BAKSA",
+    "office": "Kalipur B.O"
+  },
+  "781364": {
+    "lat": 26.338869,
+    "lng": 91.671831,
+    "district": "BAKSA",
+    "office": "Barpathar B.O"
+  },
+  "781365": {
+    "lat": 26.44169,
+    "lng": 91.61042,
+    "district": "BAKSA",
+    "office": "Bihapara B.O"
+  },
+  "781366": {
+    "lat": 26.3159,
+    "lng": 91.4345,
+    "district": "BAKSA",
+    "office": "Betna B.O"
+  },
+  "781367": {
+    "lat": 26.60669,
+    "lng": 91.58147,
+    "district": "BAKSA",
+    "office": "Kachukata B.O"
+  },
+  "781368": {
+    "lat": 26.4306,
+    "lng": 91.4452,
+    "district": "BAKSA",
+    "office": "Dongpar B.O"
+  },
+  "781369": {
+    "lat": 26.2707,
+    "lng": 91.3135,
+    "district": "NALBARI",
+    "office": "Allia B.O"
+  },
+  "781370": {
+    "lat": 26.2701,
+    "lng": 91.202,
+    "district": "NALBARI",
+    "office": "Gobradal B.O"
+  },
+  "781371": {
+    "lat": 26.474889,
+    "lng": 91.269083,
+    "district": "BARPETA",
+    "office": "Bhaluki B.O"
+  },
+  "781372": {
+    "lat": 26.300109,
+    "lng": 91.211309,
+    "district": "BAKSA",
+    "office": "Banbari B.O"
+  },
+  "781373": {
+    "lat": 26.3136,
+    "lng": 91.2353,
+    "district": "BAKSA",
+    "office": "Jalagaon B.O"
+  },
+  "781374": {
+    "lat": 26.367233,
+    "lng": 91.221967,
+    "district": "NALBARI",
+    "office": "Bhojkuchi B.O"
+  },
+  "781375": {
+    "lat": 26.444778,
+    "lng": 91.438,
+    "district": "BARPETA",
+    "office": "Helana B.O"
+  },
+  "781376": {
+    "lat": 24.1819,
+    "lng": 92.4039,
+    "district": "KAMRUP",
+    "office": "Tulsibari B.O"
+  },
+  "781377": {
+    "lat": 26.444778,
+    "lng": 91.438,
+    "district": "BAKSA",
+    "office": "Athiabari B.O"
+  },
+  "781378": {
+    "lat": 26.2625,
+    "lng": 91.1711,
+    "district": "NALBARI",
+    "office": "Barpit B.O"
+  },
+  "781380": {
+    "lat": 26.345684,
+    "lng": 91.689828,
+    "district": "KAMRUP",
+    "office": "Dobok B.O"
+  },
+  "781381": {
+    "lat": 26.34613,
+    "lng": 91.72826,
+    "district": "KAMRUP",
+    "office": "Balikuchi B.O"
+  },
+  "781382": {
+    "lat": 26.4223,
+    "lng": 91.7313,
+    "district": "KAMRUP",
+    "office": "Bardekpar B.O"
+  },
+  "781385": {
+    "lat": 26.4778,
+    "lng": 91.2333,
+    "district": "",
+    "office": "Kaniha"
+  },
+  "782001": {
+    "lat": 26.348694,
+    "lng": 92.7005,
+    "district": "NAGAON",
+    "office": "Nagaon Girls  College S.O"
+  },
+  "782002": {
+    "lat": 26.35175,
+    "lng": 92.678278,
+    "district": "NAGAON",
+    "office": "Aibheti B.O"
+  },
+  "782003": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "NAGAON",
+    "office": "Dimaruguri B.O"
+  },
+  "782010": {
+    "lat": 26.3056,
+    "lng": 92.7565,
+    "district": "",
+    "office": "Senchowa"
+  },
+  "782101": {
+    "lat": 24.1617,
+    "lng": 92.1392,
+    "district": "NAGAON",
+    "office": "Biharigaon B.O"
+  },
+  "782102": {
+    "lat": 26.3503,
+    "lng": 92.6912,
+    "district": "NAGAON",
+    "office": "Kandali B.O"
+  },
+  "782103": {
+    "lat": 26.228,
+    "lng": 92.520167,
+    "district": "NAGAON",
+    "office": "Fulaguri B.O"
+  },
+  "782104": {
+    "lat": 26.2521,
+    "lng": 92.3423,
+    "district": "MARIGAON",
+    "office": "Goroimari B.O"
+  },
+  "782105": {
+    "lat": 26.252942,
+    "lng": 92.335689,
+    "district": "MARIGAON",
+    "office": "Azarbari B.O"
+  },
+  "782106": {
+    "lat": 26.2521,
+    "lng": 92.3423,
+    "district": "NAGAON",
+    "office": "Chatabar B.O"
+  },
+  "782107": {
+    "lat": 26.45,
+    "lng": 90.8667,
+    "district": "",
+    "office": "Barapujia"
+  },
+  "782108": {
+    "lat": 26.45,
+    "lng": 90.8667,
+    "district": "",
+    "office": "Mikirbheta"
+  },
+  "782120": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "NAGAON",
+    "office": "Kathpara Bazar B.O"
+  },
+  "782121": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "MARIGAON",
+    "office": "Baralimari B.O"
+  },
+  "782122": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "NAGAON",
+    "office": "Balikatia B.O"
+  },
+  "782123": {
+    "lat": 26.466528,
+    "lng": 92.474028,
+    "district": "NAGAON",
+    "office": "Rowmari Bill B.O"
+  },
+  "782124": {
+    "lat": 26.413222,
+    "lng": 92.742722,
+    "district": "NAGAON",
+    "office": "Chitalmari Beel B.O"
+  },
+  "782125": {
+    "lat": 26.448078,
+    "lng": 92.659667,
+    "district": "NAGAON",
+    "office": "Gatonga B.O"
+  },
+  "782126": {
+    "lat": 26.4535,
+    "lng": 92.4245,
+    "district": "MARIGAON",
+    "office": "Goroimaripathar B.O"
+  },
+  "782127": {
+    "lat": 26.4187,
+    "lng": 92.3425,
+    "district": "MARIGAON",
+    "office": "Katanigaon B.O"
+  },
+  "782128": {
+    "lat": 26.348694,
+    "lng": 92.7005,
+    "district": "NAGAON",
+    "office": "Ghehua Chalchali B.O"
+  },
+  "782130": {
+    "lat": 26.3917,
+    "lng": 92.9167,
+    "district": "",
+    "office": "Singimari"
+  },
+  "782135": {
+    "lat": 26.3307,
+    "lng": 92.8605,
+    "district": "NAGAON",
+    "office": "Parkup Pahar B.O"
+  },
+  "782136": {
+    "lat": 26.635778,
+    "lng": 92.984278,
+    "district": "NAGAON",
+    "office": "Kuthori B.O"
+  },
+  "782137": {
+    "lat": 26.3338,
+    "lng": 92.5633,
+    "district": "NAGAON",
+    "office": "Pubthoria B.O"
+  },
+  "782138": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "NAGAON",
+    "office": "Amoni B.O"
+  },
+  "782139": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "NAGAON",
+    "office": "Sarishabari B.O"
+  },
+  "782140": {
+    "lat": 26.4159,
+    "lng": 92.8397,
+    "district": "NAGAON",
+    "office": "Singia B.O"
+  },
+  "782141": {
+    "lat": 26.3735,
+    "lng": 92.794,
+    "district": "NAGAON",
+    "office": "Barangatoli B.O"
+  },
+  "782142": {
+    "lat": 26.302917,
+    "lng": 92.625889,
+    "district": "NAGAON",
+    "office": "Barmanipur B.O"
+  },
+  "782143": {
+    "lat": 26.3618,
+    "lng": 92.5545,
+    "district": "NAGAON",
+    "office": "Sonarigaon B.O"
+  },
+  "782144": {
+    "lat": 26.26278,
+    "lng": 92.64178,
+    "district": "NAGAON",
+    "office": "Ghahibhatikuri B.O"
+  },
+  "782401": {
+    "lat": 26.1401,
+    "lng": 91.5625,
+    "district": "KAMRUP METRO",
+    "office": "Panbari B.O"
+  },
+  "782402": {
+    "lat": 26.0723,
+    "lng": 91.5813,
+    "district": "KAMRUP METRO",
+    "office": "Hahara B.O"
+  },
+  "782403": {
+    "lat": 26.188778,
+    "lng": 91.745639,
+    "district": "KAMRUP METRO",
+    "office": "Gandhinagar B.O"
+  },
+  "782410": {
+    "lat": 26.12375,
+    "lng": 92.198583,
+    "district": "MARIGAON",
+    "office": "Dayang Beloguri B.O"
+  },
+  "782411": {
+    "lat": 26.238248,
+    "lng": 92.142148,
+    "district": "MARIGAON",
+    "office": "Mayong / Burgaon B.O"
+  },
+  "782412": {
+    "lat": 26.1903,
+    "lng": 92.3739,
+    "district": "MARIGAON",
+    "office": "Bangaldhara B.O"
+  },
+  "782413": {
+    "lat": 26.34206,
+    "lng": 92.5191,
+    "district": "MARIGAON",
+    "office": "Amlighat B.O"
+  },
+  "782425": {
+    "lat": 26.1214,
+    "lng": 92.3057,
+    "district": "KARBI ANGLONG",
+    "office": "Bargaon B.O"
+  },
+  "782426": {
+    "lat": 26.157861,
+    "lng": 92.659278,
+    "district": "NAGAON",
+    "office": "Tetelisara B.O"
+  },
+  "782427": {
+    "lat": 26.1835,
+    "lng": 92.7362,
+    "district": "NAGAON",
+    "office": "Rengbeng B.O"
+  },
+  "782428": {
+    "lat": 26.1069,
+    "lng": 92.7456,
+    "district": "HOJAI",
+    "office": "Dumaihagi Dapara B.O"
+  },
+  "782429": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "HOJAI",
+    "office": "Radhanagar B.O"
+  },
+  "782435": {
+    "lat": 26.348809,
+    "lng": 92.699908,
+    "district": "HOJAI",
+    "office": "Golaghatiabasti B.O"
+  },
+  "782439": {
+    "lat": 26.3503,
+    "lng": 92.6922,
+    "district": "HOJAI",
+    "office": "Samarail B.O"
+  },
+  "782440": {
+    "lat": 26.1166,
+    "lng": 92.8666,
+    "district": "HOJAI",
+    "office": "Changmaji B.O"
+  },
+  "782441": {
+    "lat": 26.2092,
+    "lng": 93.0527,
+    "district": "KARBI ANGLONG",
+    "office": "Duarbamuni B.O"
+  },
+  "782442": {
+    "lat": 26.3503,
+    "lng": 92.79615,
+    "district": "HOJAI",
+    "office": "Bhalukmari B.O"
+  },
+  "782445": {
+    "lat": 26.0685,
+    "lng": 92.9001,
+    "district": "HOJAI",
+    "office": "Kapashbari B.O"
+  },
+  "782446": {
+    "lat": 26.348694,
+    "lng": 92.7005,
+    "district": "HOJAI",
+    "office": "Lachit Pathar B.O"
+  },
+  "782447": {
+    "lat": 26.348694,
+    "lng": 92.7005,
+    "district": "HOJAI",
+    "office": "Pub Lumding Bazar B.O"
+  },
+  "782448": {
+    "lat": 25.8524,
+    "lng": 92.8568,
+    "district": "WEST KARBI ANGLONG",
+    "office": "Forest Bazar B.O"
+  },
+  "782450": {
+    "lat": 25.815088,
+    "lng": 92.4658,
+    "district": "NAGAON",
+    "office": "Barpani B.O"
+  },
+  "782460": {
+    "lat": 25.8394444,
+    "lng": 93.4376944,
+    "district": "KARBI ANGLONG",
+    "office": "Diphu H.O"
+  },
+  "782461": {
+    "lat": 25.839444,
+    "lng": 93.437694,
+    "district": "KARBI ANGLONG",
+    "office": "Amlakhi Bazar B.O"
+  },
+  "782462": {
+    "lat": 25.839444,
+    "lng": 93.437694,
+    "district": "KARBI ANGLONG",
+    "office": "Rongkhelon B.O"
+  },
+  "782470": {
+    "lat": 25.3219,
+    "lng": 92.1619,
+    "district": "KARBI ANGLONG",
+    "office": "Neparpatty B.O"
+  },
+  "782475": {
+    "lat": 26.0542,
+    "lng": 92.8062,
+    "district": "",
+    "office": "Chokihola"
+  },
+  "782480": {
+    "lat": 26.024278,
+    "lng": 93.772056,
+    "district": "KARBI ANGLONG",
+    "office": "Golaibasti B.O"
+  },
+  "782481": {
+    "lat": 25.8415,
+    "lng": 93.4246,
+    "district": "KARBI ANGLONG",
+    "office": "Uttar Borbil B.O"
+  },
+  "782482": {
+    "lat": 25.8415,
+    "lng": 93.4246,
+    "district": "KARBI ANGLONG",
+    "office": "Pub Silputa B.O"
+  },
+  "782485": {
+    "lat": 25.2532,
+    "lng": 92.4632,
+    "district": "WEST KARBI ANGLONG",
+    "office": "Phangtrengphang B.O"
+  },
+  "782486": {
+    "lat": 25.679233,
+    "lng": 93.38,
+    "district": "WEST KARBI ANGLONG",
+    "office": "Khanduli B.O"
+  },
+  "782490": {
+    "lat": 26.1777,
+    "lng": 93.6625,
+    "district": "KARBI ANGLONG",
+    "office": "Vitorkaliani B.O"
+  },
+  "783101": {
+    "lat": 26.047121,
+    "lng": 90.663503,
+    "district": "GOALPARA",
+    "office": "Barbhita B.O"
+  },
+  "783120": {
+    "lat": 25.99497,
+    "lng": 90.630611,
+    "district": "GOALPARA",
+    "office": "Tisimpur B.O"
+  },
+  "783121": {
+    "lat": 25.9889,
+    "lng": 90.5444,
+    "district": "",
+    "office": "Baladmari"
+  },
+  "783122": {
+    "lat": 25.739798,
+    "lng": 90.61368,
+    "district": "GOALPARA",
+    "office": "Nishangram B.O"
+  },
+  "783123": {
+    "lat": 26.055458,
+    "lng": 91.477673,
+    "district": "GOALPARA",
+    "office": "Salpara B.O"
+  },
+  "783124": {
+    "lat": 25.928603,
+    "lng": 90.786366,
+    "district": "GOALPARA",
+    "office": "Khusdhowa B.O"
+  },
+  "783125": {
+    "lat": 26.217561,
+    "lng": 91.141413,
+    "district": "GOALPARA",
+    "office": "Dahela B.O"
+  },
+  "783126": {
+    "lat": 26.282986,
+    "lng": 91.048994,
+    "district": "GOALPARA",
+    "office": "Harimura B.O"
+  },
+  "783127": {
+    "lat": 25.951897,
+    "lng": 90.793523,
+    "district": "SOUTH SALMARA MANCACHAR",
+    "office": "Sarkarergaon B.O"
+  },
+  "783128": {
+    "lat": 25.883692,
+    "lng": 90.487453,
+    "district": "SOUTH SALMARA MANCACHAR",
+    "office": "Muhurirchar B.O"
+  },
+  "783129": {
+    "lat": 26.161135,
+    "lng": 90.340977,
+    "district": "GOALPARA",
+    "office": "Rajmita Pantai B.O"
+  },
+  "783130": {
+    "lat": 26.300156,
+    "lng": 91.136842,
+    "district": "GOALPARA",
+    "office": "Kahibari B.O"
+  },
+  "783131": {
+    "lat": 25.724166,
+    "lng": 90.073551,
+    "district": "SOUTH SALMARA MANCACHAR",
+    "office": "Barkona B.O"
+  },
+  "783132": {
+    "lat": 26.133902,
+    "lng": 90.442118,
+    "district": "GOALPARA",
+    "office": "Katarihara B.O"
+  },
+  "783133": {
+    "lat": 26.0426,
+    "lng": 90.3827,
+    "district": "GOALPARA",
+    "office": "Rajapara S.O"
+  },
+  "783134": {
+    "lat": 26.182199,
+    "lng": 91.000774,
+    "district": "GOALPARA",
+    "office": "Kachadal B.O"
+  },
+  "783135": {
+    "lat": 25.798916,
+    "lng": 89.939925,
+    "district": "SOUTH SALMARA MANCACHAR",
+    "office": "Hatsingimari  S.O"
+  },
+  "783301": {
+    "lat": 26.179887,
+    "lng": 90.029019,
+    "district": "DHUBRI",
+    "office": "Bhotgaon B.O"
+  },
+  "783323": {
+    "lat": 26.059138,
+    "lng": 90.421694,
+    "district": "DHUBRI",
+    "office": "Aironjongla B.O"
+  },
+  "783324": {
+    "lat": 26.008766,
+    "lng": 89.914069,
+    "district": "DHUBRI",
+    "office": "Chagalchara B.O"
+  },
+  "783325": {
+    "lat": 26.037057,
+    "lng": 89.975634,
+    "district": "DHUBRI",
+    "office": "Khalilpur B.O"
+  },
+  "783330": {
+    "lat": 26.051798,
+    "lng": 90.666346,
+    "district": "DHUBRI",
+    "office": "Barkaila Serso B.O"
+  },
+  "783331": {
+    "lat": 26.104854,
+    "lng": 89.98648,
+    "district": "DHUBRI",
+    "office": "South Geramari B.O"
+  },
+  "783332": {
+    "lat": 25.905781,
+    "lng": 90.719378,
+    "district": "KOKRAJHAR",
+    "office": "Barjan B.O"
+  },
+  "783333": {
+    "lat": 26.385105,
+    "lng": 90.011731,
+    "district": "KOKRAJHAR",
+    "office": "Failaguri B.O"
+  },
+  "783334": {
+    "lat": 26.236107,
+    "lng": 90.111526,
+    "district": "DHUBRI",
+    "office": "Barundanga B.O"
+  },
+  "783335": {
+    "lat": 26.273155,
+    "lng": 89.866123,
+    "district": "DHUBRI",
+    "office": "Pabarchara B.O"
+  },
+  "783336": {
+    "lat": 26.449805,
+    "lng": 90.132597,
+    "district": "KOKRAJHAR",
+    "office": "Gambaribil B.O"
+  },
+  "783337": {
+    "lat": 26.362579,
+    "lng": 90.123462,
+    "district": "DHUBRI",
+    "office": "Dhanpur B.O"
+  },
+  "783338": {
+    "lat": 26.2083,
+    "lng": 89.9222,
+    "district": "",
+    "office": "Satrasal"
+  },
+  "783339": {
+    "lat": 26.235895,
+    "lng": 90.59369,
+    "district": "DHUBRI",
+    "office": "Rangamati B.O"
+  },
+  "783344": {
+    "lat": 26.4333,
+    "lng": 90.15,
+    "district": "",
+    "office": "Hospital Road Raniganj"
+  },
+  "783345": {
+    "lat": 26.314271,
+    "lng": 90.500007,
+    "district": "KOKRAJHAR",
+    "office": "Baruapara B.O"
+  },
+  "783346": {
+    "lat": 26.499138,
+    "lng": 90.646564,
+    "district": "KOKRAJHAR",
+    "office": "Athiabari B.O"
+  },
+  "783347": {
+    "lat": 26.376991,
+    "lng": 90.708464,
+    "district": "KOKRAJHAR",
+    "office": "Banargaon B.O"
+  },
+  "783348": {
+    "lat": 26.282357,
+    "lng": 90.512575,
+    "district": "DHUBRI",
+    "office": "Silgara B.O"
+  },
+  "783349": {
+    "lat": 26.227086,
+    "lng": 90.881355,
+    "district": "DHUBRI",
+    "office": "Gutipara B.O"
+  },
+  "783350": {
+    "lat": 26.547145,
+    "lng": 90.055533,
+    "district": "KOKRAJHAR",
+    "office": "Saraibil B.O"
+  },
+  "783351": {
+    "lat": 26.3095,
+    "lng": 90.2155,
+    "district": "",
+    "office": "Lakhiganj Bazar"
+  },
+  "783354": {
+    "lat": 26.321289,
+    "lng": 90.164696,
+    "district": "KOKRAJHAR",
+    "office": "Mainaguri B.O"
+  },
+  "783360": {
+    "lat": 26.417572,
+    "lng": 90.38672,
+    "district": "KOKRAJHAR",
+    "office": "Panbari Bazar B.O"
+  },
+  "783361": {
+    "lat": 26.474044,
+    "lng": 89.992784,
+    "district": "KOKRAJHAR",
+    "office": "Jaraguri B.O"
+  },
+  "783362": {
+    "lat": 26.3095,
+    "lng": 90.2155,
+    "district": "",
+    "office": "Garuphela Bazar"
+  },
+  "783369": {
+    "lat": 26.422342,
+    "lng": 90.327081,
+    "district": "KOKRAJHAR",
+    "office": "Salakati B.O"
+  },
+  "783370": {
+    "lat": 26.465782,
+    "lng": 90.268926,
+    "district": "KOKRAJHAR",
+    "office": "Daloabari B.O"
+  },
+  "783371": {
+    "lat": 26.167824,
+    "lng": 90.73762,
+    "district": "DHUBRI",
+    "office": "Raijhora Bahalpur B.O"
+  },
+  "783372": {
+    "lat": 26.587337,
+    "lng": 90.927523,
+    "district": "CHIRANG",
+    "office": "Kokragaon B.O"
+  },
+  "783373": {
+    "lat": 26.426266,
+    "lng": 91.035044,
+    "district": "KOKRAJHAR",
+    "office": "Karigaon B.O"
+  },
+  "783374": {
+    "lat": 26.4278,
+    "lng": 90.4444,
+    "district": "",
+    "office": "Titagur"
+  },
+  "783375": {
+    "lat": 26.536436,
+    "lng": 90.574352,
+    "district": "CHIRANG",
+    "office": "Khungring B.O"
+  },
+  "783376": {
+    "lat": 26.395616,
+    "lng": 91.114388,
+    "district": "KOKRAJHAR",
+    "office": "Choibari B.O"
+  },
+  "783380": {
+    "lat": 26.469796,
+    "lng": 90.660819,
+    "district": "BONGAIGAON",
+    "office": "Chaprakata B.O"
+  },
+  "783381": {
+    "lat": 26.48083,
+    "lng": 90.508188,
+    "district": "BONGAIGAON",
+    "office": "Simlaguri B.O"
+  },
+  "783382": {
+    "lat": 26.323934,
+    "lng": 90.822597,
+    "district": "BONGAIGAON",
+    "office": "Pachania B.O"
+  },
+  "783383": {
+    "lat": 26.542795,
+    "lng": 91.752752,
+    "district": "BONGAIGAON",
+    "office": "Bhotguti Huramara B.O"
+  },
+  "783384": {
+    "lat": 26.332635,
+    "lng": 90.740608,
+    "district": "BONGAIGAON",
+    "office": "Ambari B.O"
+  },
+  "783385": {
+    "lat": 26.502358,
+    "lng": 90.500769,
+    "district": "CHIRANG",
+    "office": "Kajalgaon S.O"
+  },
+  "783386": {
+    "lat": 26.3111,
+    "lng": 90.6167,
+    "district": "",
+    "office": "Barghola Srijangram"
+  },
+  "783387": {
+    "lat": 26.3111,
+    "lng": 90.6167,
+    "district": "",
+    "office": "Barabazar"
+  },
+  "783388": {
+    "lat": 26.175052,
+    "lng": 90.502224,
+    "district": "BONGAIGAON",
+    "office": "Balapara B.O"
+  },
+  "783389": {
+    "lat": 25.223593,
+    "lng": 91.311005,
+    "district": "BONGAIGAON",
+    "office": "Kayetpara B.O"
+  },
+  "783390": {
+    "lat": 26.526482,
+    "lng": 91.238832,
+    "district": "CHIRANG",
+    "office": "Bagargaon B.O"
+  },
+  "783391": {
+    "lat": 26.735098,
+    "lng": 91.516498,
+    "district": "CHIRANG",
+    "office": "Alukhunda Bazar B.O"
+  },
+  "783392": {
+    "lat": 26.244689,
+    "lng": 91.046896,
+    "district": "BONGAIGAON",
+    "office": "Kokila B.O"
+  },
+  "783393": {
+    "lat": 26.713408,
+    "lng": 91.338351,
+    "district": "CHIRANG",
+    "office": "Amguri Bazar B.O"
+  },
+  "783394": {
+    "lat": 26.555479,
+    "lng": 91.095139,
+    "district": "CHIRANG",
+    "office": "Ouguri B.O"
+  },
+  "784001": {
+    "lat": 26.669747,
+    "lng": 92.774473,
+    "district": "SONITPUR",
+    "office": "Hazarapar S.O"
+  },
+  "784010": {
+    "lat": 26.620828,
+    "lng": 92.799014,
+    "district": "SONITPUR",
+    "office": "Tezpur Medical College S.O"
+  },
+  "784025": {
+    "lat": 26.690615,
+    "lng": 92.852593,
+    "district": "SONITPUR",
+    "office": "Singitoli B.O"
+  },
+  "784026": {
+    "lat": 26.7274886,
+    "lng": 92.8066761,
+    "district": "SONITPUR",
+    "office": "Khalihamari S.O"
+  },
+  "784027": {
+    "lat": 26.693758,
+    "lng": 92.884491,
+    "district": "SONITPUR",
+    "office": "Bhojkhowa Chapori B.O"
+  },
+  "784028": {
+    "lat": 26.6967245,
+    "lng": 92.8343361,
+    "district": "SONITPUR",
+    "office": "Napaam S.O"
+  },
+  "784101": {
+    "lat": 26.822905,
+    "lng": 92.781914,
+    "district": "SONITPUR",
+    "office": "Nankey Patgaon B.O"
+  },
+  "784102": {
+    "lat": 26.899835,
+    "lng": 92.799399,
+    "district": "SONITPUR",
+    "office": "Sonaipam B.O"
+  },
+  "784103": {
+    "lat": 26.758321,
+    "lng": 92.6398,
+    "district": "SONITPUR",
+    "office": "Gamani B.O"
+  },
+  "784104": {
+    "lat": 26.712016,
+    "lng": 92.770376,
+    "district": "SONITPUR",
+    "office": "Haleswar B.O"
+  },
+  "784105": {
+    "lat": 26.752042,
+    "lng": 92.786401,
+    "district": "SONITPUR",
+    "office": "Mansiri B.O"
+  },
+  "784110": {
+    "lat": 26.746113,
+    "lng": 92.481305,
+    "district": "SONITPUR",
+    "office": "Chitalmari B.O"
+  },
+  "784111": {
+    "lat": 26.683657,
+    "lng": 92.774103,
+    "district": "SONITPUR",
+    "office": "Batashipur B.O"
+  },
+  "784112": {
+    "lat": 26.730192,
+    "lng": 92.442596,
+    "district": "SONITPUR",
+    "office": "Natun Sirajuli B.O"
+  },
+  "784113": {
+    "lat": 26.483465,
+    "lng": 92.143227,
+    "district": "UDALGURI",
+    "office": "Bongaligaon B.O"
+  },
+  "784114": {
+    "lat": 26.567357,
+    "lng": 92.38601,
+    "district": "UDALGURI",
+    "office": "Borjhar Bazar B.O"
+  },
+  "784115": {
+    "lat": 26.53704,
+    "lng": 92.20243,
+    "district": "DARRANG",
+    "office": "Niz Kharupetia B.O"
+  },
+  "784116": {
+    "lat": 26.634358,
+    "lng": 92.647814,
+    "district": "DARRANG",
+    "office": "Jangalpara B.O"
+  },
+  "784117": {
+    "lat": 26.653693,
+    "lng": 92.440207,
+    "district": "SONITPUR",
+    "office": "Fatasimalugaon B.O"
+  },
+  "784118": {
+    "lat": 26.6333,
+    "lng": 92.35,
+    "district": "",
+    "office": "Barsola"
+  },
+  "784119": {
+    "lat": 26.6333,
+    "lng": 92.35,
+    "district": "",
+    "office": "Batasipur"
+  },
+  "784120": {
+    "lat": 26.6,
+    "lng": 92.4833,
+    "district": "",
+    "office": "Singri"
+  },
+  "784125": {
+    "lat": 26.4348442,
+    "lng": 92.0296825,
+    "district": "DARRANG",
+    "office": "Mangaldoi H.O"
+  },
+  "784144": {
+    "lat": 26.470541,
+    "lng": 91.929126,
+    "district": "DARRANG",
+    "office": "Dipila Chowka B.O"
+  },
+  "784145": {
+    "lat": 26.439585,
+    "lng": 91.933636,
+    "district": "DARRANG",
+    "office": "Bordolguri B.O"
+  },
+  "784146": {
+    "lat": 26.507109,
+    "lng": 92.059793,
+    "district": "DARRANG",
+    "office": "Balabari B.O"
+  },
+  "784147": {
+    "lat": 26.568773,
+    "lng": 92.206459,
+    "district": "DARRANG",
+    "office": "Chamatiapara B.O"
+  },
+  "784148": {
+    "lat": 26.496019,
+    "lng": 91.858203,
+    "district": "DARRANG",
+    "office": "Kenduguri B.O"
+  },
+  "784149": {
+    "lat": 26.664384,
+    "lng": 92.628945,
+    "district": "SONITPUR",
+    "office": "Bargaon B.O"
+  },
+  "784150": {
+    "lat": 26.662394,
+    "lng": 92.718416,
+    "district": "SONITPUR",
+    "office": "Dipota B.O"
+  },
+  "784151": {
+    "lat": 26.8111,
+    "lng": 93.0611,
+    "district": "",
+    "office": "Bandarmari"
+  },
+  "784152": {
+    "lat": 26.8111,
+    "lng": 93.0611,
+    "district": "",
+    "office": "Khelmati"
+  },
+  "784153": {
+    "lat": 26.705705,
+    "lng": 92.922926,
+    "district": "SONITPUR",
+    "office": "Khelmati B.O"
+  },
+  "784154": {
+    "lat": 26.639694,
+    "lng": 92.749569,
+    "district": "SONITPUR",
+    "office": "Balipukhuri Tiniali B.O"
+  },
+  "784160": {
+    "lat": 27.119941,
+    "lng": 93.930043,
+    "district": "LAKHIMPUR",
+    "office": "Dharmapur B.O"
+  },
+  "784161": {
+    "lat": 27.011043,
+    "lng": 93.920008,
+    "district": "LAKHIMPUR",
+    "office": "Pokadal B.O"
+  },
+  "784162": {
+    "lat": 26.9333,
+    "lng": 93.9667,
+    "district": "",
+    "office": "Badati"
+  },
+  "784163": {
+    "lat": 27.103633,
+    "lng": 93.905,
+    "district": "LAKHIMPUR",
+    "office": "Barbali B.O"
+  },
+  "784164": {
+    "lat": 27.214164,
+    "lng": 94.038382,
+    "district": "LAKHIMPUR",
+    "office": "Duliapthar B.O"
+  },
+  "784165": {
+    "lat": 26.929583,
+    "lng": 93.811883,
+    "district": "LAKHIMPUR",
+    "office": "Bonpuroi B.O"
+  },
+  "784166": {
+    "lat": 26.620828,
+    "lng": 92.799014,
+    "district": "Biswanath",
+    "office": "Behali S.O"
+  },
+  "784167": {
+    "lat": 26.777,
+    "lng": 93.27825,
+    "district": "Biswanath",
+    "office": "Arragaon No.1 B.O"
+  },
+  "784168": {
+    "lat": 26.845104,
+    "lng": 93.64524,
+    "district": "Biswanath",
+    "office": "Ghogra Basti B.O"
+  },
+  "784169": {
+    "lat": 26.71103,
+    "lng": 92.9009,
+    "district": "Biswanath",
+    "office": "Diphalu Satra B.O"
+  },
+  "784170": {
+    "lat": 26.65425,
+    "lng": 92.80115,
+    "district": "Biswanath",
+    "office": "Ghahigaon Chariali B.O"
+  },
+  "784171": {
+    "lat": 26.85353,
+    "lng": 93.47975,
+    "district": "Biswanath",
+    "office": "Daflagarh B.O"
+  },
+  "784172": {
+    "lat": 26.832097,
+    "lng": 93.4699,
+    "district": "Biswanath",
+    "office": "Brahmajan B.O"
+  },
+  "784173": {
+    "lat": 26.705078,
+    "lng": 92.948604,
+    "district": "Biswanath",
+    "office": "Tinikhuti B.O"
+  },
+  "784174": {
+    "lat": 26.83756,
+    "lng": 93.141228,
+    "district": "Biswanath",
+    "office": "Balichang B.O"
+  },
+  "784175": {
+    "lat": 26.691192,
+    "lng": 92.952434,
+    "district": "Biswanath",
+    "office": "Tewaripal B.O"
+  },
+  "784176": {
+    "lat": 26.725495,
+    "lng": 93.132777,
+    "district": "Biswanath",
+    "office": "Gelapukhuri B.O"
+  },
+  "784177": {
+    "lat": 26.62244,
+    "lng": 93.13567,
+    "district": "Biswanath",
+    "office": "Solemari No.1 B.O"
+  },
+  "784178": {
+    "lat": 26.84985,
+    "lng": 92.56785,
+    "district": "Biswanath",
+    "office": "Dubia B.O"
+  },
+  "784179": {
+    "lat": 26.852645,
+    "lng": 93.409958,
+    "district": "Biswanath",
+    "office": "Borjuli Nepaligaon B.O"
+  },
+  "784180": {
+    "lat": 26.747783,
+    "lng": 92.931549,
+    "district": "SONITPUR",
+    "office": "Gameripal B.O"
+  },
+  "784181": {
+    "lat": 26.8111,
+    "lng": 93.0611,
+    "district": "",
+    "office": "Bakola"
+  },
+  "784182": {
+    "lat": 26.8541,
+    "lng": 92.996389,
+    "district": "SONITPUR",
+    "office": "Rangachakua B.O"
+  },
+  "784183": {
+    "lat": 26.8111,
+    "lng": 93.0611,
+    "district": "",
+    "office": "Nagsankar"
+  },
+  "784184": {
+    "lat": 26.58719,
+    "lng": 92.85264,
+    "district": "Biswanath",
+    "office": "Borjharani B.O"
+  },
+  "784185": {
+    "lat": 26.8111,
+    "lng": 93.0611,
+    "district": "",
+    "office": "Rangachakua"
+  },
+  "784189": {
+    "lat": 26.620828,
+    "lng": 92.799014,
+    "district": "Biswanath",
+    "office": "Nagsankar B.O"
+  },
+  "784190": {
+    "lat": 26.59855,
+    "lng": 92.258916,
+    "district": "DARRANG",
+    "office": "Chamuakhat B.O"
+  },
+  "784501": {
+    "lat": 26.7298,
+    "lng": 92.6739,
+    "district": "SONITPUR",
+    "office": "Rangapukhuri B.O"
+  },
+  "784502": {
+    "lat": 26.7455,
+    "lng": 92.7375,
+    "district": "SONITPUR",
+    "office": "Bahbari B.O"
+  },
+  "784503": {
+    "lat": 26.7667,
+    "lng": 92.3933,
+    "district": "",
+    "office": "Thakurbari"
+  },
+  "784504": {
+    "lat": 26.90262,
+    "lng": 92.95665,
+    "district": "SONITPUR",
+    "office": "Phulaguri B.O"
+  },
+  "784505": {
+    "lat": 26.854829,
+    "lng": 92.672685,
+    "district": "SONITPUR",
+    "office": "Dopdopi B.O"
+  },
+  "784506": {
+    "lat": 26.826023,
+    "lng": 92.740453,
+    "district": "SONITPUR",
+    "office": "Bansbera B.O"
+  },
+  "784507": {
+    "lat": 26.751148,
+    "lng": 92.263957,
+    "district": "SONITPUR",
+    "office": "Hoograjuli B.O"
+  },
+  "784508": {
+    "lat": 26.761916,
+    "lng": 92.283904,
+    "district": "UDALGURI",
+    "office": "Shillongkhuti B.O"
+  },
+  "784509": {
+    "lat": 26.751836,
+    "lng": 92.181271,
+    "district": "UDALGURI",
+    "office": "Garaibari B.O"
+  },
+  "784510": {
+    "lat": 26.75353,
+    "lng": 92.183853,
+    "district": "UDALGURI",
+    "office": "Barigoan B.O"
+  },
+  "784513": {
+    "lat": 26.474,
+    "lng": 91.97855,
+    "district": "UDALGURI",
+    "office": "Bhairakunda B.O"
+  },
+  "784514": {
+    "lat": 26.524256,
+    "lng": 92.034012,
+    "district": "UDALGURI",
+    "office": "Aminpara B.O"
+  },
+  "784521": {
+    "lat": 26.625161,
+    "lng": 91.960818,
+    "district": "UDALGURI",
+    "office": "Mechakapukhuri B.O"
+  },
+  "784522": {
+    "lat": 26.643903,
+    "lng": 92.143188,
+    "district": "UDALGURI",
+    "office": "Bogpuri B.O"
+  },
+  "784523": {
+    "lat": 26.462423,
+    "lng": 92.058135,
+    "district": "UDALGURI",
+    "office": "Bengbari B.O"
+  },
+  "784524": {
+    "lat": 26.741015,
+    "lng": 92.637665,
+    "district": "UDALGURI",
+    "office": "Ghograbazar B.O"
+  },
+  "784525": {
+    "lat": 26.582469,
+    "lng": 92.037251,
+    "district": "UDALGURI",
+    "office": "Ranipukhuri B.O"
+  },
+  "784526": {
+    "lat": 26.754405,
+    "lng": 91.863998,
+    "district": "UDALGURI",
+    "office": "Kalikhola B.O"
+  },
+  "784527": {
+    "lat": 26.725822,
+    "lng": 91.815731,
+    "district": "UDALGURI",
+    "office": "No.2 Barangajuli B.O"
+  },
+  "784528": {
+    "lat": 26.606345,
+    "lng": 92.77051,
+    "district": "UDALGURI",
+    "office": "Dalong Ghat B.O"
+  },
+  "784529": {
+    "lat": 26.473567,
+    "lng": 91.9125,
+    "district": "DARRANG",
+    "office": "Chamuapara B.O"
+  },
+  "785001": {
+    "lat": 26.386205,
+    "lng": 93.844911,
+    "district": "JORHAT",
+    "office": "Bhogdaimukh S.O"
+  },
+  "785004": {
+    "lat": 26.6294,
+    "lng": 93.4028,
+    "district": "JORHAT",
+    "office": "Pokamura B.O"
+  },
+  "785005": {
+    "lat": 26.6843,
+    "lng": 94.2648,
+    "district": "",
+    "office": "Jorhat Air Field"
+  },
+  "785006": {
+    "lat": 26.739722,
+    "lng": 94.158194,
+    "district": "JORHAT",
+    "office": "Parbatia B.O"
+  },
+  "785007": {
+    "lat": 26.44441,
+    "lng": 94.1502,
+    "district": "JORHAT",
+    "office": "Itakhuli B.O"
+  },
+  "785008": {
+    "lat": 26.724944,
+    "lng": 94.22925,
+    "district": "JORHAT",
+    "office": "Koronga B.O"
+  },
+  "785009": {
+    "lat": 26.4242,
+    "lng": 94.1212,
+    "district": "JORHAT",
+    "office": "Bajalani Kohar B.O"
+  },
+  "785010": {
+    "lat": 26.48421,
+    "lng": 94.1037,
+    "district": "JORHAT",
+    "office": "Chenijaan B.O"
+  },
+  "785011": {
+    "lat": 26.6843,
+    "lng": 94.2648,
+    "district": "",
+    "office": "Konwaripukhuri"
+  },
+  "785013": {
+    "lat": 26.7282778,
+    "lng": 94.1947778,
+    "district": "JORHAT",
+    "office": "Assam Agriculture University S.O"
+  },
+  "785014": {
+    "lat": 26.6361,
+    "lng": 93.6711,
+    "district": "JORHAT",
+    "office": "Bongalpukhuri B.O"
+  },
+  "785015": {
+    "lat": 26.461,
+    "lng": 94.123,
+    "district": "JORHAT",
+    "office": "Desoinagar B.O"
+  },
+  "785101": {
+    "lat": 26.483,
+    "lng": 94.1426,
+    "district": "JORHAT",
+    "office": "Baghmora B.O"
+  },
+  "785102": {
+    "lat": 26.756,
+    "lng": 94.2094,
+    "district": "MAJULI",
+    "office": "Chumaimari Missing Gaon B.O"
+  },
+  "785103": {
+    "lat": 26.8333,
+    "lng": 94.1333,
+    "district": "",
+    "office": "Fulanibari"
+  },
+  "785104": {
+    "lat": 26.983668,
+    "lng": 94.156306,
+    "district": "MAJULI",
+    "office": "Madhupur B.O"
+  },
+  "785105": {
+    "lat": 26.756,
+    "lng": 94.2094,
+    "district": "MAJULI",
+    "office": "Borpomua Lakhimi B.O"
+  },
+  "785106": {
+    "lat": 26.944555,
+    "lng": 94.163667,
+    "district": "MAJULI",
+    "office": "Bengenati Satra B.O"
+  },
+  "785107": {
+    "lat": 26.4822,
+    "lng": 94.2141,
+    "district": "JORHAT",
+    "office": "Bailunggaon B.O"
+  },
+  "785108": {
+    "lat": 26.4924,
+    "lng": 94.0959,
+    "district": "JORHAT",
+    "office": "Charighoria B.O"
+  },
+  "785109": {
+    "lat": 26.8333,
+    "lng": 94.1333,
+    "district": "",
+    "office": "Kaziranga Sanctuary"
+  },
+  "785110": {
+    "lat": 26.756,
+    "lng": 94.20076,
+    "district": "MAJULI",
+    "office": "Sonowal Kachari B.O"
+  },
+  "785111": {
+    "lat": 26.502,
+    "lng": 94.1444,
+    "district": "JORHAT",
+    "office": "Fakalapather B.O"
+  },
+  "785112": {
+    "lat": 26.4947,
+    "lng": 94.2422,
+    "district": "JORHAT",
+    "office": "Jogduar Sonari B.O"
+  },
+  "785113": {
+    "lat": 26.8333,
+    "lng": 94.4167,
+    "district": "",
+    "office": "Dhekiakhowa"
+  },
+  "785601": {
+    "lat": 26.197833,
+    "lng": 93.860694,
+    "district": "GOLAGHAT",
+    "office": "Dhupguri B.O"
+  },
+  "785602": {
+    "lat": 26.2813,
+    "lng": 93.884,
+    "district": "GOLAGHAT",
+    "office": "Mirigaon B.O"
+  },
+  "785603": {
+    "lat": 26.1114,
+    "lng": 92.428314,
+    "district": "GOLAGHAT",
+    "office": "Jamuguri B.O"
+  },
+  "785604": {
+    "lat": 26.1167,
+    "lng": 93.8167,
+    "district": "",
+    "office": "Naojan"
+  },
+  "785609": {
+    "lat": 26.5355,
+    "lng": 94.3209,
+    "district": "GOLAGHAT",
+    "office": "Mohpara B.O"
+  },
+  "785610": {
+    "lat": 26.2739,
+    "lng": 94.012,
+    "district": "GOLAGHAT",
+    "office": "Borjan B.O"
+  },
+  "785611": {
+    "lat": 26.4008,
+    "lng": 93.4834,
+    "district": "GOLAGHAT",
+    "office": "Dabidubi B.O"
+  },
+  "785612": {
+    "lat": 26.640667,
+    "lng": 93.600917,
+    "district": "GOLAGHAT",
+    "office": "Balijan Aamtenga B.O"
+  },
+  "785613": {
+    "lat": 26.5833,
+    "lng": 93.8,
+    "district": "GOLAGHAT",
+    "office": "Bokial B.O"
+  },
+  "785614": {
+    "lat": 26.692959,
+    "lng": 93.952204,
+    "district": "GOLAGHAT",
+    "office": "Bongalgaon B.O"
+  },
+  "785615": {
+    "lat": 26.7172,
+    "lng": 93.7111,
+    "district": "GOLAGHAT",
+    "office": "Cinakon Chariali B.O"
+  },
+  "785616": {
+    "lat": 24.1518,
+    "lng": 92.1817,
+    "district": "JORHAT",
+    "office": "Kachamari B.O"
+  },
+  "785617": {
+    "lat": 26.5958,
+    "lng": 93.875,
+    "district": "",
+    "office": "Dohatia"
+  },
+  "785618": {
+    "lat": 26.3418,
+    "lng": 94.072,
+    "district": "GOLAGHAT",
+    "office": "Missamora B.O"
+  },
+  "785619": {
+    "lat": 26.51225,
+    "lng": 93.971694,
+    "district": "GOLAGHAT",
+    "office": "Bonkowal B.O"
+  },
+  "785620": {
+    "lat": 26.5167,
+    "lng": 93.9667,
+    "district": "",
+    "office": "Negheriting"
+  },
+  "785621": {
+    "lat": 26.51225,
+    "lng": 93.9716944,
+    "district": "GOLAGHAT",
+    "office": "Golaghat H.O"
+  },
+  "785622": {
+    "lat": 26.3608,
+    "lng": 93.5906,
+    "district": "GOLAGHAT",
+    "office": "Alengmuria B.O"
+  },
+  "785625": {
+    "lat": 26.5298,
+    "lng": 94.0531,
+    "district": "GOLAGHAT",
+    "office": "Bokalaigaon B.O"
+  },
+  "785626": {
+    "lat": 26.5089,
+    "lng": 93.9695,
+    "district": "GOLAGHAT",
+    "office": "Barting Naochalia B.O"
+  },
+  "785630": {
+    "lat": 26.610489,
+    "lng": 94.201528,
+    "district": "JORHAT",
+    "office": "Deogharia B.O"
+  },
+  "785631": {
+    "lat": 26.2652,
+    "lng": 94.0758,
+    "district": "JORHAT",
+    "office": "Raidangjuri B.O"
+  },
+  "785632": {
+    "lat": 26.353,
+    "lng": 94.114,
+    "district": "JORHAT",
+    "office": "Melamati B.O"
+  },
+  "785633": {
+    "lat": 24.1911,
+    "lng": 92.1413,
+    "district": "JORHAT",
+    "office": "Kachukhat B.O"
+  },
+  "785634": {
+    "lat": 26.758028,
+    "lng": 94.210056,
+    "district": "JORHAT",
+    "office": "Meleng B.O"
+  },
+  "785635": {
+    "lat": 26.708028,
+    "lng": 94.396472,
+    "district": "JORHAT",
+    "office": "Chungi Lahing B.O"
+  },
+  "785636": {
+    "lat": 26.7317,
+    "lng": 94.4677,
+    "district": "JORHAT",
+    "office": "Halowapathar B.O"
+  },
+  "785640": {
+    "lat": 26.823176,
+    "lng": 94.538492,
+    "district": "SIVASAGAR",
+    "office": "Betbari B.O"
+  },
+  "785661": {
+    "lat": 24.5816,
+    "lng": 92.1615,
+    "district": "SIVASAGAR",
+    "office": "Hafaluting B.O"
+  },
+  "785662": {
+    "lat": 27.126667,
+    "lng": 94.740028,
+    "district": "SIVASAGAR",
+    "office": "Dehajan B.O"
+  },
+  "785663": {
+    "lat": 24.866085,
+    "lng": 92.5816,
+    "district": "SIVASAGAR",
+    "office": "Banmukh B.O"
+  },
+  "785664": {
+    "lat": 26.5628,
+    "lng": 94.3211,
+    "district": "SIVASAGAR",
+    "office": "Ailamukh B.O"
+  },
+  "785665": {
+    "lat": 26.5791,
+    "lng": 94.3708,
+    "district": "SIVASAGAR",
+    "office": "Rong Ghar Chariali B.O"
+  },
+  "785666": {
+    "lat": 26.5903,
+    "lng": 94.374,
+    "district": "SIVASAGAR",
+    "office": "Jatakia B.O"
+  },
+  "785667": {
+    "lat": 26.123,
+    "lng": 94.123,
+    "district": "SIVASAGAR",
+    "office": "Chaulkara B.O"
+  },
+  "785668": {
+    "lat": 27.1833,
+    "lng": 94.9333,
+    "district": "",
+    "office": "Mechagarh"
+  },
+  "785669": {
+    "lat": 27.152078,
+    "lng": 94.214333,
+    "district": "SIVASAGAR",
+    "office": "Mohkhuti B.O"
+  },
+  "785670": {
+    "lat": 27.152,
+    "lng": 94.880972,
+    "district": "CHARAIDEO",
+    "office": "Photikachowa B.O"
+  },
+  "785671": {
+    "lat": 23.5718,
+    "lng": 92.2614,
+    "district": "SIVASAGAR",
+    "office": "Bam Rajabari B.O"
+  },
+  "785672": {
+    "lat": 27.2389,
+    "lng": 94.6762,
+    "district": "SIVASAGAR",
+    "office": "Koibarta Dolonigaon B.O"
+  },
+  "785673": {
+    "lat": 26.6656,
+    "lng": 94.2635,
+    "district": "",
+    "office": "Sepon"
+  },
+  "785674": {
+    "lat": 26.6656,
+    "lng": 94.2635,
+    "district": "",
+    "office": "Nemuguri"
+  },
+  "785675": {
+    "lat": 27.263251,
+    "lng": 94.871591,
+    "district": "DIBRUGARH",
+    "office": "Buri Khowang B.O"
+  },
+  "785676": {
+    "lat": 27.26176,
+    "lng": 94.868627,
+    "district": "DIBRUGARH",
+    "office": "Baligaon B.O"
+  },
+  "785680": {
+    "lat": 26.811833,
+    "lng": 94.520722,
+    "district": "SIVASAGAR",
+    "office": "Lalimchiga B.O"
+  },
+  "785681": {
+    "lat": 24.1815,
+    "lng": 92.1691,
+    "district": "SIVASAGAR",
+    "office": "Dopdhar B.O"
+  },
+  "785682": {
+    "lat": 26.5314,
+    "lng": 94.2801,
+    "district": "JORHAT",
+    "office": "Dagaon B.O"
+  },
+  "785683": {
+    "lat": 26.5046,
+    "lng": 94.2934,
+    "district": "JORHAT",
+    "office": "Bamunpukhuri B.O"
+  },
+  "785684": {
+    "lat": 26.5909,
+    "lng": 94.3752,
+    "district": "SIVASAGAR",
+    "office": "Barua Ali B.O"
+  },
+  "785685": {
+    "lat": 26.988694,
+    "lng": 94.631889,
+    "district": "SIVASAGAR",
+    "office": "Bihubar Te B.O"
+  },
+  "785686": {
+    "lat": 26.9225,
+    "lng": 94.7548,
+    "district": "CHARAIDEO",
+    "office": "Dholebagan B.O"
+  },
+  "785687": {
+    "lat": 26.8472,
+    "lng": 94.8027,
+    "district": "SIVASAGAR",
+    "office": "Nimaigarh Habi B.O"
+  },
+  "785688": {
+    "lat": 24.1319,
+    "lng": 92.5624,
+    "district": "CHARAIDEO",
+    "office": "Chalapather B.O"
+  },
+  "785689": {
+    "lat": 26.8778,
+    "lng": 94.6778,
+    "district": "",
+    "office": "Suffry"
+  },
+  "785690": {
+    "lat": 26.988694,
+    "lng": 94.631889,
+    "district": "CHARAIDEO",
+    "office": "Bekadolong B.O"
+  },
+  "785691": {
+    "lat": 26.176357,
+    "lng": 91.384733,
+    "district": "CHARAIDEO",
+    "office": "Bhalukaguri B.O"
+  },
+  "785692": {
+    "lat": 27.0639,
+    "lng": 95.0941,
+    "district": "CHARAIDEO",
+    "office": "Baruanagar B.O"
+  },
+  "785693": {
+    "lat": 27.0857,
+    "lng": 95.1701,
+    "district": "CHARAIDEO",
+    "office": "Barpatra Te B.O"
+  },
+  "785694": {
+    "lat": 27.0667,
+    "lng": 95.0333,
+    "district": "",
+    "office": "Teokghat"
+  },
+  "785695": {
+    "lat": 27.0667,
+    "lng": 95.0333,
+    "district": "",
+    "office": "Towkok"
+  },
+  "785696": {
+    "lat": 23.5716,
+    "lng": 92.3419,
+    "district": "SIVASAGAR",
+    "office": "Athkhel B.O"
+  },
+  "785697": {
+    "lat": 26.983694,
+    "lng": 94.650083,
+    "district": "SIVASAGAR",
+    "office": "Bogidole B.O"
+  },
+  "785698": {
+    "lat": 24.3712,
+    "lng": 94.1215,
+    "district": "CHARAIDEO",
+    "office": "Silakuti B.O"
+  },
+  "785699": {
+    "lat": 26.5928,
+    "lng": 93.7498,
+    "district": "GOLAGHAT",
+    "office": "Kanaighat B.O"
+  },
+  "785700": {
+    "lat": 26.4744,
+    "lng": 94.1914,
+    "district": "JORHAT",
+    "office": "Hulalbari B.O"
+  },
+  "785701": {
+    "lat": 26.5933,
+    "lng": 93.657015,
+    "district": "SIVASAGAR",
+    "office": "Bhadhara B.O"
+  },
+  "785702": {
+    "lat": 26.500139,
+    "lng": 93.972444,
+    "district": "GOLAGHAT",
+    "office": "Kacharihat B.O"
+  },
+  "785703": {
+    "lat": 26.51225,
+    "lng": 93.971694,
+    "district": "JORHAT",
+    "office": "Goalgaon Baliati B.O"
+  },
+  "785704": {
+    "lat": 27.0053,
+    "lng": 94.5125,
+    "district": "JORHAT",
+    "office": "Murmuria B.O"
+  },
+  "785705": {
+    "lat": 26.2229,
+    "lng": 94.0332,
+    "district": "GOLAGHAT",
+    "office": "Sapekhati B.O"
+  },
+  "786001": {
+    "lat": 27.392609,
+    "lng": 95.038367,
+    "district": "DIBRUGARH",
+    "office": "Naliapool B.O"
+  },
+  "786002": {
+    "lat": 27.48,
+    "lng": 94.94,
+    "district": "DIBRUGARH",
+    "office": "Hiloidhari B.O"
+  },
+  "786003": {
+    "lat": 27.469798,
+    "lng": 94.910144,
+    "district": "DIBRUGARH",
+    "office": "Bhurburi B.O"
+  },
+  "786004": {
+    "lat": 27.44,
+    "lng": 94.89,
+    "district": "DIBRUGARH",
+    "office": "Chaulkhowa B.O"
+  },
+  "786005": {
+    "lat": 27.1059,
+    "lng": 95.0143,
+    "district": "DIBRUGARH",
+    "office": "Jalan Nagar S.O"
+  },
+  "786006": {
+    "lat": 27.2937,
+    "lng": 94.5735,
+    "district": "DIBRUGARH",
+    "office": "Lepetkata S.O"
+  },
+  "786007": {
+    "lat": 27.125144,
+    "lng": 95.191637,
+    "district": "DIBRUGARH",
+    "office": "Medela B.O"
+  },
+  "786008": {
+    "lat": 27.39802,
+    "lng": 94.92506,
+    "district": "DIBRUGARH",
+    "office": "Konwar Handique Gaon B.O"
+  },
+  "786010": {
+    "lat": 27.45026,
+    "lng": 94.999821,
+    "district": "DIBRUGARH",
+    "office": "Hatkhula B.O"
+  },
+  "786012": {
+    "lat": 27.478926,
+    "lng": 95.018731,
+    "district": "DIBRUGARH",
+    "office": "Naga Ghuli Kanaigaon B.O"
+  },
+  "786052": {
+    "lat": 27.25,
+    "lng": 95.5792,
+    "district": "",
+    "office": "Tinthengia"
+  },
+  "786053": {
+    "lat": 27.25,
+    "lng": 95.5792,
+    "district": "",
+    "office": "Kotona"
+  },
+  "786054": {
+    "lat": 27.25,
+    "lng": 95.5792,
+    "district": "",
+    "office": "Lezai"
+  },
+  "786101": {
+    "lat": 27.452824,
+    "lng": 95.079993,
+    "district": "DIBRUGARH",
+    "office": "Alimur B.O"
+  },
+  "786102": {
+    "lat": 27.2751,
+    "lng": 95.0717,
+    "district": "DIBRUGARH",
+    "office": "Chabua Air Field S.O"
+  },
+  "786103": {
+    "lat": 27.004444,
+    "lng": 94.706667,
+    "district": "DIBRUGARH",
+    "office": "Bhajoni B.O"
+  },
+  "786110": {
+    "lat": 27.3278,
+    "lng": 95.5833,
+    "district": "",
+    "office": "Sissibargaon"
+  },
+  "786125": {
+    "lat": 27.361385,
+    "lng": 95.305129,
+    "district": "TINSUKIA",
+    "office": "Prakash Bazar S.O"
+  },
+  "786126": {
+    "lat": 27.4005,
+    "lng": 95.26505,
+    "district": "TINSUKIA",
+    "office": "Gellapukhuri B.O"
+  },
+  "786145": {
+    "lat": 27.28,
+    "lng": 95.191667,
+    "district": "TINSUKIA",
+    "office": "Sripuria Bengali Gaon B.O"
+  },
+  "786146": {
+    "lat": 26.34045,
+    "lng": 94.0705,
+    "district": "TINSUKIA",
+    "office": "Pakharijan B.O"
+  },
+  "786147": {
+    "lat": 27.5002,
+    "lng": 95.288,
+    "district": "TINSUKIA",
+    "office": "Laika B.O"
+  },
+  "786148": {
+    "lat": 27.454845,
+    "lng": 95.348428,
+    "district": "TINSUKIA",
+    "office": "Khetopathergaon B.O"
+  },
+  "786150": {
+    "lat": 27.53265,
+    "lng": 95.49375,
+    "district": "TINSUKIA",
+    "office": "Santipur B.O"
+  },
+  "786151": {
+    "lat": 27.363774,
+    "lng": 95.362166,
+    "district": "TINSUKIA",
+    "office": "Bordubi Te B.O"
+  },
+  "786152": {
+    "lat": 27.6123,
+    "lng": 95.631714,
+    "district": "TINSUKIA",
+    "office": "Bormuchai B.O"
+  },
+  "786153": {
+    "lat": 27.3538,
+    "lng": 95.3338,
+    "district": "TINSUKIA",
+    "office": "Rupaisiding S.O"
+  },
+  "786154": {
+    "lat": 27.2902,
+    "lng": 92.42086,
+    "district": "TINSUKIA",
+    "office": "Hatighuli B.O"
+  },
+  "786155": {
+    "lat": 27.5001,
+    "lng": 95.3947,
+    "district": "TINSUKIA",
+    "office": "Sadiya S.O"
+  },
+  "786156": {
+    "lat": 27.504464,
+    "lng": 95.376794,
+    "district": "TINSUKIA",
+    "office": "Bordoloinagar B.O"
+  },
+  "786157": {
+    "lat": 27.83816,
+    "lng": 95.69902,
+    "district": "TINSUKIA",
+    "office": "Buraburi Than B.O"
+  },
+  "786158": {
+    "lat": 27.8305,
+    "lng": 95.638167,
+    "district": "TINSUKIA",
+    "office": "Kukuremara B.O"
+  },
+  "786159": {
+    "lat": 27.5611,
+    "lng": 95.560945,
+    "district": "TINSUKIA",
+    "office": "Netaji Road B.O"
+  },
+  "786160": {
+    "lat": 27.5504,
+    "lng": 95.691514,
+    "district": "TINSUKIA",
+    "office": "Amguri B.O"
+  },
+  "786170": {
+    "lat": 27.481701,
+    "lng": 95.431889,
+    "district": "TINSUKIA",
+    "office": "Ashok Nagar B.O"
+  },
+  "786171": {
+    "lat": 27.375681,
+    "lng": 95.570146,
+    "district": "TINSUKIA",
+    "office": "3 No Borbil B.O"
+  },
+  "786172": {
+    "lat": 27.3278,
+    "lng": 95.5833,
+    "district": "",
+    "office": "Powai"
+  },
+  "786173": {
+    "lat": 26.4445,
+    "lng": 94.151,
+    "district": "TINSUKIA",
+    "office": "Jubilee Digboi S.O"
+  },
+  "786174": {
+    "lat": 27.368917,
+    "lng": 95.6021,
+    "district": "TINSUKIA",
+    "office": "Adarshgaon B.O"
+  },
+  "786179": {
+    "lat": 27.1922,
+    "lng": 95.5625,
+    "district": "TINSUKIA",
+    "office": "Challet B.O"
+  },
+  "786180": {
+    "lat": 27.3167,
+    "lng": 95.9,
+    "district": "",
+    "office": "Lekhapani"
+  },
+  "786181": {
+    "lat": 27.289681,
+    "lng": 95.661247,
+    "district": "TINSUKIA",
+    "office": "Alubari B.O"
+  },
+  "786182": {
+    "lat": 27.321077,
+    "lng": 95.686428,
+    "district": "TINSUKIA",
+    "office": "Long Gaon B.O"
+  },
+  "786183": {
+    "lat": 27.490506,
+    "lng": 95.25054,
+    "district": "TINSUKIA",
+    "office": "Laipuli B.O"
+  },
+  "786184": {
+    "lat": 27.472122,
+    "lng": 95.170167,
+    "district": "DIBRUGARH",
+    "office": "Balijan North Te B.O"
+  },
+  "786185": {
+    "lat": 27.3,
+    "lng": 95.7917,
+    "district": "",
+    "office": "Dinjan"
+  },
+  "786186": {
+    "lat": 27.3,
+    "lng": 95.7917,
+    "district": "",
+    "office": "Hatibandha"
+  },
+  "786187": {
+    "lat": 27.306667,
+    "lng": 95.503333,
+    "district": "TINSUKIA",
+    "office": "Agbandha Bengali Gaon B.O"
+  },
+  "786188": {
+    "lat": 27.38215,
+    "lng": 95.89255,
+    "district": "TINSUKIA",
+    "office": "Bishnupur B.O"
+  },
+  "786189": {
+    "lat": 27.370667,
+    "lng": 95.4607,
+    "district": "TINSUKIA",
+    "office": "Baghbari Gaon B.O"
+  },
+  "786190": {
+    "lat": 27.4414,
+    "lng": 95.275,
+    "district": "TINSUKIA",
+    "office": "Samdang B.O"
+  },
+  "786191": {
+    "lat": 27.320367,
+    "lng": 95.325633,
+    "district": "DIBRUGARH",
+    "office": "Bhadoi Pachali B.O"
+  },
+  "786192": {
+    "lat": 27.38245,
+    "lng": 95.26295,
+    "district": "TINSUKIA",
+    "office": "Dihingia Gaon B.O"
+  },
+  "786601": {
+    "lat": 27.393231,
+    "lng": 95.297704,
+    "district": "TINSUKIA",
+    "office": "Balijan T.E. B.O"
+  },
+  "786602": {
+    "lat": 27.366233,
+    "lng": 95.268187,
+    "district": "DIBRUGARH",
+    "office": "Lilapur B.O"
+  },
+  "786610": {
+    "lat": 27.280202,
+    "lng": 95.245196,
+    "district": "DIBRUGARH",
+    "office": "Balimora B.O"
+  },
+  "786611": {
+    "lat": 27.213318,
+    "lng": 95.087278,
+    "district": "DIBRUGARH",
+    "office": "Dhuapathar B.O"
+  },
+  "786612": {
+    "lat": 27.228056,
+    "lng": 95.185011,
+    "district": "DIBRUGARH",
+    "office": "Kasulugaon B.O"
+  },
+  "786613": {
+    "lat": 27.244087,
+    "lng": 94.952093,
+    "district": "DIBRUGARH",
+    "office": "Aghunibari B.O"
+  },
+  "786614": {
+    "lat": 27.25442,
+    "lng": 95.23852,
+    "district": "DIBRUGARH",
+    "office": "Kamargaon B.O"
+  },
+  "786615": {
+    "lat": 27.0167,
+    "lng": 95.5667,
+    "district": "",
+    "office": "Kowarigaon"
+  },
+  "786616": {
+    "lat": 27.0167,
+    "lng": 95.5667,
+    "district": "",
+    "office": "Lengri Bazar"
+  },
+  "786621": {
+    "lat": 27.169386,
+    "lng": 95.321814,
+    "district": "DIBRUGARH",
+    "office": "Ashabam B.O"
+  },
+  "786622": {
+    "lat": 27.2827,
+    "lng": 94.5612,
+    "district": "DIBRUGARH",
+    "office": "Namrup Thermal Power Station S.O"
+  },
+  "786623": {
+    "lat": 27.19475,
+    "lng": 95.3586111,
+    "district": "DIBRUGARH",
+    "office": "Parbatpur S.O"
+  },
+  "786624": {
+    "lat": 27.0167,
+    "lng": 95.5667,
+    "district": "",
+    "office": "Barbam"
+  },
+  "786630": {
+    "lat": 27.0167,
+    "lng": 95.5667,
+    "district": "",
+    "office": "Khonsa"
+  },
+  "786631": {
+    "lat": 27.0167,
+    "lng": 95.5667,
+    "district": "",
+    "office": "Longding"
+  },
+  "786692": {
+    "lat": 27.366,
+    "lng": 95.3118611,
+    "district": "DIBRUGARH",
+    "office": "Anandapara S.O"
+  },
+  "787001": {
+    "lat": 27.2375556,
+    "lng": 94.1075,
+    "district": "LAKHIMPUR",
+    "office": "North Lakhimpur H.O"
+  },
+  "787023": {
+    "lat": 27.169694,
+    "lng": 94.022188,
+    "district": "LAKHIMPUR",
+    "office": "Singra B.O"
+  },
+  "787026": {
+    "lat": 27.428684,
+    "lng": 94.448093,
+    "district": "DHEMAJI",
+    "office": "Deuribarbam B.O"
+  },
+  "787028": {
+    "lat": 27.3722,
+    "lng": 94.45,
+    "district": "",
+    "office": "Nowboicha"
+  },
+  "787029": {
+    "lat": 27.3722,
+    "lng": 94.45,
+    "district": "",
+    "office": "Moinapara"
+  },
+  "787030": {
+    "lat": 27.3722,
+    "lng": 94.45,
+    "district": "",
+    "office": "Baginadi"
+  },
+  "787031": {
+    "lat": 27.230075,
+    "lng": 94.090137,
+    "district": "LAKHIMPUR",
+    "office": "Dejoo Te B.O"
+  },
+  "787032": {
+    "lat": 27.437145,
+    "lng": 94.964095,
+    "district": "LAKHIMPUR",
+    "office": "Badhakhara B.O"
+  },
+  "787033": {
+    "lat": 27.435313,
+    "lng": 94.892713,
+    "district": "LAKHIMPUR",
+    "office": "Bholabari B.O"
+  },
+  "787034": {
+    "lat": 27.404857,
+    "lng": 94.292886,
+    "district": "DHEMAJI",
+    "office": "Kadamguri B.O"
+  },
+  "787035": {
+    "lat": 27.5135,
+    "lng": 94.363167,
+    "district": "DHEMAJI",
+    "office": "Mingmang B.O"
+  },
+  "787051": {
+    "lat": 27.2623,
+    "lng": 94.084133,
+    "district": "LAKHIMPUR",
+    "office": "Kakoi Rajgarh B.O"
+  },
+  "787052": {
+    "lat": 27.136167,
+    "lng": 94.10694,
+    "district": "LAKHIMPUR",
+    "office": "Ahomoni B.O"
+  },
+  "787053": {
+    "lat": 27.330777,
+    "lng": 94.406885,
+    "district": "DHEMAJI",
+    "office": "Bordoibam B.O"
+  },
+  "787054": {
+    "lat": 27.14456,
+    "lng": 93.79146,
+    "district": "LAKHIMPUR",
+    "office": "Adi Alengi Satra B.O"
+  },
+  "787055": {
+    "lat": 27.305304,
+    "lng": 94.449626,
+    "district": "LAKHIMPUR",
+    "office": "Bahpara B.O"
+  },
+  "787056": {
+    "lat": 27.45625,
+    "lng": 94.2238,
+    "district": "LAKHIMPUR",
+    "office": "Subansiri Koibarta Adarsha Gao B.O"
+  },
+  "787057": {
+    "lat": 27.594581,
+    "lng": 94.750757,
+    "district": "DHEMAJI",
+    "office": "Borlung B.O"
+  },
+  "787058": {
+    "lat": 27.414406,
+    "lng": 94.549944,
+    "district": "LAKHIMPUR",
+    "office": "Nemutengani B.O"
+  },
+  "787059": {
+    "lat": 27.582847,
+    "lng": 94.715341,
+    "district": "DHEMAJI",
+    "office": "Madhuripathar B.O"
+  },
+  "787060": {
+    "lat": 27.788937,
+    "lng": 95.208,
+    "district": "DHEMAJI",
+    "office": "Leku B.O"
+  },
+  "787061": {
+    "lat": 27.6641,
+    "lng": 94.8639,
+    "district": "DHEMAJI",
+    "office": "Dekapam B.O"
+  },
+  "787110": {
+    "lat": 27.513831,
+    "lng": 94.638775,
+    "district": "DHEMAJI",
+    "office": "Burisuti B.O"
+  },
+  "788001": {
+    "lat": 24.823637,
+    "lng": 92.801827,
+    "district": "CACHAR",
+    "office": "Silchar Court S.O"
+  },
+  "788002": {
+    "lat": 24.837955,
+    "lng": 92.808978,
+    "district": "CACHAR",
+    "office": "Larsingpar B.O"
+  },
+  "788003": {
+    "lat": 24.834285,
+    "lng": 92.764809,
+    "district": "CACHAR",
+    "office": "Chirukandi B.O"
+  },
+  "788004": {
+    "lat": 24.812238,
+    "lng": 92.801384,
+    "district": "CACHAR",
+    "office": "Sarboday Nagar B.O"
+  },
+  "788005": {
+    "lat": 24.685657,
+    "lng": 92.699498,
+    "district": "CACHAR",
+    "office": "Berenga B.O"
+  },
+  "788006": {
+    "lat": 24.808156,
+    "lng": 92.800916,
+    "district": "CACHAR",
+    "office": "Kanakpur B.O"
+  },
+  "788007": {
+    "lat": 24.823637,
+    "lng": 92.801805,
+    "district": "CACHAR",
+    "office": "Chincuri T E B.O"
+  },
+  "788009": {
+    "lat": 24.834806,
+    "lng": 92.808832,
+    "district": "CACHAR",
+    "office": "Nutan Dayapur B.O"
+  },
+  "788010": {
+    "lat": 24.811212,
+    "lng": 92.793942,
+    "district": "CACHAR",
+    "office": "Bharakhai B.O"
+  },
+  "788011": {
+    "lat": 24.734546,
+    "lng": 92.767276,
+    "district": "CACHAR",
+    "office": "Harinetilla B.O"
+  },
+  "788013": {
+    "lat": 24.745606,
+    "lng": 92.875305,
+    "district": "CACHAR",
+    "office": "Dhanehari B.O"
+  },
+  "788014": {
+    "lat": 24.823637,
+    "lng": 92.801827,
+    "district": "CACHAR",
+    "office": "Silchar Medical College S.O"
+  },
+  "788015": {
+    "lat": 24.851819,
+    "lng": 92.560913,
+    "district": "CACHAR",
+    "office": "Batertal B.O"
+  },
+  "788019": {
+    "lat": 24.8667,
+    "lng": 92.7667,
+    "district": "",
+    "office": "Barkhola"
+  },
+  "788025": {
+    "lat": 24.864849,
+    "lng": 92.773536,
+    "district": "CACHAR",
+    "office": "Buribail B.O"
+  },
+  "788026": {
+    "lat": 24.828409,
+    "lng": 92.747957,
+    "district": "CACHAR",
+    "office": "Baglaghat B.O"
+  },
+  "788030": {
+    "lat": 24.872485,
+    "lng": 92.869577,
+    "district": "CACHAR",
+    "office": "Chandighat T E B.O"
+  },
+  "788031": {
+    "lat": 24.877879,
+    "lng": 92.877276,
+    "district": "CACHAR",
+    "office": "Dumurghat B.O"
+  },
+  "788098": {
+    "lat": 24.829205,
+    "lng": 92.992728,
+    "district": "CACHAR",
+    "office": "Uttar Sonpur B.O"
+  },
+  "788099": {
+    "lat": 24.662955,
+    "lng": 92.940228,
+    "district": "CACHAR",
+    "office": "Boali Basti B.O"
+  },
+  "788101": {
+    "lat": 24.875664,
+    "lng": 92.569371,
+    "district": "CACHAR",
+    "office": "Kakmara B.O"
+  },
+  "788102": {
+    "lat": 24.815927,
+    "lng": 92.976765,
+    "district": "CACHAR",
+    "office": "Laboc T E B.O"
+  },
+  "788103": {
+    "lat": 24.823637,
+    "lng": 92.801827,
+    "district": "CACHAR",
+    "office": "Lakhipur S.O (Cachar"
+  },
+  "788104": {
+    "lat": 24.998019,
+    "lng": 92.926714,
+    "district": "CACHAR",
+    "office": "Uttar Lalpani B.O"
+  },
+  "788106": {
+    "lat": 24.667879,
+    "lng": 92.827276,
+    "district": "CACHAR",
+    "office": "Dilkhush T E B.O"
+  },
+  "788107": {
+    "lat": 24.611667,
+    "lng": 92.766666,
+    "district": "DIMA HASAO",
+    "office": "Bararkap B.O"
+  },
+  "788108": {
+    "lat": 24.647343,
+    "lng": 92.816717,
+    "district": "DIMA HASAO",
+    "office": "Lodikachari B.O"
+  },
+  "788109": {
+    "lat": 24.823637,
+    "lng": 92.801827,
+    "district": "CACHAR",
+    "office": "Kumbhirgram Airport S.O"
+  },
+  "788110": {
+    "lat": 24.821489,
+    "lng": 92.856321,
+    "district": "CACHAR",
+    "office": "Naraincherra B.O"
+  },
+  "788111": {
+    "lat": 24.877419,
+    "lng": 92.481514,
+    "district": "CACHAR",
+    "office": "Subhang B.O"
+  },
+  "788112": {
+    "lat": 24.724212,
+    "lng": 92.673942,
+    "district": "CACHAR",
+    "office": "Clever House B.O"
+  },
+  "788113": {
+    "lat": 24.617778,
+    "lng": 92.707778,
+    "district": "CACHAR",
+    "office": "New Bag O Bahar B.O"
+  },
+  "788114": {
+    "lat": 24.636484,
+    "lng": 92.836283,
+    "district": "CACHAR",
+    "office": "Bhubandhar T E B.O"
+  },
+  "788115": {
+    "lat": 24.709091,
+    "lng": 92.834547,
+    "district": "CACHAR",
+    "office": "Jogiabasti B.O"
+  },
+  "788116": {
+    "lat": 24.682149,
+    "lng": 92.881984,
+    "district": "CACHAR",
+    "office": "Chekarcham B.O"
+  },
+  "788117": {
+    "lat": 24.68,
+    "lng": 92.73,
+    "district": "CACHAR",
+    "office": "Nayabeel B.O"
+  },
+  "788118": {
+    "lat": 24.823637,
+    "lng": 92.801827,
+    "district": "CACHAR",
+    "office": "Silcuri S.O"
+  },
+  "788119": {
+    "lat": 24.736985,
+    "lng": 92.883782,
+    "district": "CACHAR",
+    "office": "Dhakin Mohonpur B.O"
+  },
+  "788120": {
+    "lat": 24.690717,
+    "lng": 92.739603,
+    "district": "CACHAR",
+    "office": "Bidyaratanpur B.O"
+  },
+  "788121": {
+    "lat": 24.671212,
+    "lng": 92.727276,
+    "district": "CACHAR",
+    "office": "Baromuni B.O"
+  },
+  "788122": {
+    "lat": 24.7194,
+    "lng": 92.7722,
+    "district": "",
+    "office": "Manierkhal"
+  },
+  "788123": {
+    "lat": 24.749565,
+    "lng": 92.704157,
+    "district": "CACHAR",
+    "office": "Paloi B.O"
+  },
+  "788124": {
+    "lat": 24.7194,
+    "lng": 92.7722,
+    "district": "",
+    "office": "Irongmara"
+  },
+  "788125": {
+    "lat": 24.7194,
+    "lng": 92.7722,
+    "district": "",
+    "office": "Laboc"
+  },
+  "788126": {
+    "lat": 24.756934,
+    "lng": 92.424561,
+    "district": "CACHAR",
+    "office": "Singerbond B.O"
+  },
+  "788127": {
+    "lat": 24.752419,
+    "lng": 92.929414,
+    "district": "CACHAR",
+    "office": "Hiyairbond B.O"
+  },
+  "788145": {
+    "lat": 24.7194,
+    "lng": 92.7722,
+    "district": "",
+    "office": "Chiparsangam"
+  },
+  "788150": {
+    "lat": 24.76,
+    "lng": 92.59,
+    "district": "HAILAKANDI",
+    "office": "Algapur PT V B.O"
+  },
+  "788151": {
+    "lat": 24.677902,
+    "lng": 92.554808,
+    "district": "HAILAKANDI",
+    "office": "Hailakandi H.O"
+  },
+  "788152": {
+    "lat": 24.0975,
+    "lng": 92.19375,
+    "district": "HAILAKANDI",
+    "office": "Ratakandi B.O"
+  },
+  "788155": {
+    "lat": 24.661765,
+    "lng": 92.576754,
+    "district": "HAILAKANDI",
+    "office": "Boalipar Bazar B.O"
+  },
+  "788156": {
+    "lat": 24.64,
+    "lng": 92.48,
+    "district": "KARIMGANJ",
+    "office": "Brojendrapur B.O"
+  },
+  "788160": {
+    "lat": 24.55,
+    "lng": 92.59,
+    "district": "HAILAKANDI",
+    "office": "Sudarshanpur B.O"
+  },
+  "788161": {
+    "lat": 24.45,
+    "lng": 92.55,
+    "district": "HAILAKANDI",
+    "office": "Alexanderpur B.O"
+  },
+  "788162": {
+    "lat": 24.454,
+    "lng": 92.562,
+    "district": "HAILAKANDI",
+    "office": "Gharmura Bazar B.O"
+  },
+  "788163": {
+    "lat": 24.56,
+    "lng": 92.64,
+    "district": "HAILAKANDI",
+    "office": "Chandrapur PT II B.O"
+  },
+  "788164": {
+    "lat": 24.65,
+    "lng": 92.57,
+    "district": "HAILAKANDI",
+    "office": "Barband B.O"
+  },
+  "788165": {
+    "lat": 24.4,
+    "lng": 92.56,
+    "district": "HAILAKANDI",
+    "office": "Karicherra Bazar B.O"
+  },
+  "788166": {
+    "lat": 24.327694,
+    "lng": 92.196851,
+    "district": "KARIMGANJ",
+    "office": "Chamela Bazar B.O"
+  },
+  "788167": {
+    "lat": 24.55,
+    "lng": 92.6,
+    "district": "",
+    "office": "Vernerpur"
+  },
+  "788168": {
+    "lat": 24.61,
+    "lng": 92.61,
+    "district": "HAILAKANDI",
+    "office": "Nimaichandpur PT II B.O"
+  },
+  "788169": {
+    "lat": 24.55,
+    "lng": 92.6,
+    "district": "",
+    "office": "Lalamukh"
+  },
+  "788701": {
+    "lat": 24.619054,
+    "lng": 92.735651,
+    "district": "KARIMGANJ",
+    "office": "Rakeshnagar B.O"
+  },
+  "788702": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Srigauri"
+  },
+  "788705": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Rajartilla"
+  },
+  "788706": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Mahakhal"
+  },
+  "788708": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Chargola Bazar"
+  },
+  "788709": {
+    "lat": 24.869597,
+    "lng": 92.355064,
+    "district": "KARIMGANJ",
+    "office": "Panighat B.O"
+  },
+  "788710": {
+    "lat": 24.87099,
+    "lng": 92.353988,
+    "district": "KARIMGANJ",
+    "office": "Longai Road B.O"
+  },
+  "788711": {
+    "lat": 24.867584,
+    "lng": 92.360382,
+    "district": "KARIMGANJ",
+    "office": "Karimganj Bazar S.O"
+  },
+  "788712": {
+    "lat": 24.86978,
+    "lng": 92.350944,
+    "district": "KARIMGANJ",
+    "office": "Dharakuna B.O"
+  },
+  "788713": {
+    "lat": 24.869597,
+    "lng": 92.35173,
+    "district": "KARIMGANJ",
+    "office": "Barkatpur B.O"
+  },
+  "788716": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Sadarasi"
+  },
+  "788719": {
+    "lat": 24.769195,
+    "lng": 92.353461,
+    "district": "KARIMGANJ",
+    "office": "Singaria Bazar B.O"
+  },
+  "788720": {
+    "lat": 24.81862,
+    "lng": 92.423375,
+    "district": "KARIMGANJ",
+    "office": "Bagbari B.O"
+  },
+  "788721": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Latu"
+  },
+  "788722": {
+    "lat": 24.763065,
+    "lng": 92.351154,
+    "district": "KARIMGANJ",
+    "office": "Alamkhani B.O"
+  },
+  "788723": {
+    "lat": 24.68,
+    "lng": 92.34,
+    "district": "KARIMGANJ",
+    "office": "Asalkandi B.O"
+  },
+  "788724": {
+    "lat": 24.63862,
+    "lng": 92.324487,
+    "district": "KARIMGANJ",
+    "office": "Patharkandi Anchalik B.O"
+  },
+  "788725": {
+    "lat": 24.929655,
+    "lng": 92.677197,
+    "district": "KARIMGANJ",
+    "office": "Puthini B.O"
+  },
+  "788726": {
+    "lat": 24.533517,
+    "lng": 92.434076,
+    "district": "KARIMGANJ",
+    "office": "Baithakhal Basti B.O"
+  },
+  "788727": {
+    "lat": 24.867584,
+    "lng": 92.360382,
+    "district": "KARIMGANJ",
+    "office": "Bazaricherra Bazar S.O"
+  },
+  "788728": {
+    "lat": 24.501517,
+    "lng": 92.312076,
+    "district": "KARIMGANJ",
+    "office": "Longai B.O"
+  },
+  "788729": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Lakhi Cherra"
+  },
+  "788731": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Kanai Bazar"
+  },
+  "788733": {
+    "lat": 24.535903,
+    "lng": 92.504256,
+    "district": "KARIMGANJ",
+    "office": "Govindaganj Bazar B.O"
+  },
+  "788734": {
+    "lat": 24.380439,
+    "lng": 92.420933,
+    "district": "KARIMGANJ",
+    "office": "Baruala B.O"
+  },
+  "788735": {
+    "lat": 24.776975,
+    "lng": 92.716202,
+    "district": "KARIMGANJ",
+    "office": "Muliala B.O"
+  },
+  "788736": {
+    "lat": 24.5,
+    "lng": 92.43,
+    "district": "KARIMGANJ",
+    "office": "Damcherra Bagan B.O"
+  },
+  "788737": {
+    "lat": 24.737984,
+    "lng": 92.375801,
+    "district": "KARIMGANJ",
+    "office": "Fenairbond B.O"
+  },
+  "788781": {
+    "lat": 24.829517,
+    "lng": 92.304076,
+    "district": "KARIMGANJ",
+    "office": "Pathu B.O"
+  },
+  "788790": {
+    "lat": 24.75,
+    "lng": 92.35,
+    "district": "",
+    "office": "Manikganj"
+  },
+  "788801": {
+    "lat": 24.9,
+    "lng": 92.6,
+    "district": "",
+    "office": "Kalinagar"
+  },
+  "788802": {
+    "lat": 24.86033,
+    "lng": 92.5922,
+    "district": "CACHAR",
+    "office": "Fulbari B.O"
+  },
+  "788803": {
+    "lat": 24.87,
+    "lng": 92.53,
+    "district": "KARIMGANJ",
+    "office": "Badarpurghat S.O"
+  },
+  "788804": {
+    "lat": 24.882528,
+    "lng": 92.480127,
+    "district": "CACHAR",
+    "office": "Gangapur B.O"
+  },
+  "788805": {
+    "lat": 24.877517,
+    "lng": 92.528076,
+    "district": "CACHAR",
+    "office": "Lathimara B.O"
+  },
+  "788806": {
+    "lat": 24.869698,
+    "lng": 92.535048,
+    "district": "KARIMGANJ",
+    "office": "Anglarbazar B.O"
+  },
+  "788808": {
+    "lat": 24.9,
+    "lng": 92.6,
+    "district": "",
+    "office": "Hilara Colony"
+  },
+  "788812": {
+    "lat": 25.075,
+    "lng": 92.8,
+    "district": "",
+    "office": "Kalaincherra"
+  },
+  "788814": {
+    "lat": 25.075,
+    "lng": 92.8,
+    "district": "",
+    "office": "Salchopra"
+  },
+  "788815": {
+    "lat": 24.961465,
+    "lng": 92.561698,
+    "district": "CACHAR",
+    "office": "Gumrah Bazar B.O"
+  },
+  "788816": {
+    "lat": 24.955861,
+    "lng": 92.426794,
+    "district": "CACHAR",
+    "office": "Rajyeshpur West B.O"
+  },
+  "788817": {
+    "lat": 24.44,
+    "lng": 92.29,
+    "district": "CACHAR",
+    "office": "Chandranathpur B.O"
+  },
+  "788818": {
+    "lat": 25.043766,
+    "lng": 93.200702,
+    "district": "DIMA HASAO",
+    "office": "Mailongdisha B.O"
+  },
+  "788819": {
+    "lat": 24.693725,
+    "lng": 92.874566,
+    "district": "DIMA HASAO",
+    "office": "Christiankempai B.O"
+  },
+  "788820": {
+    "lat": 24.601963,
+    "lng": 92.836632,
+    "district": "DIMA HASAO",
+    "office": "Topadisa B.O"
+  },
+  "788830": {
+    "lat": 25.154546,
+    "lng": 93.087988,
+    "district": "DIMA HASAO",
+    "office": "Kholjang B.O"
+  },
+  "788831": {
+    "lat": 25.247071,
+    "lng": 93.093536,
+    "district": "DIMA HASAO",
+    "office": "Hajang B.O"
+  },
+  "788832": {
+    "lat": 24.925606,
+    "lng": 92.848638,
+    "district": "DIMA HASAO",
+    "office": "Mupa B.O"
+  },
+  "788834": {
+    "lat": 25.3222,
+    "lng": 93.1333,
+    "district": "",
+    "office": "Khejurbond"
+  },
+  "788931": {
+    "lat": 24.949139,
+    "lng": 92.829165,
+    "district": "DIMA HASAO",
+    "office": "Longkhu B.O"
+  }
+}

@@ -1,4 +1,6 @@
 // Geo utilities: Haversine distance calculation, dynamic facility-based location resolution, and proximity routing
+import assamPincodesData from "../data/assam_pincodes.json";
+import { ASSAM_DISTRICTS, getDistrictCoordinates, normalizeDistrict } from "./districts.js";
 
 /**
  * Normalizes facility coordinates directly from the database/facility directory.
@@ -133,7 +135,12 @@ export function deriveSubType(name = "", type = "NHM") {
   }
 
   // NHM Sub-types
-  if (nameUpper.includes("DISTRICT HOSPITAL") || nameUpper.match(/\bDH\b/)) {
+  if (
+    nameUpper.includes("DISTRICT HOSPITAL") ||
+    nameUpper.includes("CIVIL HOSPITAL") ||
+    nameUpper.includes("MEDICAL COLLEGE") ||
+    nameUpper.match(/\bDH\b/)
+  ) {
     return "DH";
   }
   if (nameUpper.includes("SUB DIVISIONAL") || nameUpper.match(/\bSDH\b/)) {
@@ -221,6 +228,18 @@ export function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Calculates approximate road driving distance in kilometers.
+ * Applies the empirical road circuity factor (~1.28x) for Assam road terrain,
+ * with realistic baseline buffer for local arterial road access.
+ */
+export function calculateRoadDistanceKm(lat1, lon1, lat2, lon2) {
+  const straightKm = calculateHaversineDistanceKm(lat1, lon1, lat2, lon2);
+  if (straightKm == null) return null;
+  const roadKm = straightKm * 1.28;
+  return Math.round(roadKm * 10) / 10;
+}
+
+/**
  * Resolves caller location dynamically based on caller Pincode, District, City, or Coordinates/IP.
  * Caller's explicit PINCODE/District always takes precedence over workstation IP coordinates.
  */
@@ -250,9 +269,82 @@ export function resolveCallerLocation(input, facilities = []) {
   const rawDistrict = callerDist || input?.ip_district || input?.region || input?.ip_region;
   const rawCity = callerCity || input?.ip_city || input?.location || input?.ip_location;
 
-  // 1. PINCODE RESOLUTION (Highest Priority: Exact match to caller's postal area)
+  // 1. EXPLICIT GPS / NOMINATIM COORDINATES (Highest Priority when coordinates are supplied)
+  const rawLat = input?.latitude ?? input?.lat;
+  const rawLon = input?.longitude ?? input?.lon;
+
+  if (
+    rawLat != null &&
+    rawLon != null &&
+    !isNaN(Number(rawLat)) &&
+    !isNaN(Number(rawLon)) &&
+    Number(rawLat) !== 0 &&
+    Number(rawLon) !== 0
+  ) {
+    const latNum = Number(rawLat);
+    const lonNum = Number(rawLon);
+
+    let closestPin = null;
+    let minPinD = Infinity;
+    if (assamPincodesData) {
+      for (const [pin, pData] of Object.entries(assamPincodesData)) {
+        if (pData.lat != null && pData.lng != null) {
+          const d = calculateHaversineDistanceKm(latNum, lonNum, pData.lat, pData.lng);
+          if (d != null && d < minPinD) {
+            minPinD = d;
+            closestPin = { pin, ...pData, distKm: d };
+          }
+        }
+      }
+    }
+
+    const isDropPin = Boolean(input?.isDroppedPin || input?.is_drop_pin || input?.method === "dropped_pin");
+    const validCallerPin = callerPin && /^\d{6}$/.test(callerPin) ? callerPin : null;
+    const resolvedPin = validCallerPin || (minPinD <= 25 && closestPin?.pin ? closestPin.pin : null);
+    const resolvedDistrict =
+      (rawDistrict && String(rawDistrict).trim()) ||
+      closestPin?.district ||
+      null;
+    const resolvedCity = input?.city || closestPin?.office || null;
+
+    return {
+      latitude: latNum,
+      longitude: lonNum,
+      pincode: resolvedPin,
+      district: resolvedDistrict,
+      city: resolvedCity,
+      method: isDropPin ? "dropped_pin" : "coordinates",
+      matched: isDropPin
+        ? `Dropped Pin (${latNum.toFixed(4)}, ${lonNum.toFixed(4)})`
+        : (validCallerPin ? `PIN: ${validCallerPin}${resolvedDistrict ? ` (${resolvedDistrict})` : ""}` : `Location (${latNum.toFixed(4)}, ${lonNum.toFixed(4)})`),
+      isDistrictOnly: false,
+      isNoLocation: false,
+      isDroppedPin: isDropPin,
+    };
+  }
+
+  // 2. PINCODE RESOLUTION (Official Postal & GST GIS centroid coordinates)
   if (callerPin) {
-    // 1a. Exact facility pincode match
+    // 1a. Canonical Assam Pincode Database (Exact permanent match)
+    if (assamPincodesData && assamPincodesData[callerPin]) {
+      const pinData = assamPincodesData[callerPin];
+      const canonicalDistrict = pinData.district
+        ? ASSAM_DISTRICTS.find((d) => normalizeDistrict(d) === normalizeDistrict(pinData.district)) ||
+          String(pinData.district).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+        : (rawDistrict || null);
+
+      return {
+        latitude: Number(pinData.lat),
+        longitude: Number(pinData.lng),
+        pincode: callerPin,
+        district: canonicalDistrict,
+        method: "pincode",
+        matched: `PIN: ${callerPin}${canonicalDistrict ? ` (${canonicalDistrict})` : ""}`,
+        isDistrictOnly: false,
+      };
+    }
+
+    // 1b. Exact facility pincode match
     const match = cleanFacs.find(
       (f) => f.pincode && String(f.pincode).trim() === callerPin && f.latitude != null
     );
@@ -263,12 +355,12 @@ export function resolveCallerLocation(input, facilities = []) {
         pincode: callerPin,
         district: match.district || rawDistrict || null,
         method: "pincode",
-        matched: `Pincode ${callerPin} (${match.name})`,
+        matched: `PIN: ${callerPin} (${match.district || match.name})`,
         isDistrictOnly: false,
       };
     }
 
-    // 1b. Address text match containing pincode
+    // 1c. Address text match containing pincode
     const addrMatch = cleanFacs.find(
       (f) => f.address && f.address.includes(callerPin) && f.latitude != null
     );
@@ -279,65 +371,53 @@ export function resolveCallerLocation(input, facilities = []) {
         pincode: callerPin,
         district: addrMatch.district || rawDistrict || null,
         method: "pincode",
-        matched: `Pincode ${callerPin} (${addrMatch.name})`,
+        matched: `PIN: ${callerPin} (${addrMatch.district || addrMatch.name})`,
         isDistrictOnly: false,
       };
     }
 
-    // 1c. Numerically closest pincode match in same postal delivery zone (e.g. 782411 -> 782410 Jagiroad)
+    // 1d. If a 6-digit PIN code is supplied, find nearest Assam postal PIN code
     if (/^\d{6}$/.test(callerPin)) {
       const pinNum = parseInt(callerPin, 10);
-      const sameZone = cleanFacs.filter(
-        (f) => f.pincode && /^\d{6}$/.test(String(f.pincode).trim()) && f.latitude != null
-      );
+      const allPins = Object.keys(assamPincodesData || {});
+      if (allPins.length > 0) {
+        allPins.sort((a, b) => Math.abs(parseInt(a, 10) - pinNum) - Math.abs(parseInt(b, 10) - pinNum));
+        const closestPin = allPins[0];
+        const pinData = assamPincodesData[closestPin];
+        const canonicalDistrict = pinData.district
+          ? ASSAM_DISTRICTS.find((d) => normalizeDistrict(d) === normalizeDistrict(pinData.district)) ||
+            String(pinData.district).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+          : (rawDistrict || null);
 
-      if (sameZone.length > 0) {
-        const same3 = sameZone.filter((f) => String(f.pincode).startsWith(callerPin.slice(0, 3)));
-        const candidates = same3.length > 0 ? same3 : sameZone;
-
-        candidates.sort((a, b) => {
-          const diffA = Math.abs(parseInt(a.pincode, 10) - pinNum);
-          const diffB = Math.abs(parseInt(b.pincode, 10) - pinNum);
-          return diffA - diffB;
-        });
-
-        const closest = candidates[0];
-        const diff = Math.abs(parseInt(closest.pincode, 10) - pinNum);
-
-        if (diff <= 15) {
-          return {
-            latitude: closest.latitude,
-            longitude: closest.longitude,
-            pincode: callerPin,
-            district: closest.district || rawDistrict || null,
-            method: "nearby_pincode",
-            matched: `Pincode ${callerPin} (Near ${closest.name} · ${closest.pincode})`,
-            isDistrictOnly: false,
-          };
-        }
-
-        const p4 = callerPin.substring(0, 4);
-        const prefix4Matches = sameZone.filter((f) => String(f.pincode).startsWith(p4));
-        if (prefix4Matches.length > 0) {
-          prefix4Matches.sort((a, b) => Math.abs(parseInt(a.pincode, 10) - pinNum) - Math.abs(parseInt(b.pincode, 10) - pinNum));
-          const best = prefix4Matches[0];
-          return {
-            latitude: best.latitude,
-            longitude: best.longitude,
-            pincode: callerPin,
-            district: best.district || rawDistrict || null,
-            method: "pincode",
-            matched: `Pincode Area ${callerPin} (Near ${best.name} · ${best.pincode})`,
-            isDistrictOnly: false,
-          };
-        }
+        return {
+          latitude: Number(pinData.lat),
+          longitude: Number(pinData.lng),
+          pincode: callerPin,
+          district: canonicalDistrict,
+          method: "pincode",
+          matched: `PIN: ${callerPin}${canonicalDistrict ? ` (${canonicalDistrict})` : ""}`,
+          isDistrictOnly: false,
+        };
       }
     }
   }
 
-  // 2. DISTRICT RESOLUTION: Match against facilities in caller's district
+  // 2. DISTRICT RESOLUTION: First match canonical district centroid, then fallback to district facilities
   if (rawDistrict && String(rawDistrict).trim()) {
     const cleanDist = String(rawDistrict).trim().toLowerCase();
+    const distCenter = getDistrictCoordinates(cleanDist);
+    if (distCenter) {
+      return {
+        latitude: distCenter.lat,
+        longitude: distCenter.lng,
+        pincode: callerPin || null,
+        district: distCenter.name,
+        method: "district_centroid",
+        matched: `District ${distCenter.name}`,
+        isDistrictOnly: !callerPin,
+      };
+    }
+
     const match =
       cleanFacs.find(
         (f) => f.district && f.district.toLowerCase() === cleanDist && f.latitude != null
@@ -381,44 +461,7 @@ export function resolveCallerLocation(input, facilities = []) {
     }
   }
 
-  // 4. EXPLICIT GPS COORDINATES (Only if provided explicitly by user)
-  const rawLat = input?.latitude ?? input?.lat;
-  const rawLon = input?.longitude ?? input?.lon;
 
-  if (
-    rawLat != null &&
-    rawLon != null &&
-    !isNaN(Number(rawLat)) &&
-    !isNaN(Number(rawLon)) &&
-    Number(rawLat) !== 0 &&
-    Number(rawLon) !== 0
-  ) {
-    const latNum = Number(rawLat);
-    const lonNum = Number(rawLon);
-
-    let closestFac = null;
-    let minD = Infinity;
-    for (const f of cleanFacs) {
-      if (f.latitude != null && f.longitude != null) {
-        const d = calculateHaversineDistanceKm(latNum, lonNum, f.latitude, f.longitude);
-        if (d != null && d < minD) {
-          minD = d;
-          closestFac = f;
-        }
-      }
-    }
-
-    return {
-      latitude: latNum,
-      longitude: lonNum,
-      pincode: callerPin || closestFac?.pincode || null,
-      district: (rawDistrict && String(rawDistrict).trim()) || closestFac?.district || null,
-      method: "coordinates",
-      matched: `Location Coordinates (${latNum.toFixed(4)}, ${lonNum.toFixed(4)})`,
-      isDistrictOnly: false,
-      isNoLocation: false,
-    };
-  }
 
   // 5. NO PINCODE / LOCATION ENTERED: DO NOT default to Beltola or any default pincode!
   return {
@@ -463,7 +506,7 @@ export function isDispensaryOpenNow(date = new Date()) {
  *    - Always give priority to ESIS Dispensary if dispensary is open / available!
  *    - If no dispensary, refer to ESIC Hospital (if <= 25km), else District Hospital / Tie-Up Hospital.
  */
-export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isSevere = false, isWeekend = null) {
+export function rankNearestFacilities(callerLoc, facilities = [], limit = 50, isSevere = false, isWeekend = null) {
   if (!facilities || !facilities.length) return [];
   if (
     !callerLoc ||
@@ -497,7 +540,7 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
 
     let dist = null;
     if (hasCoords && f.latitude != null && f.longitude != null) {
-      dist = calculateHaversineDistanceKm(
+      dist = calculateRoadDistanceKm(
         callerLoc.latitude,
         callerLoc.longitude,
         f.latitude,
@@ -513,14 +556,15 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
 
     let finalDist = dist;
     if (finalDist !== null && finalDist !== undefined) {
-      if (finalDist <= 0.1) {
-        // Realistic local proximity in same postal delivery area rather than 0 KM
-        finalDist = isExactPin ? 0.8 : 1.2;
+      if (finalDist <= 0.2) {
+        finalDist = 0.5;
+      } else {
+        finalDist = Math.round(finalDist * 10) / 10;
       }
     } else {
-      if (isExactPin) finalDist = 0.8;
-      else if (pinDiff <= 2) finalDist = 2.4;
-      else if (pinDiff <= 5) finalDist = 5.0;
+      if (isExactPin) finalDist = 1.5;
+      else if (pinDiff <= 2) finalDist = 3.5;
+      else if (pinDiff <= 5) finalDist = 6.0;
       else finalDist = 9999;
     }
 
@@ -554,9 +598,10 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 6, isS
     };
   });
 
-  // RULE: Filter out any facility with distance > 50 KM (unless no facilities exist <= 50km)
+  // Always include all facilities sorted by proximity, with <= 50km prioritized first for Load More
   const within50Km = scored.filter((f) => f.distance_km != null && f.distance_km <= 50);
-  const eligiblePool = within50Km.length > 0 ? within50Km : scored;
+  const beyond50Km = scored.filter((f) => f.distance_km == null || f.distance_km > 50);
+  const eligiblePool = [...within50Km, ...beyond50Km];
 
   // Proximity sorting comparator:
   // 1. Exact pincode match (distance 0 km) at top

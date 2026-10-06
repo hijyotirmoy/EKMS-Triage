@@ -68,7 +68,13 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
   const chatRef = useRef(null);
   const outcomeRef = useRef(null);
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k) => (e) => {
+    let val = e.target.value;
+    if (k === "pincode") {
+      val = val.replace(/\D/g, "").slice(0, 6);
+    }
+    setForm((f) => ({ ...f, [k]: val }));
+  };
 
   const activeCallerId = useMemo(() => {
     return form.caller_id || callerFoundInfo?.caller_id || getCallerIdForPhone(form.phone, callerHistory);
@@ -97,7 +103,10 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         const parsed = JSON.parse(stored);
         if (parsed.form && (parsed.form.phone || parsed.form.caller_name || parsed.form.symptom_notes)) {
           if (parsed.form.caller_name === "." || parsed.form.caller_name === "'") parsed.form.caller_name = "";
-          if (parsed.form.pincode === "Kamrup Metro" || parsed.form.pincode === ".") parsed.form.pincode = "";
+          if (parsed.form.pincode && !/^\d{6}$/.test(String(parsed.form.pincode).trim())) {
+            if (!parsed.form.city) parsed.form.city = String(parsed.form.pincode).trim();
+            parsed.form.pincode = "";
+          }
           setForm(parsed.form);
         }
         if (parsed.result) {
@@ -105,10 +114,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           const caseTarget = res.case_ref || res.case_id || res.id;
           if (!res.is_forwarded) {
             try {
-              const forwardStored =
-                (caseTarget && (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))) ||
-                sessionStorage.getItem("ekms_active_case_forwarded") ||
-                localStorage.getItem("ekms_active_case_forwarded");
+              const forwardStored = caseTarget
+                ? (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))
+                : null;
               if (forwardStored) {
                 const fParsed = JSON.parse(forwardStored);
                 if (fParsed.is_forwarded) {
@@ -211,10 +219,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       lastLookedUpRef.current = "";
       return;
     }
-    if (!force && lastLookedUpRef.current === query) return;
-
     lastLookedUpRef.current = query;
     setIsLookingUp(true);
+
     try {
       const res = await fetch(`/api/caller/lookup?phone=${encodeURIComponent(query)}`);
       const data = await res.json();
@@ -784,6 +791,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                   if (callerFoundInfo) setCallerFoundInfo(null);
                   if (callerHistory.length > 0) setCallerHistory([]);
                   lastLookedUpRef.current = "";
+                  setResult(null);
                 } else {
                   lookupCaller(val, true);
                 }
@@ -1030,9 +1038,28 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                   });
                 }}
                 onUpdatePincode={(newPin) => {
-                  if (newPin) {
-                    setForm((f) => ({ ...f, pincode: newPin }));
+                  if (newPin && /^\d{6}$/.test(String(newPin).trim())) {
+                    setForm((f) => ({ ...f, pincode: String(newPin).trim() }));
+                  } else if (newPin && typeof newPin === "string" && newPin.trim()) {
+                    setForm((f) => ({ ...f, city: newPin.trim() }));
                   }
+                }}
+                onUpdateLocation={({ pincode, city, district }) => {
+                  setForm((f) => {
+                    const next = { ...f };
+                    if (pincode && /^\d{6}$/.test(String(pincode).trim())) {
+                      next.pincode = String(pincode).trim();
+                    } else if (f.pincode && !/^\d{6}$/.test(String(f.pincode).trim())) {
+                      next.pincode = "";
+                    }
+                    if (city && typeof city === "string" && city.trim() && !/^\d{6}$/.test(city.trim())) {
+                      next.city = city.trim();
+                    }
+                    if (district && typeof district === "string" && district.trim()) {
+                      next.district = district.trim();
+                    }
+                    return next;
+                  });
                 }}
               />
             )}

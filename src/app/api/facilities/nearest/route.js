@@ -14,9 +14,14 @@ export async function GET(request) {
     const district = searchParams.get("district");
     const city = searchParams.get("city");
 
+    const isDropPin =
+      searchParams.get("is_drop_pin") === "true" ||
+      searchParams.get("drop_pin") === "true" ||
+      (Boolean(lat && lon) && !pincode && !district);
+
     const facilities = (await getFacilities().catch(() => [])) || [];
     const callerLoc = resolveCallerLocation(
-      { latitude: lat, longitude: lon, pincode, district, city },
+      { latitude: lat, longitude: lon, pincode, district, city, isDroppedPin: isDropPin },
       facilities
     );
 
@@ -31,7 +36,8 @@ export async function GET(request) {
       ? searchParams.get("weekend") === "true"
       : null;
 
-    const nearest = rankNearestFacilities(callerLoc, facilities, 6, isSevere, isWeekendParam);
+    const limitParam = parseInt(searchParams.get("limit") || "50", 10);
+    const nearest = rankNearestFacilities(callerLoc, facilities, limitParam, isSevere, isWeekendParam);
 
     return NextResponse.json({
       resolved_location: callerLoc,
