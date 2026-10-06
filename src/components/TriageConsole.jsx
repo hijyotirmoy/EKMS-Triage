@@ -103,9 +103,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         if (parsed.result) {
           const res = parsed.result;
           const caseTarget = res.case_ref || res.case_id || res.id;
-          if (caseTarget && !res.is_forwarded) {
+          if (!res.is_forwarded) {
             try {
-              const forwardStored = sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`);
+              const forwardStored =
+                (caseTarget && (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))) ||
+                sessionStorage.getItem("ekms_active_case_forwarded") ||
+                localStorage.getItem("ekms_active_case_forwarded");
               if (forwardStored) {
                 const fParsed = JSON.parse(forwardStored);
                 if (fParsed.is_forwarded) {
@@ -1013,9 +1016,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
                 callerHistory={callerHistory}
                 onForwardSuccess={(statusData) => {
                   setResult((prev) => {
-                    if (!prev) return prev;
+                    const base = prev || {};
                     return {
-                      ...prev,
+                      ...base,
                       is_forwarded: true,
                       forwarded_at: statusData?.timestamp || new Date().toISOString(),
                       dispatch_id: statusData?.dispatchId,

@@ -480,13 +480,12 @@ export function CaseHandoverForwarding({
 
   useEffect(() => {
     const caseTarget = caseRef || result?.case_ref || result?.case_id || result?.id;
-    if (!caseTarget) return;
 
     if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
       setSentStatus({
         teamName: result.forwarded_to || "ESIS Dispensary",
         shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : "Facility"),
-        dispatchId: result.dispatch_id || `DISP-${String(caseTarget).slice(-6)}`,
+        dispatchId: result.dispatch_id || `DISP-${String(caseTarget || "SENT").slice(-6)}`,
         timestamp: result.forwarded_at ? formatTriageDate(result.forwarded_at) : "Recently",
         location: result.intake?.landmark || "",
       });
@@ -495,7 +494,9 @@ export function CaseHandoverForwarding({
 
     try {
       const stored = typeof window !== "undefined"
-        ? (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))
+        ? ((caseTarget && (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))) ||
+           sessionStorage.getItem("ekms_active_case_forwarded") ||
+           localStorage.getItem("ekms_active_case_forwarded"))
         : null;
       if (stored) {
         const parsed = JSON.parse(stored);
@@ -503,7 +504,7 @@ export function CaseHandoverForwarding({
           setSentStatus({
             teamName: parsed.forwarded_to || "ESIS Dispensary",
             shortName: parsed.forwarded_short_name || "Facility",
-            dispatchId: parsed.dispatch_id || `DISP-${String(caseTarget).slice(-6)}`,
+            dispatchId: parsed.dispatch_id || `DISP-${String(caseTarget || "SENT").slice(-6)}`,
             timestamp: parsed.forwarded_at ? formatTriageDate(parsed.forwarded_at) : "Recently",
             location: "",
           });
@@ -511,15 +512,17 @@ export function CaseHandoverForwarding({
         }
       }
 
-      const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseTarget) || String(c.id) === String(caseTarget));
-      if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
-        setSentStatus({
-          teamName: cached.forwarded_to || "ESIS Dispensary",
-          shortName: cached.forwarded_short_name || "Facility",
-          dispatchId: cached.dispatch_id || `DISP-${String(caseTarget).slice(-6)}`,
-          timestamp: cached.forwarded_at ? formatTriageDate(cached.forwarded_at) : "Recently",
-          location: cached.intake?.landmark || "",
-        });
+      if (caseTarget) {
+        const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseTarget) || String(c.id) === String(caseTarget));
+        if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
+          setSentStatus({
+            teamName: cached.forwarded_to || "ESIS Dispensary",
+            shortName: cached.forwarded_short_name || "Facility",
+            dispatchId: cached.dispatch_id || `DISP-${String(caseTarget).slice(-6)}`,
+            timestamp: cached.forwarded_at ? formatTriageDate(cached.forwarded_at) : "Recently",
+            location: cached.intake?.landmark || "",
+          });
+        }
       }
     } catch (e) {}
   }, [result, caseRef]);
@@ -786,6 +789,11 @@ ${historySection}`;
         } catch (e) {}
       }
 
+      try {
+        sessionStorage.setItem("ekms_active_case_forwarded", JSON.stringify(forwardPayload));
+        localStorage.setItem("ekms_active_case_forwarded", JSON.stringify(forwardPayload));
+      } catch (e) {}
+
       setIsSending(false);
       setModalOpen(false);
       toast.success(
@@ -848,12 +856,23 @@ ${historySection}`;
           <button
             type="button"
             onClick={handleOpenModal}
-            className={`w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs sm:text-sm font-bold text-white transition-all shadow-md active:scale-98 cursor-pointer ${getTeamButtonClass(
-              selectedTeam.id
-            )}`}
+            className={`w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs sm:text-sm font-bold text-white transition-all shadow-md active:scale-98 cursor-pointer ${
+              sentStatus
+                ? "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-500/40"
+                : getTeamButtonClass(selectedTeam.id)
+            }`}
           >
-            <Send className="h-4 w-4" />
-            <span>Send clinical summary to {selectedTeam.shortName}</span>
+            {sentStatus ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-200" />
+                <span>✓ Forwarded to {sentStatus.shortName} (Click to re-send)</span>
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4 shrink-0" />
+                <span>Send clinical summary to {selectedTeam.shortName}</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -881,6 +900,11 @@ ${historySection}`;
                   <span className="text-sm sm:text-base font-bold text-foreground truncate">
                     Verify &amp; send clinical summary
                   </span>
+                  {sentStatus && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/60 shadow-2xs shrink-0">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" /> Forwarded
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
@@ -1277,12 +1301,16 @@ ${historySection}`;
                 >
                   {isSending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : sentStatus ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-200" />
                   ) : (
                     <Send className="h-4 w-4" />
                   )}
                   <span>
                     {isSending
                       ? "Transmitting..."
+                      : sentStatus
+                      ? `Re-send / Update to ${selectedTeam.shortName}`
                       : `Confirm & Send to ${selectedTeam.shortName}`}
                   </span>
                 </button>

@@ -1510,17 +1510,45 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     (prevState.duration && !/^(not|unknown|pending|unspecified)/i.test(String(prevState.duration).trim()) && prevState.duration !== "Reported today")
   );
 
-  // If raw probing question is empty, ask caller to describe where they feel pain/discomfort and their symptoms
+  const hasDescribedComplaint = Boolean(
+    (prevState.suspectedCondition && !/^(General Medical Evaluation|Under Assessment|Pending|Not specified)$/i.test(String(prevState.suspectedCondition).trim())) ||
+    askedQuestionsList.length > 0 ||
+    userTurnsCount > 1 ||
+    /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|hand|arm|wrist|leg|knee|foot|fever|bukhar|chest|stomach|cough|cut|bleed)\b/i.test(allContext)
+  );
+
+  // If raw probing question is empty or missing:
   if (!probingQuestion || probingQuestion.trim().length < 5) {
     const rawCond = raw.suspectedCondition || prevState.suspectedCondition || prevState.symptom || "your symptoms";
     const displayComplaint = sanitizeSymptomOrCondition(rawCond, cleanInput) || "your symptoms";
-    probingQuestion = `Ask the IP: "Could you please describe where you are feeling pain or discomfort with ${displayComplaint} and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")`;
-    raw.suggestedAnswers = [
-      "Severe pain in body / limbs",
-      "Chest discomfort or breathing difficulty",
-      "Stomach pain / nausea / digestive distress",
-      "Headache, dizziness, or fever",
-    ];
+    if (hasDescribedComplaint && displayComplaint !== "your symptoms") {
+      if (!askedQuestionsList.some((q) => /\b(daily activities|normally|move|affect|chalne|hilane|gardan)\b/i.test(q))) {
+        probingQuestion = `Ask the IP: "Are you able to go about your daily activities normally with ${displayComplaint}, or is the discomfort restricting your movement?" (Hinglish: "Kya aap is ${displayComplaint} ke saath normal kaam kar pa rahe hain, ya hilne-dulne me takleef ho rahi hai?")`;
+        raw.suggestedAnswers = [
+          "Can manage daily activities with mild discomfort",
+          "Movement is restricted due to pain",
+          "Unable to work or rest comfortably",
+          "Need doctor examination today",
+        ];
+      } else {
+        raw.isReadyForSummary = true;
+        probingQuestion = `Ask the IP: "We have noted all details of your ${displayComplaint}. Please confirm your location so I can guide you to the nearest ESIS Dispensary or facility." (Hinglish: "Humne aapki ${displayComplaint} note kar li hai. Kripya apna pata batayein taaki sahi suvidha tak margdarshan kiya ja sake.")`;
+        raw.suggestedAnswers = [
+          "Please guide me to the nearest healthcare facility",
+          "Will visit ESIS Dispensary during OPD hours",
+          "Connect me with the 104 tele-doctor",
+          "Need directions to ESIC Hospital",
+        ];
+      }
+    } else {
+      probingQuestion = `Ask the IP: "Could you please describe where you are feeling pain or discomfort and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")`;
+      raw.suggestedAnswers = [
+        "Severe pain in body / limbs",
+        "Chest discomfort or breathing difficulty",
+        "Stomach pain / nausea / digestive distress",
+        "Headache, dizziness, or fever",
+      ];
+    }
   }
 
   // 2. Check if the newly proposed question asks for duration, date, or time
@@ -1550,8 +1578,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     return false;
   });
 
-  // If candidate question is duplicate OR repeats asking for time/date when duration is already known:
-  if ((isCandidateAskingDuration && isDurationAlreadyKnown) || isDuplicateQuestion) {
+  const isAskingToDescribeSymptomAgain = /\b(where you are feeling|what exact symptoms|kahan dard|kya mukhya lakshan|describe where you are feeling|kahan takleef|kahan dard ya takleef|where are you feeling pain)\b/i.test(probingQuestion);
+
+  // If candidate question is duplicate OR repeats asking for time/date when duration is already known OR re-asks opening question when symptoms already reported:
+  if ((isCandidateAskingDuration && isDurationAlreadyKnown) || isDuplicateQuestion || (hasDescribedComplaint && isAskingToDescribeSymptomAgain)) {
     const alternativeQuestions = [
       {
         id: "associated_symptoms",
@@ -1902,7 +1932,15 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     allergies: detectedAllergies,
     medication: detectedMedications,
     medications: detectedMedications,
-    isReadyForSummary: Boolean(raw.isReadyForSummary || (history.length >= 6) || is104PhoneDoctor),
+    isReadyForSummary: Boolean(
+      raw.isReadyForSummary ||
+      userTurnsCount >= 3 ||
+      askedQuestionsList.length >= 3 ||
+      history.length >= 4 ||
+      ((askedQuestionsList.some((q) => /\b(move|walk|normally|daily activities|weight|turn head|stand|hilane|gardan)\b/i.test(q)) || severity === "High") &&
+       askedQuestionsList.some((q) => /\b(pre-existing|diabetes|high bp|asthma|blood pressure|comorbidit|pehle se)\b/i.test(q))) ||
+      is104PhoneDoctor
+    ),
     clinicalSummary: sanitizeSymptomOrCondition(
       raw.clinicalSummary ||
         `Caller presents with ${finalCondition || "symptoms"}. Evaluated Severity: ${severity}. Duration: ${duration}. Recommended Action: ${referralDestination || "Medical Evaluation"}.`,
@@ -3018,7 +3056,93 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
-  } else if (/\b(hand|hands|wrist|wrists|finger|fingers|palm|thumb|haath\b|hath\b|kalai\b|leg|legs|knee|knees|ankle|ankles|foot|feet|pair\b|taang\b|thigh|calf|calves|arm|arms|elbow|shoulder|bone|joint|joints|jod\b|back pain|kamar)\b/i.test(effectiveInput)) {
+  } else if (
+    /\b(neck|gardan|cervical|stiff neck|back pain|peeth|kamar|spine|reedh|vertebra)\b/i.test(effectiveInput) ||
+    /\b(neck|cervical|back pain|spine|stiff neck)\b/i.test(prevState.suspectedCondition || "")
+  ) {
+    const isNeck = /\b(neck|gardan|cervical|stiff neck)\b/i.test(effectiveInput) || /\b(neck|cervical|stiff neck)\b/i.test(prevState.suspectedCondition || "");
+    conditionLabel = isNeck ? "Neck Pain / Stiffness" : "Back & Spine Pain";
+
+    if (!hasAsked(["move", "normally", "turn your head", "stand up", "daily activities", "gardan", "hilane", "walk", "bend"])) {
+      currentStep = isNeck
+        ? {
+            title: "Neck Mobility & Severity Assessment",
+            question:
+              'Ask the IP: "Are you able to move your neck normally and go about your daily activities, or is the stiffness so severe that you cannot turn your head or stand up comfortably?" (Hinglish: "Kya aap apna sar/gardan normally hila pa rahe hain, ya akad aur dard itna zyada hai ki gardan ghumane me mushkil ho rahi hai?")',
+            options: [
+              "Can move neck but it hurts a bit / mild soreness",
+              "Cannot turn head due to sharp pain and stiffness",
+              "Severe stiffness with dizziness or headache",
+              "Manageable discomfort with light neck movements",
+            ],
+            severity: /cannot turn|severe|sharp|high|unbearable/i.test(cleanInput) ? "High" : "Moderate",
+          }
+        : {
+            title: "Spine & Mobility Assessment",
+            question:
+              'Ask the IP: "Are you able to stand and walk normally, or is the back pain severe enough that bending or sitting is difficult?" (Hinglish: "Kya aap normally khade ho kar chal pa rahe hain, ya kamar dard ki wajah se jhukne ya baithne me tez takleef hai?")',
+            options: [
+              "Can walk slowly with mild back stiffness",
+              "Severe back pain, difficult to stand or bend",
+              "Pain radiating down one leg / buttock",
+              "Manageable soreness after rest",
+            ],
+            severity: /cannot stand|severe|sharp|radiating/i.test(cleanInput) ? "High" : "Moderate",
+          };
+    } else if (!hasAsked(["radiat", "numbness", "tingling", "sunn", "jhanjhanahat", "fever", "bukhar", "spread", "phail"])) {
+      currentStep = isNeck
+        ? {
+            title: "Neurological & Radiation Screening",
+            question:
+              'Ask the IP: "Is the pain radiating down to your arms or fingers, or do you have any numbness, tingling, or fever with stiff neck?" (Hinglish: "Kya dard baazu ya ungliyon tak phail raha hai, ya sunn-pan, jhanjhanahat, ya gardan me akad ke saath bukhar hai?")',
+            options: [
+              "No radiating pain, numbness, or fever",
+              "Pain radiating down to shoulder or arm",
+              "Numbness / tingling in fingers",
+              "High fever with stiff neck (Urgent check)",
+            ],
+            severity: "Moderate",
+          }
+        : {
+            title: "Spine Neurological Screening",
+            question:
+              'Ask the IP: "Is there any numbness, tingling, or shooting electric-like pain travelling down your leg to your feet?" (Hinglish: "Kya kamar se pair tak sunn-pan, jhanjhanahat ya current jaisa dard ja raha hai?")',
+            options: [
+              "Shooting pain and tingling down one leg",
+              "Numbness around foot or toes",
+              "Local back soreness only, no radiating pain",
+              "Pain worsens when coughing or bending",
+            ],
+            severity: "Moderate",
+          };
+    } else if (!hasAsked(["jerk", "strain", "posture", "injury", "twist", "chot", "fall", "moch", "vajan"])) {
+      currentStep = {
+        title: "Mechanism & Onset Screening",
+        question:
+          'Ask the IP: "Did this pain start after a sudden jerk, awkward posture while sleeping, heavy lifting, or a fall/injury?" (Hinglish: "Kya yeh dard kisi jhatke, sone ke galat posture, bhari vajan uthane ya chot lagne ke baad shuru hua?")',
+        options: [
+          "Woke up with stiff neck / sleeping strain",
+          "Gradual muscle soreness from work or desk",
+          "Sudden jerk or sprain while working/lifting",
+          "After a slip, fall, or physical impact",
+        ],
+        severity: "Moderate",
+      };
+    } else {
+      currentStep = {
+        title: "Musculoskeletal Pain Impact & Medication",
+        question:
+          'Ask the IP: "Have you taken any pain reliever, or applied warm fomentation/balm, and did it provide relief?" (Hinglish: "Kya aapne dard ke liye koi davai li ya sikai ki hai, aur kya usse aaram mila?")',
+        options: [
+          "Applied balm/fomentation with mild relief",
+          "Took painkiller, still sore",
+          "Have not taken any medicines yet",
+          "Need doctor examination and prescription",
+        ],
+        severity: "Moderate",
+      };
+    }
+  } else if (/\b(hand|hands|wrist|wrists|finger|fingers|palm|thumb|haath\b|hath\b|kalai\b|leg|legs|knee|knees|ankle|ankles|foot|feet|pair\b|taang\b|thigh|calf|calves|arm|arms|elbow|shoulder|bone|joint|joints|jod\b)\b/i.test(effectiveInput)) {
     const isUpperLimb = /\b(hand|wrist|finger|palm|thumb|haath|kalai|arm|elbow|shoulder)\b/i.test(effectiveInput);
     if (/\b(wrist|kalai)\b/i.test(effectiveInput) && /\b(hand|haath)\b/i.test(effectiveInput)) {
       conditionLabel = "Hand & Wrist Pain";
@@ -3098,8 +3222,19 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   } else {
     // General Medical Complaint - Progressive 3-stage clinical inquiry
     conditionLabel = prevState.suspectedCondition || "General Medical Evaluation";
-    const alreadyDescribedSymptom = /\b(pain|dard|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|chest|stomach|chot|swelling)\b/i.test(cleanInput);
-    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"]) && !alreadyDescribedSymptom) {
+    const hasKnownCondition = Boolean(
+      (prevState.suspectedCondition && !/^(General Medical Evaluation|Under Assessment|Pending|Not specified)$/i.test(String(prevState.suspectedCondition).trim())) ||
+      (conditionLabel && !/^(General Medical Evaluation|Under Assessment)$/i.test(conditionLabel))
+    );
+    const callerAlreadyReportedSymptoms = Boolean(
+      hasKnownCondition ||
+      askedQuestions.length > 0 ||
+      history.length > 0 ||
+      /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(allCallerText) ||
+      /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(cleanInput)
+    );
+
+    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"]) && !callerAlreadyReportedSymptoms) {
       currentStep = {
         title: "Main Complaint & Specific Symptoms",
         question: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")',
@@ -3313,6 +3448,33 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const fallbackAllergies = extractAllergiesFromText(effectiveInput, prevState.allergies);
   const fallbackMedications = extractMedicationsFromText(effectiveInput, prevState.medications || prevState.medication);
 
+  const hasAnsweredKeyQuestionsFallback =
+    (hasAsked(["move", "walk", "normally", "daily activities", "weight", "hilane", "turn your head", "gardan"]) || isSevere) &&
+    hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "blood pressure", "purani bimari", "comorbidit"]);
+
+  const isReadyForSummaryFallback = Boolean(
+    isSevere ||
+    isLifeThreateningCrisis ||
+    hasAnsweredKeyQuestionsFallback ||
+    userTurnsCountFallback >= 3 ||
+    askedQuestions.length >= 3 ||
+    history.length >= 4
+  );
+
+  if (isReadyForSummaryFallback && !isLifeThreateningCrisis && !isSevere) {
+    currentStep = {
+      title: "Triage Evaluation Complete",
+      question: `Ask the IP: "We have carefully noted all your symptoms and medical details regarding ${conditionLabel}. Please confirm your location so I can direct you to the nearest ESIS Dispensary for doctor consultation and medicines." (Hinglish: "Humne aapki ${conditionLabel} aur medical details note kar li hain. Kripya apna address/landmark batayein taaki najdeeki ESIS Dispensary ka margdarshan kiya ja sake.")`,
+      options: [
+        "Please guide me to the nearest ESIS Dispensary",
+        "Connect me with 104 tele-doctor",
+        "Need directions to ESIC Hospital",
+        "Thank you, noted",
+      ],
+      severity: "Moderate",
+    };
+  }
+
   let probingText = currentStep.question;
   if (!probingText.startsWith("Ask the IP:")) {
     probingText = `Ask the IP: "${probingText}"`;
@@ -3339,7 +3501,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     allergies: fallbackAllergies,
     medication: fallbackMedications,
     medications: fallbackMedications,
-    isReadyForSummary: history.length >= 6 || isSevere,
+    isReadyForSummary: isReadyForSummaryFallback,
     clinicalSummary: `Patient presents with ${conditionLabel}. Evaluated severity: ${severity}. Duration: ${duration}. Recommended Routing: ${referralDestination}.`,
   };
 }

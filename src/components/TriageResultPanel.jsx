@@ -520,7 +520,38 @@ export const TriageResultPanel = ({
   const secondaryDirective =
     ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
 
-  const [forwardedStatus, setForwardedStatus] = useState(null);
+  const [forwardedStatus, setForwardedStatus] = useState(() => {
+    if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
+      const caseRef = result?.case_ref || result?.case_id || result?.id;
+      return {
+        shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (result.forwarded_to?.includes("104") ? "104 Health Helpline" : (result.forwarded_to?.includes("108") ? "108 Ambulance" : result.forwarded_to))) || "Facility",
+        teamName: result.forwarded_to || "ESIS Dispensary",
+        dispatchId: result.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
+        timestamp: result.forwarded_at || new Date().toISOString(),
+      };
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const caseRef = result?.case_ref || result?.case_id || result?.id;
+        const stored =
+          (caseRef && (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))) ||
+          sessionStorage.getItem("ekms_active_case_forwarded") ||
+          localStorage.getItem("ekms_active_case_forwarded");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.is_forwarded) {
+            return {
+              shortName: parsed.forwarded_short_name || "Facility",
+              teamName: parsed.forwarded_to || "ESIS Dispensary",
+              dispatchId: parsed.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
+              timestamp: parsed.forwarded_at || new Date().toISOString(),
+            };
+          }
+        }
+      } catch (e) {}
+    }
+    return null;
+  });
 
   useEffect(() => {
     const caseRef = result?.case_ref || result?.case_id || result?.id;
@@ -534,38 +565,44 @@ export const TriageResultPanel = ({
       return;
     }
 
-    if (caseRef) {
+    if (typeof window !== "undefined") {
       try {
-        const stored = typeof window !== "undefined"
-          ? (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))
-          : null;
+        const stored =
+          (caseRef && (sessionStorage.getItem(`ekms_forwarded_${caseRef}`) || localStorage.getItem(`ekms_forwarded_${caseRef}`))) ||
+          sessionStorage.getItem("ekms_active_case_forwarded") ||
+          localStorage.getItem("ekms_active_case_forwarded");
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed.is_forwarded) {
             setForwardedStatus({
               shortName: parsed.forwarded_short_name || "Facility",
               teamName: parsed.forwarded_to || "ESIS Dispensary",
-              dispatchId: parsed.dispatch_id,
-              timestamp: parsed.forwarded_at,
+              dispatchId: parsed.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
+              timestamp: parsed.forwarded_at || new Date().toISOString(),
             });
             return;
           }
         }
 
-        const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
-        if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
-          setForwardedStatus({
-            shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
-            teamName: cached.forwarded_to || "ESIS Dispensary",
-            dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
-            timestamp: cached.forwarded_at,
-          });
-          return;
+        if (caseRef) {
+          const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
+          if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
+            setForwardedStatus({
+              shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
+              teamName: cached.forwarded_to || "ESIS Dispensary",
+              dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
+              timestamp: cached.forwarded_at,
+            });
+            return;
+          }
         }
       } catch (e) {}
     }
 
-    setForwardedStatus(null);
+    // Only clear if result is explicitly cleared/null
+    if (!result) {
+      setForwardedStatus(null);
+    }
   }, [result]);
 
   useEffect(() => {
@@ -785,6 +822,37 @@ export const TriageResultPanel = ({
     ""
   );
 
+  const forwardedTeamStr = String(
+    forwardedStatus?.shortName ||
+    forwardedStatus?.teamName ||
+    result?.forwarded_short_name ||
+    result?.forwarded_to ||
+    ""
+  ).toLowerCase();
+
+  const isCaseForwarded = Boolean(
+    forwardedStatus ||
+    result?.is_forwarded ||
+    result?.forwarded_at ||
+    result?.dispatch_id ||
+    result?.status === "forwarded"
+  );
+
+  const secondaryStr = String(secondaryReferralDest || "").toLowerCase();
+  const isSentToSecondary = Boolean(
+    isCaseForwarded &&
+    secondaryStr &&
+    (
+      (secondaryStr.includes("104") && forwardedTeamStr.includes("104")) ||
+      (secondaryStr.includes("108") && forwardedTeamStr.includes("108")) ||
+      (secondaryStr.includes("hospital") && forwardedTeamStr.includes("hospital")) ||
+      (secondaryStr.includes("dispensary") && forwardedTeamStr.includes("dispensary")) ||
+      (secondaryStr.includes("tie") && forwardedTeamStr.includes("tie"))
+    )
+  );
+
+  const isSentToPrimary = Boolean(isCaseForwarded && !isSentToSecondary);
+
   return (
     <div className="space-y-5 rise w-full max-w-full min-w-0" data-testid="triage-result">
       <div
@@ -896,7 +964,7 @@ export const TriageResultPanel = ({
                     Recommended Call Referral 01 (Primary Immediate Destination)
                   </span>
                   <div className="flex items-center gap-1.5">
-                    {Boolean(forwardedStatus && !String(forwardedStatus?.shortName || "").toLowerCase().includes(secondaryReferralDest.toLowerCase().split(" ")[0])) && (
+                    {Boolean(isSentToPrimary) && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
                         <CheckCircle2 className="h-3 w-3" /> Forwarded
                       </span>
@@ -925,7 +993,7 @@ export const TriageResultPanel = ({
                       Recommended Call Referral 02 (Co-Occurring / Secondary Referral)
                     </span>
                     <div className="flex items-center gap-1.5">
-                      {Boolean(forwardedStatus && String(forwardedStatus?.shortName || "").toLowerCase().includes(secondaryReferralDest.toLowerCase().split(" ")[0])) && (
+                      {Boolean(isSentToSecondary) && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
                           <CheckCircle2 className="h-3 w-3" /> Forwarded
                         </span>
