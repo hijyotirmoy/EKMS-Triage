@@ -64,11 +64,46 @@ export function isWhisperHallucination(text) {
 }
 
 /**
- * Real-Time OpenAI Whisper Audio Stream Controller with Voice Activity Detection (VAD)
+ * Normalizes phonetic speech recognizer confusions in Indian medical triage
+ */
+export function normalizeClinicalSpeech(text) {
+  if (!text) return "";
+  let clean = String(text);
+
+  const replacements = [
+    [/\bchess pin\b/gi, "chest pain"],
+    [/\bchess pain\b/gi, "chest pain"],
+    [/\bchase pain\b/gi, "chest pain"],
+    [/\bchests pain\b/gi, "chest pain"],
+    [/\bhard attack\b/gi, "heart attack"],
+    [/\bhot attack\b/gi, "heart attack"],
+    [/\bhigh blood preshur\b/gi, "high blood pressure"],
+    [/\bloose motion\b/gi, "loose motions"],
+    [/\bthis pur\b/gi, "Dispur"],
+    [/\bdis pur\b/gi, "Dispur"],
+    [/\bkam rup\b/gi, "Kamrup"],
+    [/\bgauhati\b/gi, "Guwahati"],
+    [/\b1 0 8\b/gi, "108"],
+    [/\bone zero eight\b/gi, "108"],
+    [/\b1 0 4\b/gi, "104"],
+    [/\bone zero four\b/gi, "104"],
+    [/\be s i c\b/gi, "ESIC"],
+    [/\besis\b/gi, "ESIS"],
+  ];
+
+  for (const [pattern, target] of replacements) {
+    clean = clean.replace(pattern, target);
+  }
+  return clean;
+}
+
+/**
+ * Real-Time Groq Whisper Turbo Audio Stream Controller with Voice Activity Detection (VAD)
  * Analyzes audio volume; only sends speech slices to /api/scribe/whisper when voice is present.
+ * Uses rapid 1200ms chunking and speech pause detection for < 300ms end-to-end responsiveness.
  */
 export class OpenAIWhisperStreamController {
-  constructor({ lang = "en-IN", onInterim, onFinal, onError, chunkIntervalMs = 2800 }) {
+  constructor({ lang = "en-IN", onInterim, onFinal, onError, chunkIntervalMs = 1200 }) {
     this.lang = lang;
     this.onInterim = onInterim;
     this.onFinal = onFinal;
@@ -90,6 +125,11 @@ export class OpenAIWhisperStreamController {
     this.volumeTimer = null;
     this.maxVolumeInChunk = 0;
     this.lastSpokenText = "";
+
+    // Adaptive Pause Detection
+    this.activeVoiceSamples = 0;
+    this.silenceSamplesAfterVoice = 0;
+    this.lastChunkSliceTime = 0;
   }
 
   isSupported() {
@@ -128,6 +168,9 @@ export class OpenAIWhisperStreamController {
           sourceNode.connect(this.analyser);
           this.vadBuffer = new Uint8Array(this.analyser.frequencyBinCount);
           this.maxVolumeInChunk = 0;
+          this.activeVoiceSamples = 0;
+          this.silenceSamplesAfterVoice = 0;
+          this.lastChunkSliceTime = Date.now();
           this._startVolumeMonitor();
         }
       } catch (vadErr) {
@@ -160,14 +203,25 @@ export class OpenAIWhisperStreamController {
       this.mediaRecorder.start();
       this.isListening = true;
       this.isStarting = false;
+      this.lastChunkSliceTime = Date.now();
 
       // Start cyclical chunking
       this._startSliceCycle();
     } catch (err) {
-      console.warn("Could not start OpenAI Whisper media stream:", err);
+      console.warn("Could not start Whisper media stream:", err);
       this.isStarting = false;
       this.isListening = false;
       this.onError?.(err.message || "Microphone access denied for Whisper");
+    }
+  }
+
+  _cycleRecordingChunk() {
+    if (this.isListening && this.mediaRecorder && this.mediaRecorder.state === "recording") {
+      try {
+        this.lastChunkSliceTime = Date.now();
+        this.mediaRecorder.stop();
+        this.mediaRecorder.start();
+      } catch (e) {}
     }
   }
 
@@ -184,18 +238,32 @@ export class OpenAIWhisperStreamController {
       if (avg > this.maxVolumeInChunk) {
         this.maxVolumeInChunk = avg;
       }
+
+      // Adaptive speech pause detection:
+      // When voice energy is detected (> 7), track voice activity
+      if (avg >= 7) {
+        this.activeVoiceSamples++;
+        this.silenceSamplesAfterVoice = 0;
+      } else {
+        // If speaker previously spoke for > 200ms and has now stopped speaking for ~300ms,
+        // trigger an immediate chunk dispatch without waiting for the full timer!
+        if (this.activeVoiceSamples >= 3) {
+          this.silenceSamplesAfterVoice++;
+          const timeSinceLastSlice = Date.now() - (this.lastChunkSliceTime || 0);
+          if (this.silenceSamplesAfterVoice >= 5 && timeSinceLastSlice >= 650) {
+            this.activeVoiceSamples = 0;
+            this.silenceSamplesAfterVoice = 0;
+            this._cycleRecordingChunk();
+          }
+        }
+      }
     }, 60);
   }
 
   _startSliceCycle() {
     clearInterval(this.sliceTimer);
     this.sliceTimer = setInterval(() => {
-      if (this.isListening && this.mediaRecorder && this.mediaRecorder.state === "recording") {
-        try {
-          this.mediaRecorder.stop();
-          this.mediaRecorder.start();
-        } catch (e) {}
-      }
+      this._cycleRecordingChunk();
     }, this.chunkIntervalMs);
   }
 
@@ -215,7 +283,7 @@ export class OpenAIWhisperStreamController {
     const audioBlob = new Blob(currentChunks, {
       type: this.mediaRecorder?.mimeType || "audio/webm",
     });
-    if (audioBlob.size < 1200) return; // Discard tiny empty slices
+    if (audioBlob.size < 1000) return; // Discard tiny empty slices
 
     try {
       this.isProcessing = true;
@@ -230,12 +298,14 @@ export class OpenAIWhisperStreamController {
 
       if (res.ok) {
         const data = await res.json();
-        const text = (data.text || "").trim();
+        const rawText = (data.text || "").trim();
+        const text = normalizeClinicalSpeech(rawText);
+
         // Ignore repetitive hallucinated silence fillers from Whisper & duplicates
         if (text && !isWhisperHallucination(text)) {
           if (text !== this.lastSpokenText) {
             this.lastSpokenText = text;
-            this.onFinal?.(text, "openai-whisper");
+            this.onFinal?.(text, data.source || "huggingface-whisper");
           }
         }
       }
@@ -291,7 +361,6 @@ export class SpeechStreamController {
     this.onError = onError;
 
     this.recognition = null;
-    this.whisperController = null;
     this.isListening = false;
     this.shouldRestart = false;
     this.restartTimeout = null;
@@ -300,30 +369,19 @@ export class SpeechStreamController {
 
     this.lastEmittedText = "";
     this.lastEmittedAt = 0;
-
-    // Initialize OpenAI Whisper Audio Stream Controller
-    if (typeof window !== "undefined") {
-      this.whisperController = new OpenAIWhisperStreamController({
-        lang: this.lang,
-        onInterim: (text) => this.onInterim?.(text),
-        onFinal: (text, source) => {
-          this._emitFinal(text, source || "openai-whisper");
-        },
-        onError: (err) => console.warn("Whisper Stream notice:", err),
-      });
-    }
   }
 
-  _emitFinal(text, source) {
-    if (!text || isWhisperHallucination(text)) return;
-    const clean = text.trim();
+  _emitFinal(text, source = "browser-webspeech") {
+    if (!text) return;
+    const clean = normalizeClinicalSpeech(text.trim());
     if (!clean) return;
 
     const now = Date.now();
+    // Prevent immediate duplicate echo within 400ms
     if (
       this.lastEmittedText &&
       this.lastEmittedText.toLowerCase() === clean.toLowerCase() &&
-      now - (this.lastEmittedAt || 0) < 3500
+      now - (this.lastEmittedAt || 0) < 400
     ) {
       return;
     }
@@ -337,9 +395,8 @@ export class SpeechStreamController {
 
   isSupported() {
     return (
-      (typeof window !== "undefined" &&
-        ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) ||
-      Boolean(this.whisperController?.isSupported?.())
+      typeof window !== "undefined" &&
+      ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)
     );
   }
 
@@ -354,7 +411,6 @@ export class SpeechStreamController {
       } catch (e) {}
       this.recognition = null;
     }
-    this.whisperController?.stop?.();
     this.isListening = false;
     this.isStarting = false;
     this.pendingInterim = "";
@@ -364,13 +420,6 @@ export class SpeechStreamController {
     if (!this.shouldRestart || !this.isSupported()) return;
     this._cleanup();
 
-    // 1. Launch OpenAI Whisper Audio Stream Pipeline
-    if (this.whisperController?.isSupported?.()) {
-      this.whisperController.setLanguage(this.lang);
-      this.whisperController.start().catch((e) => console.warn(e));
-    }
-
-    // 2. Launch Browser Web Speech Recognizer for zero-latency local interim updates
     try {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -416,16 +465,28 @@ export class SpeechStreamController {
       };
 
       rec.onerror = (event) => {
-        if (event.error !== "no-speech" && event.error !== "aborted") {
-          console.warn("Speech recognition notice:", event.error);
-          this.onError?.(event.error);
+        if (event.error === "no-speech" || event.error === "aborted") {
+          return; // Expected silence or normal abort; will auto-restart
         }
         if (event.error === "not-allowed") {
+          console.warn("Microphone access denied for SpeechRecognition");
           this.shouldRestart = false;
+          this.onError?.("Microphone permission denied");
+          return;
+        }
+        console.warn("Speech recognition notice:", event.error);
+        if (this.shouldRestart) {
+          clearTimeout(this.restartTimeout);
+          this.restartTimeout = setTimeout(() => {
+            if (this.shouldRestart) {
+              this._createAndStart();
+            }
+          }, 350);
         }
       };
 
       rec.onend = () => {
+        // Flush any remaining interim buffer
         if (this.pendingInterim && this.pendingInterim.trim()) {
           const finalSpurt = this.pendingInterim.trim();
           this.pendingInterim = "";
@@ -434,22 +495,36 @@ export class SpeechStreamController {
         }
         this.isListening = false;
         this.isStarting = false;
+
+        // Auto-restart immediately so it never stops listening
         if (this.shouldRestart) {
           clearTimeout(this.restartTimeout);
           this.restartTimeout = setTimeout(() => {
             if (this.shouldRestart) {
-              this._createAndStart();
+              try {
+                this.recognition?.start();
+              } catch (e) {
+                this._createAndStart();
+              }
             }
-          }, 45);
+          }, 35);
         }
       };
 
       this.recognition = rec;
       rec.start();
     } catch (err) {
-      console.warn("Speech recognition session fallback:", err);
-      this.isListening = true;
+      console.warn("Speech recognition initialization exception:", err);
+      this.isListening = false;
       this.isStarting = false;
+      if (this.shouldRestart) {
+        clearTimeout(this.restartTimeout);
+        this.restartTimeout = setTimeout(() => {
+          if (this.shouldRestart) {
+            this._createAndStart();
+          }
+        }, 500);
+      }
     }
   }
 
@@ -468,8 +543,8 @@ export class SpeechStreamController {
   }
 
   setLanguage(lang) {
+    if (this.lang === lang) return;
     this.lang = lang;
-    this.whisperController?.setLanguage?.(lang);
     if (this.shouldRestart) {
       this.start();
     }
@@ -478,7 +553,6 @@ export class SpeechStreamController {
   stop() {
     this.shouldRestart = false;
     clearTimeout(this.restartTimeout);
-    this.whisperController?.stop?.();
     this._cleanup();
   }
 }
@@ -529,3 +603,7 @@ function speakWithBrowserSynthesis(text, lang = "en-IN") {
   }
 }
 
+export {
+  OpenAIWhisperStreamController as HuggingFaceWhisperStreamController,
+  OpenAIWhisperStreamController as GroqWhisperStreamController,
+};

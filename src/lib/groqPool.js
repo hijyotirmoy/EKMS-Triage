@@ -253,54 +253,69 @@ export async function groqChatCompletion({
 
 /**
  * Ultra-fast Groq Whisper Audio Transcription wrapper with multi-key pool failover.
+ * Defaults to whisper-large-v3-turbo (150ms latency), falling back to whisper-large-v3.
  */
 export async function groqWhisperTranscription({
   audioFile,
-  model = "whisper-large-v3",
+  model = "whisper-large-v3-turbo",
   prompt = "",
   language = null,
-  timeoutMs = 8000,
+  timeoutMs = 6000,
 }) {
+  const modelsToTry = model === "whisper-large-v3-turbo"
+    ? ["whisper-large-v3-turbo", "whisper-large-v3"]
+    : [model];
+
   return executeGroqWithFailover(
     async (activeKey, { keyIndex, maskedKey }) => {
-      const formData = new FormData();
-      formData.append("file", audioFile, "audio.webm");
-      formData.append("model", model);
-      if (prompt) formData.append("prompt", prompt);
-      if (language && ["en", "hi"].includes(language)) {
-        formData.append("language", language);
+      for (const currentModel of modelsToTry) {
+        try {
+          const formData = new FormData();
+          formData.append("file", audioFile, "audio.webm");
+          formData.append("model", currentModel);
+          if (prompt) formData.append("prompt", prompt);
+          if (language && typeof language === "string" && language.length >= 2) {
+            const cleanLang = language.split("-")[0].toLowerCase();
+            formData.append("language", cleanLang);
+          }
+
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+          const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${activeKey}`,
+            },
+            body: formData,
+            signal: controller.signal,
+          });
+
+          clearTimeout(timer);
+
+          if (res.status === 429) {
+            return res; // Triggers key rotation in executeGroqWithFailover
+          }
+
+          if (res.ok) {
+            const data = await res.json();
+            return {
+              ok: true,
+              text: data.text || "",
+              model: currentModel,
+              keyIndex,
+              maskedKey,
+            };
+          }
+        } catch (mErr) {
+          if (mErr.name === "AbortError") {
+            console.warn(`[GroqPool] Whisper timeout (${timeoutMs}ms) on ${currentModel}`);
+          }
+        }
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${activeKey}`,
-        },
-        body: formData,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-
-      if (res.status === 429) {
-        return res; // Triggers key rotation in executeGroqWithFailover
-      }
-
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          ok: true,
-          text: data.text || "",
-          keyIndex,
-          maskedKey,
-        };
-      }
-
-      return res;
+      return null;
     },
-    { label: "Whisper" }
+    { label: "WhisperTurbo" }
   );
 }

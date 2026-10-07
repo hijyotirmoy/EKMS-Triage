@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { groqWhisperTranscription } from "@/lib/groqPool";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -60,9 +59,9 @@ function scrubWhisperHallucinations(rawText) {
 }
 
 /**
- * OpenAI Whisper Audio Transcription Flow
- * Seamlessly transcribes audio chunks from the client using OpenAI Whisper (whisper-1).
- * Features automatic high-speed fallback to Groq Whisper Large V3 if OpenAI quota is exhausted or offline.
+ * Audio Transcription using Hugging Face Whisper Large Models
+ * Models: openai/whisper-large-v3-turbo, openai/whisper-large-v3
+ * Groq is exclusively reserved for clinical triage and LLM chat; voice-to-text uses Hugging Face.
  */
 export async function POST(request) {
   try {
@@ -86,24 +85,75 @@ export async function POST(request) {
       );
     }
 
+    const hfKey =
+      process.env.HUGGINGFACE_API_KEY ||
+      process.env.HF_TOKEN ||
+      process.env.HUGGING_FACE_TOKEN ||
+      process.env.NEXT_PUBLIC_HUGGINGFACE_API_KEY;
+
     const openAiKey =
       process.env.OPENAI_API_KEY ||
       process.env.NEXT_PUBLIC_OPENAI_API_KEY;
 
-    const groqKey =
-      process.env.GROQ_API_KEY ||
-      process.env.NEXT_PUBLIC_GROQ_API_KEY;
+    // Convert incoming file to audio buffer
+    const audioBytes = await audioFile.arrayBuffer();
+    const audioBuffer = Buffer.from(audioBytes);
+    const audioMime = audioFile.type || "audio/webm";
 
-    // Default clinical prompt to boost medical and Indian vernacular recognition
-    const medicalVocabularyPrompt =
-      customPrompt ||
-      "ESIC / ESIS Indian medical triage call consultation. Common terms: chest pain, seene mein dard, vomiting, ulti, bukhar, fever, chakkar, weakness, kamzori, khansi, cough, medicine, dawai, 104, 108 ambulance, hospital, dispensary, prescription, suicide, depression, accident, casualty, fracture.";
+    // 1. PRIMARY: Hugging Face Whisper Large Model
+    if (hfKey) {
+      const hfModels = ["openai/whisper-large-v3-turbo", "openai/whisper-large-v3"];
 
-    const isoLang = lang && lang !== "auto" ? lang.split("-")[0].toLowerCase() : null;
+      for (const hfModel of hfModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-    // 1. Try OpenAI Whisper (whisper-1)
+          const hfRes = await fetch(
+            `https://router.huggingface.co/hf-inference/models/${hfModel}`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${hfKey.trim()}`,
+                "Content-Type": audioMime,
+                "x-wait-for-model": "true",
+                "x-use-cache": "false",
+              },
+              body: audioBuffer,
+              signal: controller.signal,
+            }
+          );
+
+          clearTimeout(timeoutId);
+
+          if (hfRes.ok) {
+            const result = await hfRes.json();
+            const rawText = result.text || "";
+            const cleanText = scrubWhisperHallucinations(rawText.trim());
+            return NextResponse.json({
+              text: cleanText,
+              source: "huggingface-whisper",
+              model: hfModel,
+            });
+          } else {
+            const errBody = await hfRes.text();
+            console.warn(`Hugging Face (${hfModel}) status ${hfRes.status}:`, errBody);
+          }
+        } catch (hfErr) {
+          console.warn(`Hugging Face fetch error on ${hfModel}:`, hfErr.message);
+        }
+      }
+    }
+
+    // 2. SECONDARY FALLBACK: OpenAI Whisper (whisper-1) if configured
     if (openAiKey) {
       try {
+        const medicalVocabularyPrompt =
+          customPrompt ||
+          "ESIC Indian emergency medical triage consultation. Terms: chest pain, seene mein dard, vomiting, ulti, bukhar, sir dard, chakkar, kamzori, Guwahati, Dispur, Beltola, 108 ambulance, 104 helpline.";
+
+        const isoLang = lang && lang !== "auto" ? lang.split("-")[0].toLowerCase() : null;
+
         const openAiFormData = new FormData();
         openAiFormData.append("file", audioFile, "audio.webm");
         openAiFormData.append("model", "whisper-1");
@@ -113,7 +163,7 @@ export async function POST(request) {
         }
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000);
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
         const openAiRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
           method: "POST",
@@ -134,41 +184,18 @@ export async function POST(request) {
             duration: result.duration || null,
             language: result.language || lang,
             source: "openai-whisper",
+            engine: "whisper-1",
           });
-        } else {
-          const errText = await openAiRes.text();
-          console.warn("OpenAI Whisper returned non-OK status:", openAiRes.status, errText);
-          // If quota exhausted (429) or other issue, proceed to Groq Whisper fallback
         }
       } catch (err) {
-        console.warn("OpenAI Whisper fetch exception, falling back:", err.message);
+        console.warn("OpenAI Whisper fallback exception:", err.message);
       }
-    }
-
-    // 2. High-speed Fallback: Groq Whisper Large V3 with Multi-Key Pool Rotation
-    try {
-      const groqResult = await groqWhisperTranscription({
-        audioFile,
-        model: "whisper-large-v3",
-        prompt: medicalVocabularyPrompt,
-        language: isoLang && ["en", "hi"].includes(isoLang) ? isoLang : null,
-        timeoutMs: 8000,
-      });
-
-      if (groqResult?.text) {
-        const cleanText = scrubWhisperHallucinations(groqResult.text.trim());
-        return NextResponse.json({
-          text: cleanText,
-          source: "groq-whisper",
-          engine: "whisper-large-v3",
-        });
-      }
-    } catch (err) {
-      console.warn("Groq Whisper multi-key pool fallback exception:", err.message);
     }
 
     return NextResponse.json(
-      { error: "Whisper transcription service unavailable. Please check API keys." },
+      {
+        error: "Hugging Face Whisper transcription unavailable. Please verify HUGGINGFACE_API_KEY in .env.local",
+      },
       { status: 503 }
     );
   } catch (err) {
