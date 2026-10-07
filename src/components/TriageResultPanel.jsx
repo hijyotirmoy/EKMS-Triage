@@ -93,8 +93,7 @@ export const ACTION_DIRECTIVES = {
     summary: "",
     checklist: [
       "1. Locate the nearest ESIC Hospital shown in Facilities below.",
-      "2. Click 'SMS to Caller' to send the hospital name, address, and Google Maps link.",
-      "3. Instruct caller to carry their Pehchan Card and government photo ID for urgent OPD/casualty.",
+      "2. Instruct caller to carry their Pehchan Card and government photo ID for urgent OPD/casualty.",
     ],
   },
   ESIS_DISPENSARY: {
@@ -111,8 +110,7 @@ export const ACTION_DIRECTIVES = {
       "Condition is suitable for primary clinic level care. Direct the IP to their registered or nearest ESIS Dispensary for doctor consultation and free medicine dispensing.",
     checklist: [
       "1. Check the nearest ESIS Dispensary listed under Facilities below.",
-      "2. Click 'SMS to Caller' to dispatch address and dispensary timings (10:00 AM – 3:00 PM, Mon–Fri; Closed Sat/Sun).",
-      "3. Remind IP to carry their ESIC Pehchan / Insurance card for free consultations and prescribed medicines.",
+      "2. Remind IP to carry their ESIC Pehchan / Insurance card for free consultations and prescribed medicines.",
     ],
   },
   TELE_104: {
@@ -147,8 +145,7 @@ export const ACTION_DIRECTIVES = {
     summary: "",
     checklist: [
       "1. Check the nearest empanelled tie-up facility listed under Facilities below.",
-      "2. Click 'SMS to Caller' to dispatch address, phone number, and Google Maps directions.",
-      "3. Remind IP to carry their ESIC Pehchan / Insurance card for cashless treatment under ESIC tie-up guidelines.",
+      "2. Remind IP to carry their ESIC Pehchan / Insurance card for cashless treatment under ESIC tie-up guidelines.",
     ],
   },
   DIST_HOSPITAL: {
@@ -165,8 +162,7 @@ export const ACTION_DIRECTIVES = {
       "Beneficiary requires public healthcare services outside ESIC network, general public specialist care, non-ESIC admissions, or child immunization.",
     checklist: [
       "1. Check the nearest Govt District Hospital listed under Facilities below.",
-      "2. Click 'SMS to Caller' to dispatch address and Google Maps directions.",
-      "3. Remind caller to carry government photo ID / Aadhaar and medical records for OPD/admissions.",
+      "2. Remind caller to carry government photo ID / Aadhaar and medical records for OPD/admissions.",
     ],
   },
 };

@@ -42,9 +42,15 @@ export function appendCaseToLocalCache(newCase) {
   if (typeof window === "undefined" || !newCase) return;
   try {
     const cases = getCachedCases();
-    const filtered = cases.filter(
-      (c) => (c.id && c.id !== newCase.id) && (c.case_ref && c.case_ref !== newCase.case_ref)
-    );
+    const newRef = String(newCase.case_ref || "").trim().toUpperCase();
+    const newId = String(newCase.id || "").trim().toUpperCase();
+    const filtered = cases.filter((c) => {
+      const cRef = String(c.case_ref || "").trim().toUpperCase();
+      const cId = String(c.id || "").trim().toUpperCase();
+      if (newRef && cRef === newRef) return false;
+      if (newId && cId === newId) return false;
+      return true;
+    });
     filtered.unshift(newCase);
     setCachedCases(filtered);
   } catch (e) {}
@@ -54,9 +60,12 @@ export function removeCaseFromLocalCache(caseRefOrId) {
   if (typeof window === "undefined" || !caseRefOrId) return;
   try {
     const cases = getCachedCases();
-    const filtered = cases.filter(
-      (c) => c.case_ref !== caseRefOrId && c.id !== caseRefOrId
-    );
+    const target = String(caseRefOrId).trim().toUpperCase();
+    const filtered = cases.filter((c) => {
+      const cRef = String(c.case_ref || "").trim().toUpperCase();
+      const cId = String(c.id || "").trim().toUpperCase();
+      return cRef !== target && cId !== target;
+    });
     setCachedCases(filtered);
   } catch (e) {}
 }
@@ -65,14 +74,26 @@ export function updateCaseInLocalCache(caseRefOrId, updates) {
   if (typeof window === "undefined" || !caseRefOrId || !updates) return;
   try {
     const cases = getCachedCases();
-    const target = String(caseRefOrId);
+    const target = String(caseRefOrId).trim().toUpperCase();
+    let matchedRef = target;
     const updated = cases.map((c) => {
-      if (String(c.case_ref) === target || String(c.id) === target) {
+      const cRef = String(c.case_ref || "").trim().toUpperCase();
+      const cId = String(c.id || "").trim().toUpperCase();
+      if (cRef === target || cId === target) {
+        if (c.case_ref) matchedRef = String(c.case_ref);
         return { ...c, ...updates };
       }
       return c;
     });
     setCachedCases(updated);
+    if (updates.is_forwarded) {
+      localStorage.setItem(`ekms_forwarded_${target}`, JSON.stringify(updates));
+      localStorage.setItem(`ekms_forwarded_${caseRefOrId}`, JSON.stringify(updates));
+      if (matchedRef && matchedRef !== target) {
+        localStorage.setItem(`ekms_forwarded_${matchedRef}`, JSON.stringify(updates));
+        localStorage.setItem(`ekms_forwarded_${matchedRef.toUpperCase()}`, JSON.stringify(updates));
+      }
+    }
   } catch (e) {}
 }
 

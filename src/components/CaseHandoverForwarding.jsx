@@ -432,6 +432,7 @@ function cleanPhone(val) {
 
 export function CaseHandoverForwarding({
   result,
+  caseRef: propCaseRef,
   activeDirective,
   allRedFlags = [],
   callerIntake = null,
@@ -461,7 +462,7 @@ export function CaseHandoverForwarding({
   }, [modalOpen]);
 
   const t = result?.triage || {};
-  const caseRef = result?.case_ref || result?.case_id || "CA0001AB01";
+  const caseRef = propCaseRef || result?.case_ref || result?.case_id || result?.id || "CA0001AB01";
   const activeCallerId = useMemo(() => {
     return (
       result?.caller_id ||
@@ -777,16 +778,42 @@ ${historySection}`;
         result.dispatch_info = statusData;
       }
 
-      const caseTarget = caseRef || result?.case_ref || result?.id;
-      if (caseTarget) {
-        updateCaseInLocalCache(caseTarget, forwardPayload);
+      const targets = Array.from(
+        new Set(
+          [
+            caseRef,
+            propCaseRef,
+            result?.case_ref,
+            result?.case_id,
+            result?.id,
+            editData?.caseRef,
+          ].filter(Boolean).map((k) => String(k).trim())
+        )
+      );
+
+      targets.forEach((targetKey) => {
+        const upper = targetKey.toUpperCase();
         try {
-          sessionStorage.setItem(`ekms_forwarded_${caseTarget}`, JSON.stringify(forwardPayload));
-          localStorage.setItem(`ekms_forwarded_${caseTarget}`, JSON.stringify(forwardPayload));
+          sessionStorage.setItem(`ekms_forwarded_${targetKey}`, JSON.stringify(forwardPayload));
+          localStorage.setItem(`ekms_forwarded_${targetKey}`, JSON.stringify(forwardPayload));
+          if (upper !== targetKey) {
+            sessionStorage.setItem(`ekms_forwarded_${upper}`, JSON.stringify(forwardPayload));
+            localStorage.setItem(`ekms_forwarded_${upper}`, JSON.stringify(forwardPayload));
+          }
         } catch (e) {}
-        broadcastEvent("CASE_FORWARDED", { case_ref: caseTarget, ...forwardPayload });
+        updateCaseInLocalCache(targetKey, forwardPayload);
+      });
+
+      const primaryTarget = caseRef || targets[0];
+      if (primaryTarget) {
+        broadcastEvent("CASE_FORWARDED", {
+          case_ref: primaryTarget,
+          id: result?.id,
+          all_targets: targets,
+          ...forwardPayload,
+        });
         try {
-          api.patch("/cases", { case_ref: caseTarget, updates: forwardPayload }).catch(() => {});
+          api.patch("/cases", { case_ref: primaryTarget, updates: forwardPayload }).catch(() => {});
         } catch (e) {}
       }
 

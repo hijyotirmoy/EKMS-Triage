@@ -204,7 +204,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [form, ekmsContext]);
 
-  // Caller history lookup by phone number - works directly without needing browser refresh
+  // Caller history lookup by phone number - works instantly in 0ms without waiting
   const lookupCaller = useCallback(async (phoneNumber, force = false) => {
     if (!phoneNumber) {
       setCallerFoundInfo(null);
@@ -220,17 +220,127 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       return;
     }
     lastLookedUpRef.current = query;
-    setIsLookingUp(true);
 
+    // STEP 1: INSTANT LOCAL CLIENT CACHE CHECK (0ms)
+    // Check browser-cached cases right away without ANY network delay!
+    const localCases = getCachedCases();
+    const localMatches = Array.isArray(localCases)
+      ? localCases.filter((item) => {
+          const rawIp = String(item.intake?.phone || "").replace(/\D/g, "");
+          const ip10 = rawIp.length >= 10 ? rawIp.slice(-10) : "";
+          return ip10.length === 10 && ip10 === query;
+        })
+      : [];
+
+    // Deduplicate any repeated cases in client cache
+    const seenCaseKeys = new Set();
+    const uniqueLocalMatches = [];
+    for (const item of localMatches) {
+      const matchKey = item.id || (item.case_ref ? `${item.case_ref}_${item.created_at || ""}` : null);
+      if (matchKey && seenCaseKeys.has(matchKey)) continue;
+      if (matchKey) seenCaseKeys.add(matchKey);
+      uniqueLocalMatches.push(item);
+    }
+
+    if (uniqueLocalMatches.length > 0) {
+      const latestLocal = uniqueLocalMatches[0];
+      const intake = latestLocal.intake || {};
+      const cleanCallerName =
+        intake.caller_name && intake.caller_name.trim() !== "." && intake.caller_name.trim() !== "'"
+          ? intake.caller_name
+          : "";
+      const resolvedCid =
+        latestLocal.caller_id ||
+        latestLocal.intake?.caller_id ||
+        getCallerIdForPhone(query, uniqueLocalMatches);
+      const callerInfo = {
+        caller_name: cleanCallerName,
+        phone: intake.phone || phoneNumber,
+        caller_id: resolvedCid,
+        age: intake.age != null && String(intake.age).trim() !== "." ? String(intake.age) : "",
+        sex: intake.sex && intake.sex !== "." ? intake.sex : "",
+        city: intake.city && intake.city !== "." ? intake.city : "",
+        district: intake.district && intake.district !== "." ? intake.district : "",
+        pincode: intake.pincode && intake.pincode !== "Kamrup Metro" ? intake.pincode : "",
+        latitude: intake.latitude ? String(intake.latitude) : "",
+        longitude: intake.longitude ? String(intake.longitude) : "",
+        last_case_ref: latestLocal.case_ref || "",
+        case_count: uniqueLocalMatches.length,
+      };
+
+      setForm((f) => ({
+        ...f,
+        phone: phoneNumber,
+        caller_id: resolvedCid,
+        caller_name: cleanCallerName || f.caller_name || "",
+        age: callerInfo.age || f.age || "",
+        sex: callerInfo.sex || f.sex || "",
+        city: callerInfo.city || f.city || "",
+        district: callerInfo.district || f.district || "",
+        pincode: callerInfo.pincode || f.pincode || "",
+        latitude: callerInfo.latitude || f.latitude || "",
+        longitude: callerInfo.longitude || f.longitude || "",
+      }));
+      setCallerFoundInfo(callerInfo);
+      setCallerHistory(
+        uniqueLocalMatches.map((c, i) => ({
+          id: c.id || `${c.case_ref || "call"}_${c.created_at || ""}_${i}`,
+          case_ref: c.case_ref || "",
+          caller_id: c.caller_id || c.intake?.caller_id || resolvedCid,
+          created_at: c.created_at || "",
+          caller_name: c.intake?.caller_name || "",
+          chief_complaint:
+            c.triage?.primary_complaint || c.intake?.symptom_notes || c.triage?.summary_en || "",
+          reason: c.intake?.symptom_notes || c.triage?.summary_en || "",
+          summary: c.triage?.summary_en || "",
+          red_flags:
+            Array.isArray(c.triage?.red_flags) && c.triage.red_flags.length > 0
+              ? c.triage.red_flags
+              : c.ekms_ai_context?.triageState?.redFlagsDetected || [],
+          urgency_level: c.triage?.urgency_level || "Routine",
+          urgency_score: c.triage?.urgency_score || 0,
+          navigation: c.triage?.recommended_action || c.triage?.recommended_facility_type || "",
+          recommended_action: c.triage?.recommended_action || "",
+          recommended_facility_type: c.triage?.recommended_facility_type || "",
+        }))
+      );
+      setIsLookingUp(false);
+      toast.success(
+        `Record found for ${cleanCallerName || phoneNumber}: Details loaded instantly.`
+      );
+
+      // Silent non-blocking background refresh
+      fetch(`/api/caller/lookup?phone=${encodeURIComponent(query)}`, {
+        signal: AbortSignal.timeout(2500),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.found && data?.caller) {
+            setCallerFoundInfo((prev) => ({ ...prev, ...data.caller }));
+            if (Array.isArray(data.history) && data.history.length > 0) {
+              setCallerHistory(data.history);
+            }
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    // STEP 2: Not in client cache, perform server query with fast timeout
+    setIsLookingUp(true);
     try {
-      const res = await fetch(`/api/caller/lookup?phone=${encodeURIComponent(query)}`);
+      const res = await fetch(`/api/caller/lookup?phone=${encodeURIComponent(query)}`, {
+        signal: AbortSignal.timeout(2000),
+      });
       const data = await res.json();
       if (data && data.found && data.caller) {
         const c = data.caller;
-        const cleanCallerName = (c.caller_name && c.caller_name.trim() !== "." && c.caller_name.trim() !== "'") ? c.caller_name : "";
+        const cleanCallerName =
+          c.caller_name && c.caller_name.trim() !== "." && c.caller_name.trim() !== "'"
+            ? c.caller_name
+            : "";
         const resolvedCid = c.caller_id || getCallerIdForPhone(query, data.history);
         c.caller_id = resolvedCid;
-        // Known caller: populate THIS caller's stored data and history
         setForm((f) => ({
           ...f,
           phone: phoneNumber,
@@ -251,92 +361,36 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           setCallerHistory([]);
         }
         toast.success(
-          `Record found for ${cleanCallerName || phoneNumber}: Details & history loaded.`
+          `Record found for ${cleanCallerName || phoneNumber}: Details loaded.`
         );
       } else {
-        // Fallback: Check local cache ONLY with strict 10-digit exact match
-        const localCases = getCachedCases();
-        const matches = localCases.filter((item) => {
-          const rawIp = String(item.intake?.phone || "").replace(/\D/g, "");
-          const ip10 = rawIp.length >= 10 ? rawIp.slice(-10) : "";
-          return ip10.length === 10 && ip10 === query;
-        });
-
-        if (matches.length > 0) {
-          const latestLocal = matches[0];
-          const intake = latestLocal.intake || {};
-          const cleanCallerName = (intake.caller_name && intake.caller_name.trim() !== "." && intake.caller_name.trim() !== "'") ? intake.caller_name : "";
-          const resolvedCid = latestLocal.caller_id || latestLocal.intake?.caller_id || getCallerIdForPhone(query, matches);
-          const callerInfo = {
-            caller_name: cleanCallerName,
-            phone: intake.phone || phoneNumber,
-            caller_id: resolvedCid,
-            age: intake.age != null && String(intake.age).trim() !== "." ? String(intake.age) : "",
-            sex: intake.sex && intake.sex !== "." ? intake.sex : "",
-            city: intake.city && intake.city !== "." ? intake.city : "",
-            district: intake.district && intake.district !== "." ? intake.district : "",
-            pincode: intake.pincode && intake.pincode !== "Kamrup Metro" ? intake.pincode : "",
-            last_case_ref: latestLocal.case_ref || "",
-            case_count: matches.length,
-          };
-          setForm((f) => ({
-            ...f,
-            phone: phoneNumber,
-            caller_id: resolvedCid,
-            caller_name: cleanCallerName || f.caller_name || "",
-            age: callerInfo.age || f.age || "",
-            sex: callerInfo.sex || f.sex || "",
-            city: callerInfo.city || f.city || "",
-            district: callerInfo.district || f.district || "",
-            pincode: callerInfo.pincode || f.pincode || "",
-            latitude: intake.latitude ? String(intake.latitude) : (f.latitude || ""),
-            longitude: intake.longitude ? String(intake.longitude) : (f.longitude || ""),
-          }));
-          setCallerFoundInfo(callerInfo);
-          setCallerHistory(
-            matches.map((c) => ({
-              case_ref: c.case_ref || "",
-              caller_id: c.caller_id || c.intake?.caller_id || resolvedCid,
-              created_at: c.created_at || "",
-              caller_name: c.intake?.caller_name || "",
-              chief_complaint: c.triage?.primary_complaint || c.intake?.symptom_notes || c.triage?.summary_en || "",
-              reason: c.intake?.symptom_notes || c.triage?.summary_en || "",
-              summary: c.triage?.summary_en || "",
-              red_flags: Array.isArray(c.triage?.red_flags) && c.triage.red_flags.length > 0
-                ? c.triage.red_flags
-                : (c.ekms_ai_context?.triageState?.redFlagsDetected || []),
-              urgency_level: c.triage?.urgency_level || "Routine",
-              urgency_score: c.triage?.urgency_score || 0,
-              navigation: c.triage?.recommended_action || c.triage?.recommended_facility_type || "",
-              recommended_action: c.triage?.recommended_action || "",
-              recommended_facility_type: c.triage?.recommended_facility_type || "",
-            }))
-          );
-          toast.success(
-            `Record found for ${cleanCallerName || phoneNumber}: Details loaded.`
-          );
-        } else {
-          // Brand New Number: Clear all previous returning caller state completely!
-          const newCid = data?.caller_id || getCallerIdForPhone(query);
-          setCallerFoundInfo(null);
-          setCallerHistory([]);
-          setHistoryPage(1);
-          setForm((f) => ({
-            ...f,
-            phone: phoneNumber,
-            caller_id: newCid,
-            caller_name: f.caller_name === "." ? "" : f.caller_name,
-            pincode: f.pincode === "Kamrup Metro" ? "" : f.pincode,
-          }));
-          toast.info(
-            `New number (${phoneNumber}): Please fill caller details.`
-          );
-        }
+        // Brand New Number: Clear all previous returning caller state completely!
+        const newCid = data?.caller_id || getCallerIdForPhone(query);
+        setCallerFoundInfo(null);
+        setCallerHistory([]);
+        setHistoryPage(1);
+        setForm((f) => ({
+          ...f,
+          phone: phoneNumber,
+          caller_id: newCid,
+          caller_name: f.caller_name === "." ? "" : f.caller_name,
+          pincode: f.pincode === "Kamrup Metro" ? "" : f.pincode,
+        }));
+        toast.info(
+          `New number (${phoneNumber}): Please fill caller details.`
+        );
       }
     } catch (err) {
-      console.warn("Caller lookup error:", err);
+      // If server lookup timed out or failed, resolve immediately as new number
+      const newCid = getCallerIdForPhone(query);
       setCallerFoundInfo(null);
       setCallerHistory([]);
+      setForm((f) => ({
+        ...f,
+        phone: phoneNumber,
+        caller_id: f.caller_id || newCid,
+      }));
+      toast.info(`New number (${phoneNumber}): Please fill caller details.`);
     } finally {
       setIsLookingUp(false);
     }
@@ -612,7 +666,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         <div className="space-y-3.5">
           {paginatedHistory.map((item, idx) => (
             <div
-              key={item.case_ref || idx}
+              key={item.id ? `hist_${item.id}_${idx}` : `${item.case_ref || "hist"}_${item.created_at || ""}_${idx}`}
               className="rounded-lg border border-border/70 bg-card p-3.5 sm:p-4 shadow-2xs transition-colors hover:border-primary/50"
             >
               {/* Top Bar: Date, Time, Case Ref, Urgency Badge */}

@@ -1,6 +1,7 @@
 // Geo utilities: Haversine distance calculation, dynamic facility-based location resolution, and proximity routing
 import assamPincodesData from "../data/assam_pincodes.json";
 import { ASSAM_DISTRICTS, getDistrictCoordinates, normalizeDistrict } from "./districts.js";
+import { detectAssamLocationFromText } from "./assamLocations.js";
 
 /**
  * Normalizes facility coordinates directly from the database/facility directory.
@@ -462,6 +463,23 @@ export function resolveCallerLocation(input, facilities = []) {
   }
 
 
+
+  // 4. ASSAM LANDMARK RESOLUTION (e.g. Zoo Road Tiniali, Paltan Bazaar, Six Mile, Dispur)
+  const fullTextToSearch = `${rawCity || ""} ${input?.address || ""} ${input?.symptom_notes || ""}`.trim();
+  if (fullTextToSearch) {
+    const landmarkMatch = detectAssamLocationFromText(fullTextToSearch);
+    if (landmarkMatch.found) {
+      return {
+        latitude: landmarkMatch.lat,
+        longitude: landmarkMatch.lng,
+        pincode: callerPin || landmarkMatch.pincode || null,
+        district: landmarkMatch.district || rawDistrict || null,
+        method: landmarkMatch.type === "landmark" ? "landmark" : "pincode",
+        matched: `${landmarkMatch.name}${landmarkMatch.pincode ? ` (${landmarkMatch.pincode})` : ""}`,
+        isDistrictOnly: false,
+      };
+    }
+  }
 
   // 5. NO PINCODE / LOCATION ENTERED: DO NOT default to Beltola or any default pincode!
   return {

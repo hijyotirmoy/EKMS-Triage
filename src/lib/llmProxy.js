@@ -1,5 +1,5 @@
 // High-Performance Multi-Provider LLM Proxy Router
-// Manages 21 Groq API keys with zero-downtime 429 rotation, plus Gemini, Claude & Custom Gateways.
+// Manages Groq API Key Pool with zero-downtime 429 rotation, plus OpenRouter, Hugging Face, Gemini & Gateways.
 
 import { getGroqKeys, maskKey } from "./groqPool.js";
 
@@ -39,11 +39,11 @@ export function resetAllCooldowns() {
  */
 async function callGroqWithRotation({
   messages,
-  candidateModels = ["qwen/qwen3.8-27b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "mixtral-8x7b-32768"],
-  temperature = 0.3,
-  max_tokens = 512,
+  candidateModels = ["qwen/qwen3.8-27b"],
+  temperature = 0.2,
+  max_tokens = 250,
   response_format,
-  timeoutMs = 7000,
+  timeoutMs = 4000,
 }) {
   const allKeys = getGroqKeys();
   if (allKeys.length === 0) {
@@ -347,9 +347,184 @@ async function callOtherProxy({
   throw new Error("Other/Custom LLM Gateway failed to respond.");
 }
 
+// In-memory OpenRouter multi-key pointer
+let openrouterKeyPointer = 0;
+
+/**
+ * Returns all configured OpenRouter keys from environment variables across multiple accounts.
+ */
+export function getOpenRouterKeys() {
+  const keys = [];
+  if (process.env.OPENROUTER_API_KEYS) {
+    const list = process.env.OPENROUTER_API_KEYS.split(",")
+      .map((k) => k.trim())
+      .filter((k) => k.startsWith("sk-or-"));
+    keys.push(...list);
+  }
+  if (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.startsWith("sk-or-")) {
+    keys.push(process.env.OPENROUTER_API_KEY.trim());
+  }
+  for (let i = 1; i <= 20; i++) {
+    const k = process.env[`OPENROUTER_API_KEY_${i}`];
+    if (k && k.trim().startsWith("sk-or-")) {
+      keys.push(k.trim());
+    }
+  }
+  return Array.from(new Set(keys));
+}
+
+/**
+ * Executes a Chat Completion via OpenRouter API (OpenAI-compatible)
+ * Defaults to 100% FREE community models (:free) with multi-account rotation & failover.
+ */
+async function callOpenRouterProxy({
+  messages,
+  candidateModels = ["qwen/qwen-2.5-72b-instruct", "openrouter/free"],
+  temperature = 0.2,
+  max_tokens = 550,
+  response_format,
+  timeoutMs = 5000,
+}) {
+  const allKeys = getOpenRouterKeys();
+  if (allKeys.length === 0) {
+    throw new Error("No OPENROUTER_API_KEY configured in pool.");
+  }
+
+  const totalKeys = allKeys.length;
+
+  for (let attempt = 0; attempt < totalKeys; attempt++) {
+    const keyIndex = (openrouterKeyPointer + attempt) % totalKeys;
+    const currentKey = allKeys[keyIndex];
+
+    for (const model of candidateModels) {
+      const startTime = Date.now();
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+        const payload = {
+          model,
+          messages,
+          temperature,
+          max_tokens,
+          ...(response_format ? { response_format } : {}),
+        };
+
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentKey}`,
+            "HTTP-Referer": "https://ekms-triage.gov.in",
+            "X-Title": "EKMS Triage AI",
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (res.ok) {
+          const data = await res.json();
+          const latency = Date.now() - startTime;
+          const choice = data.choices?.[0];
+          const content = choice?.message?.content || "";
+
+          // Advance pointer on success
+          openrouterKeyPointer = (keyIndex + 1) % totalKeys;
+
+          return {
+            content,
+            provider: "openrouter",
+            model,
+            keyIndex,
+            latency,
+          };
+        } else if (res.status === 429) {
+          console.warn(`[LLM Proxy] OpenRouter Key #${keyIndex + 1} rate limited (429). Rotating to next account key...`);
+          break; // Try next account key
+        } else {
+          const errText = await res.text().catch(() => "");
+          console.warn(`[LLM Proxy] OpenRouter (${model}) error HTTP ${res.status}: ${errText}`);
+        }
+      } catch (err) {
+        console.warn(`[LLM Proxy] OpenRouter (${model}) key #${keyIndex + 1} error:`, err.message);
+      }
+    }
+  }
+
+  throw new Error("All OpenRouter API keys failed or exhausted.");
+}
+
+/**
+ * Executes a Chat Completion via Hugging Face Serverless Inference API (OpenAI-compatible)
+ * Natively supports Qwen/Qwen3.8-27B with sub-100ms response times
+ */
+async function callHuggingFaceProxy({
+  messages,
+  model = "Qwen/Qwen3.8-27B",
+  temperature = 0.2,
+  max_tokens = 512,
+  response_format,
+  timeoutMs = 6000,
+}) {
+  const hfKey = process.env.HUGGINGFACE_API_KEY;
+  if (!hfKey) {
+    throw new Error("HUGGINGFACE_API_KEY is not configured.");
+  }
+
+  const startTime = Date.now();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    const payload = {
+      model,
+      messages,
+      temperature,
+      max_tokens,
+      ...(response_format ? { response_format } : {}),
+    };
+
+    const res = await fetch("https://router.huggingface.co/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${hfKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      const latency = Date.now() - startTime;
+      const choice = data.choices?.[0];
+      const content = choice?.message?.content || "";
+
+      return {
+        content,
+        provider: "huggingface",
+        model,
+        latency,
+      };
+    } else {
+      const errText = await res.text().catch(() => "");
+      console.warn(`[LLM Proxy] Hugging Face error HTTP ${res.status}: ${errText}`);
+    }
+  } catch (err) {
+    console.warn("[LLM Proxy] Hugging Face error:", err.message);
+  }
+
+  throw new Error("Hugging Face API failed to respond.");
+}
+
 /**
  * Master Centralized LLM Proxy Function:
- * Cascades gracefully: Groq (21 Keys) -> Gemini -> Anthropic -> Other/Custom Gateway
+ * Cascades gracefully across high-speed ensemble:
+ * Groq Pool -> OpenRouter (Qwen 2.5 72B / Llama 3.3) -> Hugging Face (Qwen 3.8 27B) -> Gemini -> Anthropic -> Other
  */
 export async function executeCentralizedLlmProxy({
   messages = [],
@@ -363,7 +538,7 @@ export async function executeCentralizedLlmProxy({
     ? [{ role: "system", content: system }, ...messages.filter((m) => m.role !== "system")]
     : messages;
 
-  // 1. Groq (21 Keys Pool)
+  // 1. Groq Multi-Key Pool (Qwen 3.8 27B)
   if (preferredProvider === "auto" || preferredProvider === "groq") {
     try {
       return await callGroqWithRotation({
@@ -373,11 +548,40 @@ export async function executeCentralizedLlmProxy({
         response_format,
       });
     } catch (groqErr) {
-      console.warn("[LLM Proxy Cascade] Groq pool failed, falling back to Gemini:", groqErr.message);
+      console.warn("[LLM Proxy Cascade] Groq pool failed, falling back to OpenRouter / Hugging Face:", groqErr.message);
     }
   }
 
-  // 2. Google Gemini Fallback
+  // 2. OpenRouter API (Qwen 2.5 72B Instruct / Llama 3.3 70B)
+  if ((preferredProvider === "auto" || preferredProvider === "openrouter") && process.env.OPENROUTER_API_KEY) {
+    try {
+      return await callOpenRouterProxy({
+        messages: preparedMessages,
+        temperature,
+        max_tokens,
+        response_format,
+      });
+    } catch (orErr) {
+      console.warn("[LLM Proxy Cascade] OpenRouter failed, falling back to Hugging Face:", orErr.message);
+    }
+  }
+
+  // 3. Hugging Face Serverless (Qwen 3.8 27B)
+  if ((preferredProvider === "auto" || preferredProvider === "huggingface") && process.env.HUGGINGFACE_API_KEY) {
+    try {
+      return await callHuggingFaceProxy({
+        messages: preparedMessages,
+        model: "Qwen/Qwen3.8-27B",
+        temperature,
+        max_tokens,
+        response_format,
+      });
+    } catch (hfErr) {
+      console.warn("[LLM Proxy Cascade] Hugging Face failed, falling back to Gemini:", hfErr.message);
+    }
+  }
+
+  // 3. Google Gemini Fallback
   if (preferredProvider === "auto" || preferredProvider === "gemini") {
     try {
       return await callGeminiProxy({
@@ -390,7 +594,7 @@ export async function executeCentralizedLlmProxy({
     }
   }
 
-  // 3. Anthropic Claude Fallback
+  // 4. Anthropic Claude Fallback
   if (preferredProvider === "auto" || preferredProvider === "claude") {
     try {
       return await callAnthropicProxy({
@@ -404,7 +608,7 @@ export async function executeCentralizedLlmProxy({
     }
   }
 
-  // 4. Other/Custom Gateway Fallback
+  // 5. Other/Custom Gateway Fallback
   if (preferredProvider === "auto" || preferredProvider === "other") {
     try {
       return await callOtherProxy({
@@ -421,4 +625,4 @@ export async function executeCentralizedLlmProxy({
   throw new Error("All centralized LLM proxy providers failed.");
 }
 
-export { callGroqWithRotation, callGeminiProxy, callAnthropicProxy, callOtherProxy };
+export { callGroqWithRotation, callOpenRouterProxy, callHuggingFaceProxy, callGeminiProxy, callAnthropicProxy, callOtherProxy };

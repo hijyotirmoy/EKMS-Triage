@@ -38,12 +38,75 @@ import {
 } from "../lib/clientCache";
 import { subscribeToSync, broadcastEvent } from "../lib/broadcastSync";
 import { getCallerIdForPhone } from "../lib/callerId";
+import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 
+export function isCaseItemForwarded(c) {
+  if (!c) return false;
+  if (c.is_forwarded || c.forwarded_at || c.dispatch_id || c.handover_sent || c.status === "forwarded") {
+    return true;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const keys = [
+        c.case_ref,
+        c.id,
+        c.case_id,
+        c.caller_id,
+        c.intake?.phone,
+      ].filter(Boolean);
+      for (const k of keys) {
+        const str = String(k).trim();
+        if (
+          localStorage.getItem(`ekms_forwarded_${str}`) ||
+          sessionStorage.getItem(`ekms_forwarded_${str}`) ||
+          localStorage.getItem(`ekms_forwarded_${str.toUpperCase()}`) ||
+          sessionStorage.getItem(`ekms_forwarded_${str.toUpperCase()}`) ||
+          localStorage.getItem(`ekms_forwarded_${str.toLowerCase()}`) ||
+          sessionStorage.getItem(`ekms_forwarded_${str.toLowerCase()}`)
+        ) {
+          return true;
+        }
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+
+export function mergeCaseForwardStatus(casesList) {
+  if (!Array.isArray(casesList) || typeof window === "undefined") return casesList;
+  return casesList.map((c) => {
+    if (c.is_forwarded || c.forwarded_at || c.dispatch_id || c.status === "forwarded") return c;
+    const keys = [
+      c.case_ref,
+      c.id,
+      c.case_id,
+      c.caller_id,
+      c.intake?.phone,
+    ].filter(Boolean);
+    for (const k of keys) {
+      const str = String(k).trim();
+      const stored =
+        localStorage.getItem(`ekms_forwarded_${str}`) ||
+        sessionStorage.getItem(`ekms_forwarded_${str}`) ||
+        localStorage.getItem(`ekms_forwarded_${str.toUpperCase()}`) ||
+        sessionStorage.getItem(`ekms_forwarded_${str.toUpperCase()}`) ||
+        localStorage.getItem(`ekms_forwarded_${str.toLowerCase()}`) ||
+        sessionStorage.getItem(`ekms_forwarded_${str.toLowerCase()}`);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          return { ...c, ...parsed, is_forwarded: true, status: "forwarded" };
+        } catch (e) {}
+      }
+    }
+    return c;
+  });
+}
+
+const PAGE_SIZE = 50;
 
 const inputCls =
   "rounded-md border border-border/80 bg-secondary/50 px-3 py-2 text-sm outline-none transition-colors duration-200 focus:border-primary/70";
-
-const PAGE_SIZE = 50;
 
 export function getReferralBadge(c) {
   const t = c?.triage || {};
@@ -234,9 +297,9 @@ export function getCaseUniqueKey(c, idx = 0) {
 
 export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
   const [cases, setCases] = useState(() => {
-    // 1. Instant 0ms initial load from browser storage
+    // 1. Instant 0ms initial load from browser storage, merged with persistent forward state
     const cached = getCachedCases();
-    return Array.isArray(cached) ? cached : [];
+    return Array.isArray(cached) ? mergeCaseForwardStatus(cached) : [];
   });
   const [urgency, setUrgency] = useState("all");
   const [q, setQ] = useState("");
@@ -259,13 +322,15 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
       .get("/cases", { params: { urgency, q: q || undefined } })
       .then(({ data }) => {
         if (Array.isArray(data)) {
-          setCases(data);
+          // Merge with persistent forward states so a forwarded badge NEVER disappears on server refresh!
+          const merged = mergeCaseForwardStatus(data);
+          setCases(merged);
           if (urgency === "all" && !q) {
-            setCachedCases(data);
+            setCachedCases(merged);
             const currentStats = getCachedStats() || {};
-            const updatedStats = { ...currentStats, total: data.length };
+            const updatedStats = { ...currentStats, total: merged.length };
             setCachedStats(updatedStats);
-            broadcastEvent("SYNC_STATS_TOTAL", { total: data.length });
+            broadcastEvent("SYNC_STATS_TOTAL", { total: merged.length });
           }
         }
       })
@@ -294,11 +359,18 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
           return updated;
         });
       } else if ((event?.type === "CASE_FORWARDED" || event?.type === "CASE_UPDATED") && event?.payload) {
-        const { case_ref, id } = event.payload;
+        const { case_ref, id, all_targets } = event.payload;
+        const targetSet = new Set(
+          [case_ref, id, ...(Array.isArray(all_targets) ? all_targets : [])]
+            .filter(Boolean)
+            .map((k) => String(k).trim().toUpperCase())
+        );
         setCases((prev) => {
           const updated = prev.map((c) => {
-            if (c.case_ref === case_ref || c.id === id) {
-              return { ...c, ...event.payload };
+            const cRef = String(c.case_ref || "").trim().toUpperCase();
+            const cId = String(c.id || "").trim().toUpperCase();
+            if ((cRef && targetSet.has(cRef)) || (cId && targetSet.has(cId))) {
+              return { ...c, ...event.payload, is_forwarded: true, status: "forwarded" };
             }
             return c;
           });
@@ -595,10 +667,10 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                             </span>
                           );
                         })()}
-                        {/* Green Forwarded indicator appears ONLY if forwarded/sent */}
-                        {Boolean(c.is_forwarded || c.forwarded_at || c.dispatch_id || c.handover_sent || c.status === "forwarded") && (
-                          <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="h-3 w-3 shrink-0" /> Forwarded
+                        {/* Green Forwarded badge: Shows instantly and never disappears */}
+                        {isCaseItemForwarded(c) && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-700 dark:text-emerald-300 shadow-2xs">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" /> Forwarded
                           </span>
                         )}
                       </div>
@@ -778,6 +850,28 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
         <CaseConversationModal
           caseItem={selectedCaseForConvo}
           allCases={cases}
+          onCaseForwarded={(caseRef, statusData) => {
+            const forwardPayload = {
+              is_forwarded: true,
+              status: "forwarded",
+              forwarded_to: statusData.teamName,
+              forwarded_short_name: statusData.shortName,
+              dispatch_id: statusData.dispatchId,
+              forwarded_at: new Date().toISOString(),
+            };
+            setCases((prev) =>
+              prev.map((c) => {
+                const cRef = String(c.case_ref || "").trim().toUpperCase();
+                const targetRef = String(caseRef || "").trim().toUpperCase();
+                return (cRef && cRef === targetRef) || c.id === caseRef
+                  ? { ...c, ...forwardPayload }
+                  : c;
+              })
+            );
+            setSelectedCaseForConvo((prev) =>
+              prev ? { ...prev, ...forwardPayload } : null
+            );
+          }}
           onClose={() => setSelectedCaseForConvo(null)}
         />
       )}
@@ -809,16 +903,21 @@ function formatChatTime(m, fallbackDate) {
   return "";
 }
 
-function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onClose }) {
+function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCaseForwarded, onClose }) {
+  const [forwardOverride, setForwardOverride] = useState(null);
+
   const caseItem = useMemo(() => {
     if (!initialCaseItem) return null;
+    const initialUpper = String(initialCaseItem.case_ref || "").trim().toUpperCase();
     const found = allCases?.find(
-      (c) =>
-        (c.case_ref && c.case_ref === initialCaseItem.case_ref) ||
-        (c.id && c.id === initialCaseItem.id)
+      (c) => {
+        const cRef = String(c.case_ref || "").trim().toUpperCase();
+        return (cRef && cRef === initialUpper) || (c.id && c.id === initialCaseItem.id);
+      }
     );
-    return found ? { ...initialCaseItem, ...found } : initialCaseItem;
-  }, [initialCaseItem, allCases]);
+    const base = found ? { ...initialCaseItem, ...found } : initialCaseItem;
+    return forwardOverride ? { ...base, ...forwardOverride } : base;
+  }, [initialCaseItem, allCases, forwardOverride]);
 
   if (!caseItem) return null;
 
@@ -830,14 +929,12 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onClo
   const secondaryBadge = getSecondaryReferralBadge(caseItem);
 
   const isCaseForwarded = Boolean(
-    caseItem.is_forwarded ||
-    caseItem.forwarded_at ||
-    caseItem.dispatch_id ||
-    caseItem.handover_sent ||
-    caseItem.status === "forwarded"
+    forwardOverride || isCaseItemForwarded(caseItem)
   );
 
   const forwardedTarget = String(
+    forwardOverride?.forwarded_to ||
+    forwardOverride?.forwarded_short_name ||
     caseItem.forwarded_to ||
     caseItem.forwarded_short_name ||
     caseItem.dispatch_to ||
@@ -913,8 +1010,8 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onClo
                   {getAgentFullLabel(agentCode)}
                 </span>
                 <UrgencyBadge level={triage.urgency_level} size="sm" />
-                {Boolean(caseItem.is_forwarded || caseItem.forwarded_at || caseItem.dispatch_id || caseItem.handover_sent || caseItem.status === "forwarded") && (
-                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/50 shadow-2xs">
+                {isCaseItemForwarded(caseItem) && (
+                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-md border border-emerald-500/50 shadow-2xs">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Forwarded
                   </span>
                 )}

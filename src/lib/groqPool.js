@@ -178,8 +178,8 @@ export async function groqChatCompletion({
   candidateModels = ["qwen/qwen3.8-27b"],
   response_format = { type: "json_object" },
   temperature = 0.2,
-  max_tokens = 450,
-  timeoutMs = 2500,
+  max_tokens = 550,
+  timeoutMs = 3500,
   maxAttempts = 3,
 }) {
   const modelsToTry = candidateModels.length > 0 ? candidateModels : [model];
@@ -210,7 +210,7 @@ export async function groqChatCompletion({
           clearTimeout(timer);
 
           if (res.status === 429) {
-            return res; // Signal to executeGroqWithFailover to rotate keys immediately
+            return { status: 429 };
           }
 
           if (res.ok) {
@@ -226,19 +226,19 @@ export async function groqChatCompletion({
           }
 
           if (res.status === 401 || res.status === 403) {
-            return res; // Signal auth issue to rotate key
+            return { status: res.status, isRestricted: true };
           }
 
           if (res.status === 400) {
             const errData = await res.json().catch(() => ({}));
-            if (errData?.error?.code === "organization_restricted") {
+            const msg = (errData?.error?.message || "").toLowerCase();
+            if (msg.includes("restricted") || msg.includes("invalid api key") || errData?.error?.code === "organization_restricted") {
               return { status: 400, isRestricted: true };
             }
             console.warn(`[GroqPool] Bad request (400) on model ${m}: ${errData?.error?.message || "Invalid payload"}`);
             return null;
           }
         } catch (fetchErr) {
-          // If aborted or network dropped, continue to next model/key
           if (fetchErr.name === "AbortError") {
             console.warn(`[GroqPool] Timeout (${timeoutMs}ms) on model ${m} with key #${keyIndex + 1}`);
           }

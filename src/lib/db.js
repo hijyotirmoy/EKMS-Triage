@@ -488,6 +488,43 @@ export async function getCaseByRef(caseRef) {
   return all.find((c) => c.case_ref === caseRef || c.id === caseRef) || null;
 }
 
+export async function getCasesByPhone(phone) {
+  if (!phone) return [];
+  const digits = String(phone).replace(/\D/g, "");
+  const p10 = digits.length >= 10 ? digits.slice(-10) : digits;
+
+  // 1. If memoryCases is loaded or populated, filter instantly in 0.01ms (0 Firestore reads)
+  if (memoryCases && memoryCases.length > 0) {
+    return memoryCases.filter((c) => {
+      const cp = String(c.intake?.phone || "").replace(/\D/g, "");
+      return cp.length >= 10 && cp.slice(-10) === p10;
+    });
+  }
+
+  // 2. Direct fast targeted query if cold
+  const ctx = await getFirestoreContext();
+  if (ctx) {
+    try {
+      if (ctx.type === "admin") {
+        const snap = await ctx.db
+          .collection("cases")
+          .where("intake.phone", "in", [p10, `+91${p10}`, `91${p10}`, phone])
+          .limit(10)
+          .get();
+        if (!snap.empty) {
+          return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
+      }
+    } catch (e) {}
+  }
+
+  const all = await getCases();
+  return all.filter((c) => {
+    const cp = String(c.intake?.phone || "").replace(/\D/g, "");
+    return cp.length >= 10 && cp.slice(-10) === p10;
+  });
+}
+
 /**
  * Save Case:
  * Exactly 1 Firestore write, 0 Firestore reads.
@@ -519,30 +556,62 @@ export async function saveCase(caseData) {
 
 export async function updateCase(caseRefOrId, updates) {
   if (!caseRefOrId || !updates) return null;
-  const target = String(caseRefOrId);
+  const target = String(caseRefOrId).trim();
+  const targetUpper = target.toUpperCase();
   let updatedCase = null;
 
+  // 1. Update in-memory cache instantly (0 reads)
   memoryCases = memoryCases.map((c) => {
-    if (String(c.case_ref) === target || String(c.id) === target) {
+    const cRef = String(c.case_ref || "").trim().toUpperCase();
+    const cId = String(c.id || "").trim().toUpperCase();
+    if (cRef === targetUpper || cId === targetUpper || String(c.case_ref) === target || String(c.id) === target) {
       updatedCase = { ...c, ...updates };
       return updatedCase;
     }
     return c;
   });
 
+  // 2. Persist to Firestore with minimum reads (exact doc update or 1 query)
   const ctx = await getFirestoreContext();
-  if (ctx && updatedCase) {
+  if (ctx) {
     try {
       if (ctx.type === "admin") {
         const snap = await ctx.db.collection("cases").where("case_ref", "==", target).get();
         if (!snap.empty) {
-          await snap.docs[0].ref.set(updates, { merge: true });
-        } else if (updatedCase.id) {
+          for (const doc of snap.docs) {
+            await doc.ref.set(updates, { merge: true });
+          }
+        } else if (targetUpper !== target) {
+          const snapUpper = await ctx.db.collection("cases").where("case_ref", "==", targetUpper).get();
+          if (!snapUpper.empty) {
+            for (const doc of snapUpper.docs) {
+              await doc.ref.set(updates, { merge: true });
+            }
+          } else if (updatedCase?.id) {
+            await ctx.db.collection("cases").doc(updatedCase.id).set(updates, { merge: true });
+          }
+        } else if (updatedCase?.id) {
           await ctx.db.collection("cases").doc(updatedCase.id).set(updates, { merge: true });
         }
       } else {
-        const { doc, setDoc } = await import("firebase/firestore");
-        if (updatedCase.id) {
+        const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
+        const q = query(collection(ctx.db, "cases"), where("case_ref", "==", target));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          for (const d of snap.docs) {
+            await setDoc(doc(ctx.db, "cases", d.id), updates, { merge: true });
+          }
+        } else if (targetUpper !== target) {
+          const qUpper = query(collection(ctx.db, "cases"), where("case_ref", "==", targetUpper));
+          const snapUpper = await getDocs(qUpper);
+          if (!snapUpper.empty) {
+            for (const d of snapUpper.docs) {
+              await setDoc(doc(ctx.db, "cases", d.id), updates, { merge: true });
+            }
+          } else if (updatedCase?.id) {
+            await setDoc(doc(ctx.db, "cases", updatedCase.id), updates, { merge: true }).catch(() => {});
+          }
+        } else if (updatedCase?.id) {
           await setDoc(doc(ctx.db, "cases", updatedCase.id), updates, { merge: true }).catch(() => {});
         }
       }

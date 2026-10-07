@@ -23,22 +23,22 @@ import { isWhisperHallucination } from "@/lib/speechRecognition";
 import { detectDirectCallerReferralIntent } from "@/lib/doctorChatEngine";
 
 const INITIAL_SYMPTOM_SHORTCUTS = [
-  { icon: "❤️", label: "Chest Pain / Pressure", text: "Severe chest pain and heavy pressure" },
-  { icon: "⚡", label: "Weakness & Dizziness", text: "Patient has extreme weakness and dizziness" },
-  { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
-  { icon: "🤢", label: "Vomiting & Nausea", text: "Continuous vomiting and unable to keep fluids" },
-  { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
-  { icon: "🥘", label: "Abdominal / Stomach Pain", text: "Severe stomach cramps and gastric pain" },
-  { icon: "🩸", label: "Workplace Injury / Cut", text: "Deep cut and bleeding from injury at work" },
+  { icon: "❤️", label: "Chest Pain / Pressure", text: "Chest pain and pressure" },
+  { icon: "⚡", label: "Weakness & Dizziness", text: "Weakness and dizziness" },
+  { icon: "🌡️", label: "Fever & Chills", text: "Fever and chills" },
+  { icon: "🤢", label: "Vomiting & Nausea", text: "Vomiting and nausea" },
+  { icon: "🤕", label: "Severe Headache", text: "Headache and discomfort" },
+  { icon: "🥘", label: "Abdominal / Stomach Pain", text: "Abdominal / stomach pain" },
+  { icon: "🩸", label: "Workplace Injury / Cut", text: "Workplace injury and cut" },
 ];
 
 const MOBILE_SYMPTOM_SHORTCUTS = [
-  { icon: "❤️", label: "Chest Pain / Pressure", text: "Severe chest pain and heavy pressure" },
-  { icon: "🌡️", label: "Fever & Chills", text: "High fever with chills and shivering" },
-  { icon: "⚡", label: "Weakness & Dizziness", text: "Patient has extreme weakness and dizziness" },
-  { icon: "🤢", label: "Vomiting & Nausea", text: "Continuous vomiting and unable to keep fluids" },
-  { icon: "🤕", label: "Severe Headache", text: "Severe throbbing headache and blurred vision" },
-  { icon: "🥘", label: "Abdominal Pain", text: "Severe stomach cramps and gastric pain" },
+  { icon: "❤️", label: "Chest Pain / Pressure", text: "Chest pain and pressure" },
+  { icon: "🌡️", label: "Fever & Chills", text: "Fever and chills" },
+  { icon: "⚡", label: "Weakness & Dizziness", text: "Weakness and dizziness" },
+  { icon: "🤢", label: "Vomiting & Nausea", text: "Vomiting and nausea" },
+  { icon: "🤕", label: "Severe Headache", text: "Headache and discomfort" },
+  { icon: "🥘", label: "Abdominal Pain", text: "Abdominal / stomach pain" },
 ];
 
 function formatReferralDestination(dest) {
@@ -346,17 +346,26 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
           (directIntent?.destination === "Psychological Counselling Department")
         ),
         isReadyForSummary: Boolean(data.isReadyForSummary || (updatedMsgsWithUser.length >= 8) || Boolean(directIntent)),
+        initialChiefComplaint: data.initialChiefComplaint || curState.initialChiefComplaint || curState.symptom || null,
+        detectedLocation: data.detectedLocation || curState.detectedLocation || null,
+        nearestFacility: data.nearestFacility || curState.nearestFacility || null,
       };
 
       setClinicalState(nextClinicalState);
       clinicalStateRef.current = nextClinicalState;
 
-      // Auto-sync severity and duration with the triage form
+      // Auto-sync severity, duration, and detected location with the triage form
       if (nextClinicalState.severityScore && onSyncFields) {
         onSyncFields("severity_reported", nextClinicalState.severityScore);
       }
       if (nextClinicalState.duration && onSyncFields) {
         onSyncFields("duration", nextClinicalState.duration);
+      }
+      if (nextClinicalState.detectedLocation?.pincode && onSyncFields) {
+        onSyncFields("pincode", nextClinicalState.detectedLocation.pincode);
+      }
+      if (nextClinicalState.detectedLocation?.name && onSyncFields) {
+        onSyncFields("city", nextClinicalState.detectedLocation.name);
       }
 
       const botTime = Date.now();

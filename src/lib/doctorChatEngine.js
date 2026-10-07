@@ -12,84 +12,74 @@ import {
 } from "./clinicalAdaptiveEngine.js";
 import { getDispensaryOperatingStatus, getHospitalOpdOperatingStatus, sanitizeSymptomOrCondition, isLifeThreateningAmbulanceCase, stripNegatedPhrases, deduplicateRedFlags } from "./triageEngine.js";
 import { groqChatCompletion } from "./groqPool.js";
-import { executeCentralizedLlmProxy } from "./llmProxy.js";
+import { executeCentralizedLlmProxy, callOpenRouterProxy, callHuggingFaceProxy } from "./llmProxy.js";
 import { buildLearnedPromptSnippet } from "./feedbackLearningEngine.js";
+import {
+  detectAssamLocationFromText,
+  findNearestFacilitiesForLocation,
+  buildFacilityRecommendationMessage,
+} from "./assamLocations.js";
+import { isDispensary } from "./geo.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
 
 CORE CLINICAL RULES:
-1. FIRST UNDERSTAND THE MAIN CONDITION & COMPLAINT:
-   - When a caller describes a situation, event, incident, or symptom (e.g. "I slipped from the car", "I fell down", "I have pain in my side", "My chest is feeling heavy"), your FIRST PRIORITY is to understand the EXACT MAIN CONDITION, INJURY, PAIN LOCATION, OR SYMPTOMS.
-   - Clarify where they got hurt, where they feel pain, or what exact physical difficulty they are experiencing.
-   - DO NOT start by asking "Since when have you had this?" or asking about duration before understanding what happened to the patient and what their main condition is!
-2. NATURAL CLINICAL QUESTION FLOW:
-   - Step 1: Clarify and understand Main Complaint, Specific Symptoms, Pain Location, or Injury (e.g. "Where are you feeling pain or got injured, and what symptoms do you have?").
-   - Step 2: Emergency Red Flags & Associated Signs (e.g. bleeding, inability to move limbs, head strike, breathing trouble, dizziness, high fever).
-   - Step 3: Functional Impact & Clinical Probing (e.g. mobility, ability to stand/walk, fluid retention, speech effort) and onset/duration if not yet clear.
-   - Step 4: Final referral recommendation.
-3. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
-4. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
+1. EMPATHY, WARMTH & HUMAN COMPASSION:
+   - When a caller reports distress, pain, injury, fever, dizziness, nausea, or anxiety, ALWAYS begin with genuine human sympathy, emotional reassurance, and comforting words:
+     * e.g. "I'm so sorry you're dealing with this fever and shivering; please rest and keep warm.",
+     * "I understand how distressing this chest discomfort feels; please sit down calmly and rest.",
+     * "I'm really sorry to hear about your severe pain; we are here to support you and find the best care."
+   - Speak with the genuine warmth and compassion of an experienced, caring doctor or nurse triage counselor.
+
+2. ADAPTIVE CLINICAL PROBING FLOW (FLEXIBLE, THOROUGH & COMPASSIONATE):
+   - Do NOT rush to conclude or ask for location after just 2, 3, or 4 questions! Take time to thoroughly understand the caller's clinical condition.
+   - Stage 1: Clarify Specific Symptoms & Severity (e.g. for fever, probe whether it is high-grade with shivering or mild warmth; for pain, character, exact location, and radiation; for cuts/injuries, bleeding and movement).
+   - Stage 2: Duration & Onset Progression (e.g., "Since when have you been having this, and did it start suddenly today or a few days ago?").
+   - Stage 3: Associated Symptoms & Warning Signs (e.g., breathing trouble, nausea/vomiting, cold sweats, dizziness, rash, visual changes).
+   - Stage 4: Pre-Existing Conditions / Comorbidities (e.g., "Do you have any pre-existing health conditions such as high blood pressure, diabetes/sugar, asthma, heart, or kidney disease?").
+   - Stage 5: Medications Taken & Treatments (e.g., "Have you taken any medicines so far (such as Paracetamol or painkiller), and did they provide any relief?").
+   - Stage 6: Final Referral & Summary (Turn 5 to 7+):
+     * Set "isReadyForSummary": true ONLY when all key clinical facets (symptom details -> duration -> associated signs -> pre-existing diseases -> medications) have been thoroughly gathered, UNLESS there is an acute life-threatening emergency (cardiac arrest, massive bleeding, unresponsive) where immediate 108 dispatch is critical.
+   - FLEXIBLE RULE: If the caller already provided duration, a pre-existing disease, or medication in earlier turns, NEVER ask them again. Dynamically adapt and ask only what is still uncollected!
+
+3. FREE-FORM ENTITY EXTRACTION MANDATE:
+   - If the caller mentions ANY pre-existing condition (Diabetes, High BP, Asthma, Heart disease, Kidney disease, Thyroid, etc.) or ANY medication (Paracetamol, BP tablet, insulin, painkiller, etc.) at ANY turn, ALWAYS extract them into "comorbidity" and "medications" respectively!
+   - Even if your question was about associated symptoms, if the caller types a chronic disease or medicine, capture it immediately!
+
+4. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
+5. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
    - Formulate the probing question in English, followed by a concise Romanized Hinglish translation in parentheses:
      Format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
    - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
-5. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
-6. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
-7. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
-8. EMPATHY & EMOTIONAL REASSURANCE:
-   - For distress, pain, injury, or suicidal crisis: Express immediate heartfelt sympathy and reassurance before asking your question.
+6. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
+7. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
+8. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
 9. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
    Tier 1. 108 Ambulance Services (HIGH SEVERITY 9 & EMERGENCY):
-      - In the majority of cases where severity is 9 or 10, dispatch 108 Emergency Ambulance.
-      - However, for Severity 9, if the condition is explicitly NOT too severe (patient can speak normally, manageable pain, minor superficial scratch, stable condition without airway, circulatory, or traumatic collapse), forward to others (ESIC Hospital / 104 Health Helpline).
-      - Always dispatch 108 Ambulance immediately for:
-        * Heavy bleeding, severe cut, work injury, and cut & bleeding (acute traumatic injuries or deep bleeding at work MUST dispatch 108 even if caller reports manageable).
-        * Severe breathing difficulty / gasping for air / cyanosis.
-        * Unconsciousness / collapse / unresponsive.
-        * Uncontrollable heavy bleeding.
-        * Major trauma / serious road crash / fall from height / factory or industrial machinery accident.
-        * Prolonged seizures (>5 min) or anaphylaxis.
-        * Crushing chest pain / cardiac arrest.
-        * Explicit caller request for ambulance.
-   Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling, or HIV/AIDS/STI confidential information over the phone.
+      - Dispatch 108 Ambulance immediately for: heavy bleeding, severe work trauma, choking, severe respiratory failure, unconsciousness, crushing cardiac chest pain, or explicit caller request for ambulance.
+   Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling.
    Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
    Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
-   Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment (Inpatient IPD emergency, off-hours emergency, or direct referral).
-   Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network (non-ESIC public admissions, general public specialist care, child immunization).
+   Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment.
+   Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network.
 10. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
    - We are triage helpline call operators, NOT diagnosing doctors.
-   - NEVER diagnose or hypothesize medical diseases, pathologies, or syndromes unless caller explicitly named that disease in their own words.
-   - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'High Fever', 'Throbbing Headache', 'Limb Injury').
-   - NEVER suggest or name specific medicines, drugs, tablets, or injections.
+   - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'Fever & Chills', 'Throbbing Headache').
+   - NEVER suggest or name specific medicines to take.
 11. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
-   - NEVER ask the caller or patient to rate their pain or condition on a scale of 1 to 10 (e.g. "On a scale of 1 to 10...", "1-10 ki scale par...", "rate the severity").
-   - Real patients cannot rate numbers accurately.
-   - Instead, ALWAYS ask clinical, functional, or descriptive probing questions (e.g. "Are you able to stand and walk on your own, or are you too weak to get out of bed?", "Are you able to keep water down or is everything coming back up?", "Is the pain manageable or so intense that you cannot rest or move?").
-   - Internally deduce and calculate the severity (High / Moderate / Mild and score 1-10) based on their answers, red flags, and functional impairment.
-12. PROBING FOR COMORBIDITIES & MEDICATIONS (NO DEDICATED ALLERGY QUESTIONS):
-   - During the conversation without breaking the conversational flow (typically around question 6 or 7, flexible based on flow), the assistant should inquire about pre-existing COMORBIDITIES and any current MEDICATIONS:
-     -> Ask naturally: "Do you have any pre-existing health conditions such as high blood pressure, diabetes/sugar, asthma, heart, or kidney disease, and are you currently taking any medicines for them?" (Hinglish: "Kya aapko pehle se diabetes, high BP, asthma ya dil ki koi bimari hai, aur kya aap koi regular dawai lete hain?")
-     -> If caller mentions taking any acute medication for their current symptom (such as Paracetamol, antacid, vomiting pill like Ondansetron, or painkiller), note the medicine and whether it provided relief.
-   - DO NOT ask dedicated or isolated allergy questions. Remove allergy-specific questions completely.
-   - Actively detect and extract any mentioned comorbidities (Diabetes, Hypertension, Asthma, Cardiac, Kidney, Thyroid) and medications into the structured output.
-
-13. DAYTIME HOSPITAL PROBING & BALANCED 108 REFERRALS:
-   - In daytime hours (6:00 AM - 6:00 PM), hospitals and OPD facilities are open and operational.
-   - DO NOT send to 108 immediately on turns 1 and 2 for general complaints (pain, vomiting, fever, limb cuts, wounds).
-   - First ask probing questions to find out whether the condition is a true life-threatening emergency or manageable at a hospital.
-   - If symptoms are manageable or stable, steer toward ESIC Hospital or ESIS Dispensary rather than defaulting to 108.
-   - Keep responses concise, direct, and fast.
+   - NEVER ask the caller to rate on a 1 to 10 scale. Ask functional, clinical questions (e.g. "Are you able to walk or are you too weak to stand?", "Is the fever accompanied by shivering?").
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
   "probingQuestion": "Ask the IP: '...' (Hinglish: ...)",
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
-  "suspectedCondition": "Reported symptom area only (e.g. 'Abdominal Pain / Cramps'); NEVER diagnose a disease",
+  "suspectedCondition": "Reported symptom area only (e.g. 'Fever & Chills'); NEVER diagnose a disease",
   "isPsychiatric": true | false,
   "severity": "High" | "Moderate" | "Mild",
   "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Nearest Tie-Up Facility" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
-  "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms like 'no/nehi fever'"],
+  "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms"],
   "duration": "detected duration or accident time",
   "comorbidity": "Known chronic conditions (e.g. Diabetes, Hypertension, Asthma) or 'None reported by caller'",
   "medications": "Specific medicines taken or leave empty string '' if none / no answer",
@@ -372,6 +362,93 @@ export async function processDoctorConsultationTurn({
 
   const userTurnsCount = history.filter((m) => m.sender === "user" || m.role === "user").length + 1;
 
+  // Retrieve or lock initial chief complaint for session-long memory
+  const initialChiefComplaint =
+    currentClinicalState.initialChiefComplaint ||
+    currentClinicalState.symptom ||
+    (userTurnsCount <= 2 ? (sanitizeSymptomOrCondition(currentClinicalState.suspectedCondition || cleanInput, cleanInput) || cleanInput) : "Fever & Health complaint");
+
+  // Check if caller provides Assam location, landmark, or 6-digit PIN code
+  const detectedLoc = detectAssamLocationFromText(cleanInput);
+  const isLastQuestionAskingLocation = askedQuestionsList.some((q, idx) =>
+    idx >= askedQuestionsList.length - 2 && /\b(location|landmark|pincode|address|pata|kahan|district|city)\b/i.test(q)
+  );
+
+  if (detectedLoc.found) {
+    const facs = findNearestFacilitiesForLocation({
+      lat: detectedLoc.lat,
+      lng: detectedLoc.lng,
+      pincode: detectedLoc.pincode,
+      district: detectedLoc.district,
+    });
+    const rec = buildFacilityRecommendationMessage({
+      locationName: detectedLoc.name,
+      nearestDispensary: facs.nearestDispensary,
+      nearestHospital: facs.nearestHospital,
+      conditionLabel: initialChiefComplaint || currentClinicalState.suspectedCondition || "your condition",
+      severity: currentClinicalState.severity || "Moderate",
+    });
+
+    return {
+      probingQuestion: rec.text,
+      suggestedAnswers: rec.options,
+      suspectedCondition: currentClinicalState.suspectedCondition || "Medical Consultation",
+      isPsychiatric: Boolean(currentClinicalState.isPsychiatric),
+      severity: currentClinicalState.severity || "Moderate",
+      severityScore: currentClinicalState.severityScore || 5,
+      referralDestination: isDispensary(rec.facility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralReason: `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${rec.facility?.name}.`,
+      is_dual_protocol: false,
+      call_referral_secondary: null,
+      redFlagsDetected: currentClinicalState.redFlagsDetected || [],
+      duration: currentClinicalState.duration || "Reported today",
+      comorbidity: currentClinicalState.comorbidity || "None reported by caller",
+      comorbidities: currentClinicalState.comorbidity || "None reported by caller",
+      allergies: currentClinicalState.allergies || "None reported by caller",
+      medication: currentClinicalState.medications || "",
+      medications: currentClinicalState.medications || "",
+      isReadyForSummary: true,
+      isReferralReady: true,
+      initialChiefComplaint,
+      detectedLocation: detectedLoc,
+      nearestFacility: rec.facility,
+      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}. Routed to nearest facility: ${rec.facility?.name} (${rec.facility?.roadKm ? `${rec.facility.roadKm} km` : "nearby"}). Address: ${rec.facility?.address || "Assam"}.`,
+    };
+  }
+
+  // If caller is answering a location question or entered an unrecognized locality:
+  if ((detectedLoc.needsPincode || (isLastQuestionAskingLocation && !detectedLoc.found)) && !/^(no|nahi|none|kuch nahi|not now|baad me)/i.test(cleanInput)) {
+    return {
+      probingQuestion: 'Ask the IP: "Could you please share your 6-digit postal PIN code so we can pinpoint the exact nearest ESIS Dispensary or hospital near your area?" (Hinglish: "Kripya apna 6-digit PIN code batayein taaki hum aapke ilaqe ka sabse nazdeeki ESIS Dispensary dhoondh sakein?")',
+      suggestedAnswers: [
+        "781001 (Guwahati)",
+        "781005 (Zoo Road / Japorigog)",
+        "781006 (Dispur)",
+        "781022 (Beltola / Six Mile)",
+      ],
+      suspectedCondition: currentClinicalState.suspectedCondition || "Medical Consultation",
+      isPsychiatric: Boolean(currentClinicalState.isPsychiatric),
+      severity: currentClinicalState.severity || "Moderate",
+      severityScore: currentClinicalState.severityScore || 5,
+      referralDestination: "ESIS Dispensary",
+      referralReason: "Awaiting caller PIN code to finalize nearest dispensary routing.",
+      is_dual_protocol: false,
+      call_referral_secondary: null,
+      redFlagsDetected: currentClinicalState.redFlagsDetected || [],
+      duration: currentClinicalState.duration || "Reported today",
+      comorbidity: currentClinicalState.comorbidity || "None reported by caller",
+      comorbidities: currentClinicalState.comorbidity || "None reported by caller",
+      allergies: currentClinicalState.allergies || "None reported by caller",
+      medication: currentClinicalState.medications || "",
+      medications: currentClinicalState.medications || "",
+      isReadyForSummary: false,
+      isReferralReady: false,
+      initialChiefComplaint,
+      isAwaitingPincode: true,
+      clinicalSummary: currentClinicalState.clinicalSummary || "Awaiting PIN code to calculate nearest healthcare facility.",
+    };
+  }
+
   // Retrieve any learned feedback rules from human agents relevant to current caller presentation
   const learnedSnippet = await buildLearnedPromptSnippet(
     `${cleanInput} ${currentClinicalState.suspectedCondition || ""}`,
@@ -380,9 +457,11 @@ export async function processDoctorConsultationTurn({
 
   // =========================================================================
   // ULTRA-FAST AI ENGINE CASCADE:
-  // Priority 1: Groq Multi-Key Pool (llama-3.1-8b-instant / llama-3.3-70b-versatile, ~150-350ms)
-  // Priority 2: Google Gemini 2.0 Flash (Direct, ~400-600ms)
-  // Priority 3: Progressive Deterministic Clinical Engine (< 5ms)
+  // Priority 1: Groq Multi-Key Pool (qwen/qwen3.8-27b / llama-3.3-70b-versatile, ~150-350ms)
+  // Priority 2: OpenRouter Multi-Model Gateway (qwen/qwen-2.5-72b-instruct / llama-3.3-70b)
+  // Priority 3: Hugging Face Serverless (Qwen/Qwen3.8-27B)
+  // Priority 4: Google Gemini 2.0 Flash (Direct)
+  // Priority 5: Progressive Deterministic Clinical Engine (< 5ms)
   // =========================================================================
 
   const conversationMessages = [
@@ -390,18 +469,25 @@ export async function processDoctorConsultationTurn({
       role: "system",
       content: `${SYSTEM_PROMPT}
 
+SESSION MEMORY ANCHOR (CHIEF COMPLAINT):
+The caller started this triage conversation presenting with: "${initialChiefComplaint}".
+You must NEVER forget this starting point! Even when you probe for duration, associated symptoms, pre-existing diseases, or current medications, always anchor your empathy and questions around "${initialChiefComplaint}" (e.g. 'For this fever that you mentioned...', 'Have you taken any medicines for your fever?').
+
 CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
-1. REVIEW HISTORY: Never re-ask or rephrase questions already answered in previous turns.
-2. FIRST UNDERSTAND MAIN COMPLAINT & SYMPTOMS: On initial turns or when a caller describes a situation/incident/pain, focus on clarifying the injury, pain location, or specific symptoms. DO NOT blindly ask duration/time first.
-3. CONVERSATION ADVANCEMENT:
-   - Turn 1: Main complaint, symptoms, pain location, or injury details.
-   - Turn 2: Key Associated Symptoms & Emergency Red Flags (e.g. bleeding, inability to move, breathing trouble, dizziness, head strike, fever).
-   - Turn 3: Functional impact & clinical probing (e.g. mobility, ability to keep fluids/food, speech effort, breathing distress) and onset/duration if still needed. NEVER ask the caller to rate on a 1-10 scale; deduce severity internally.
-   - Turn 4+: Set "isReadyForSummary": true and provide clear final referral.
-4. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
-5. ADAPT TO SYMPTOM CLARIFICATION: If the caller updates, clarifies, or changes their symptom (e.g. from general stomach pain to 'periods cramps' or vice-versa), immediately adapt the suspected condition to the clarified symptom (e.g. 'Dysmenorrhea / Menstrual Cramps') and ask probing questions specifically tailored to that complaint. NEVER assume chest pain or unrelated conditions unless explicitly stated by the caller.
-6. NEVER HALLUCINATE CHEST PAIN: Only assess cardiac conditions if the caller affirmatively reported chest pain or heart symptoms.
-7. Keep questions concise and empathetic in format: Ask the IP: "..." (Hinglish: "...")`,
+1. EMPATHY & WARM REASSURANCE:
+   - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
+2. THOROUGH ADAPTIVE CLINICAL PROGRESSION (DO NOT RUSH TO CONCLUDE):
+   - Turn 1: Main complaint specifics, nature of symptoms, and severity (probe fever degree/chills, pain character, wound depth).
+   - Turn 2: Duration & onset progression (how long has this been present, did it start suddenly today or a few days ago).
+   - Turn 3: Associated symptoms & warning signs (breathing difficulty, nausea/vomiting, sweating, dizziness, rash).
+   - Turn 4: Pre-existing chronic diseases / Comorbidities (High BP, Diabetes/Sugar, Asthma, Heart, Kidney, Thyroid).
+   - Turn 5: Medications taken so far (Paracetamol, painkiller, BP medicines) and any relief.
+   - Turn 6+: Conclude clinical assessment with clear final referral and set "isReadyForSummary": true.
+   - DO NOT set "isReadyForSummary": true on Turns 1, 2, 3, or 4 unless it is a life-threatening crisis (cardiac arrest, unconscious, massive hemorrhage)!
+3. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
+4. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
+5. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
+6. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
@@ -410,44 +496,92 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
     {
       role: "user",
       content: `Caller: "${cleanInput}".
-Clinical Context: Current Condition: "${currentClinicalState.suspectedCondition || "Under Assessment"}", Known Duration: "${currentClinicalState.duration || "Not specified"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
+Clinical Context: Chief Complaint: "${initialChiefComplaint}", Current Condition: "${currentClinicalState.suspectedCondition || "Under Assessment"}", Known Duration: "${currentClinicalState.duration || "Not specified"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
 Already Asked Questions: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
-Respond strictly in valid JSON format:
+Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 words):
 { "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "comorbidity": "Known chronic conditions (Diabetes, Hypertension, Asthma) or None reported by caller", "medications": "Medicines taken or empty string '' if none / no answer", "isReadyForSummary": false, "clinicalSummary": "..." }`,
     },
   ];
 
-  // 1. Direct Groq Fast Multi-Key Pool (Rotates across all keys on 429/failures)
+  // 1. Direct Groq Fast Multi-Key Pool (Rotates across 11 healthy keys on 429/failures)
   try {
     const groqResult = await groqChatCompletion({
       messages: conversationMessages,
       model: "qwen/qwen3.8-27b",
       candidateModels: ["qwen/qwen3.8-27b"],
       temperature: 0.2,
-      max_tokens: 450,
-      timeoutMs: 2500,
+      max_tokens: 550,
+      timeoutMs: 3500,
       maxAttempts: 3,
     });
 
     if (groqResult?.content) {
       const parsed = JSON.parse(groqResult.content);
       if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-        return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
+        return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
       }
     }
   } catch (groqErr) {
     console.warn("[DoctorChat] Groq pool notice:", groqErr.message);
   }
 
-  // 2. Direct Gemini Flash (Fallback if all Groq keys are exhausted)
+  // 1.3 Direct OpenRouter Multi-Model Gateway Failover (Qwen 2.5 72B / Llama 3.3 70B)
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const orResult = await callOpenRouterProxy({
+        messages: conversationMessages,
+        candidateModels: ["qwen/qwen-2.5-72b-instruct", "openrouter/free"],
+        temperature: 0.2,
+        max_tokens: 550,
+        response_format: { type: "json_object" },
+        timeoutMs: 3500,
+      });
+
+      if (orResult?.content) {
+        const cleaned = orResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+          return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
+        }
+      }
+    } catch (orErr) {
+      console.warn("[DoctorChat] OpenRouter notice:", orErr.message);
+    }
+  }
+
+  // 1.5 Direct Hugging Face Serverless (Qwen/Qwen3.8-27B) Failover
+  if (process.env.HUGGINGFACE_API_KEY) {
+    try {
+      const hfResult = await callHuggingFaceProxy({
+        messages: conversationMessages,
+        model: "Qwen/Qwen3.8-27B",
+        temperature: 0.2,
+        max_tokens: 550,
+        response_format: { type: "json_object" },
+        timeoutMs: 3500,
+      });
+
+      if (hfResult?.content) {
+        const cleaned = hfResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
+          return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
+        }
+      }
+    } catch (hfErr) {
+      console.warn("[DoctorChat] Hugging Face notice:", hfErr.message);
+    }
+  }
+
+  // 2. Direct Gemini Flash (Fallback if upstream keys are exhausted)
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-      const promptText = `${SYSTEM_PROMPT}\n\nCaller: "${cleanInput}"\nContext: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", Turn: ${userTurnsCount}\nAlready asked: ${JSON.stringify(askedQuestionsList)}\n${learnedSnippet ? `\n${learnedSnippet}` : ""}\nStrictly return JSON object with anti-repetition.`;
+      const promptText = `${SYSTEM_PROMPT}\n\nChief Complaint: "${initialChiefComplaint}"\nCaller: "${cleanInput}"\nContext: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", Turn: ${userTurnsCount}\nAlready asked: ${JSON.stringify(askedQuestionsList)}\n${learnedSnippet ? `\n${learnedSnippet}` : ""}\nStrictly return JSON object with anti-repetition.`;
 
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
@@ -469,7 +603,7 @@ Respond strictly in valid JSON format:
         if (content) {
           const parsed = JSON.parse(content);
           if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-            return normalizeDoctorOutput(parsed, cleanInput, currentClinicalState, askedQuestionsList, history);
+            return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
           }
         }
       }
@@ -479,7 +613,7 @@ Respond strictly in valid JSON format:
   }
 
   // 3. Local Progressive Clinical Engine (<5ms, 100% accurate, zero network delay)
-  return buildLocalDoctorConsultationFallback(cleanInput, history, currentClinicalState);
+  return buildLocalDoctorConsultationFallback(cleanInput, history, { ...currentClinicalState, initialChiefComplaint });
 }
 
 /**
@@ -1086,30 +1220,61 @@ export function extractComorbiditiesFromText(text = "", existingComorbidity = nu
   if (/\b(diabet(?:es|ic)|sugar|madhumeh|high blood sugar|type\s*2\s*diabetes|type\s*1\s*diabetes)\b/i.test(lower)) {
     conditions.push("Diabetes / High Blood Sugar");
   }
-  if (/\b(hypertension|high\s*bp|blood\s*pressure|high\s*pressure|uchh\s*raktchap)\b/i.test(lower)) {
+  if (/\b(hypertension|high\s*bp|blood\s*pressure|high\s*pressure|uchh\s*raktchap|bp\s*ki\s*bimari|bp\s*problem)\b/i.test(lower)) {
     conditions.push("Hypertension / High BP");
   }
   if (/\b(asthma|damah|dama\b|wheezing|copd|respiratory\s*disease)\b/i.test(lower)) {
     conditions.push("Bronchial Asthma / Respiratory condition");
   }
-  if (/\b(heart\s*disease|cardiac|cad\b|heart\s*attack|dil\s*ki\s*bimari|angina|stent|bypass)\b/i.test(lower)) {
+  if (/\b(heart\s*disease|cardiac|cad\b|heart\s*attack|dil\s*ki\s*bimari|angina|stent|bypass|heart\s*problem|dil\s*ka\s*mariz)\b/i.test(lower)) {
     conditions.push("Cardiovascular / Heart Disease");
   }
-  if (/\b(kidney\s*disease|renal|ckd\b|dialysis|kidney\s*problem|gurde)\b/i.test(lower)) {
+  if (/\b(kidney\s*disease|renal|ckd\b|dialysis|kidney\s*problem|gurde|kidney\s*stone)\b/i.test(lower)) {
     conditions.push("Chronic Kidney Disease / Renal illness");
   }
   if (/\b(thyroid|hypothyroid|hyperthyroid)\b/i.test(lower)) {
     conditions.push("Thyroid disorder");
   }
-  if (/\b(liver\s*disease|cirrhosis|jaundice|hepatitis|liver\s*problem)\b/i.test(lower)) {
+  if (/\b(liver\s*disease|cirrhosis|jaundice|hepatitis|liver\s*problem|fatty\s*liver)\b/i.test(lower)) {
     conditions.push("Liver disease / condition");
+  }
+  if (/\b(tuberculosis|tb\b|t\.b\.)\b/i.test(lower)) {
+    conditions.push("Tuberculosis (TB)");
+  }
+  if (/\b(arthritis|gathiya|joint\s*pain\s*disease|rheumatoid)\b/i.test(lower)) {
+    conditions.push("Arthritis / Gathiya");
+  }
+  if (/\b(stroke|paralysis|lakwa)\b/i.test(lower)) {
+    conditions.push("Stroke / Paralysis history");
+  }
+  if (/\b(epilepsy|mirgi|seizure\s*disorder|fits\b)\b/i.test(lower)) {
+    conditions.push("Epilepsy / Seizure disorder");
+  }
+  if (/\b(anemia|khoon\s*ki\s*kami|low\s*hemoglobin)\b/i.test(lower)) {
+    conditions.push("Anemia");
+  }
+  if (/\b(cancer|tumor|chemo|malignan)\b/i.test(lower)) {
+    conditions.push("Oncology / Cancer history");
+  }
+  if (/\b(ulcer|gerd|peptic\s*ulcer|acidity\s*problem)\b/i.test(lower)) {
+    conditions.push("Peptic Ulcer / Acid Peptic Disease");
+  }
+
+  // Preserve existing conditions and merge
+  if (existingComorbidity && !/^(none|nil|no pre|none reported)/i.test(existingComorbidity)) {
+    const existingList = existingComorbidity.split(";").map((s) => s.trim()).filter(Boolean);
+    existingList.forEach((ec) => {
+      if (!conditions.some((c) => c.toLowerCase().includes(ec.toLowerCase()) || ec.toLowerCase().includes(c.toLowerCase()))) {
+        conditions.unshift(ec);
+      }
+    });
   }
 
   if (conditions.length > 0) {
-    return conditions.join("; ");
+    return Array.from(new Set(conditions)).join("; ");
   }
 
-  const directMatch = lower.match(/\b(?:history of|suffering from|patient has|bimari hai)\s+([a-zA-Z\s]{2,30})/i);
+  const directMatch = lower.match(/\b(?:history of|suffering from|patient has|bimari hai|patient is a known case of)\s+([a-zA-Z\s]{2,30})/i);
   if (directMatch && directMatch[1]) {
     const rawCond = directMatch[1].trim().replace(/\b(hai|tha|se|ki)\b/gi, "").trim();
     if (rawCond.length > 2 && !/^(no|none|nahi|nil)/i.test(rawCond)) {
@@ -1207,12 +1372,28 @@ export function extractMedicationsFromText(text = "", existingMed = null) {
   if (/\b(insulin|metformin|glycomet)\b/i.test(lower)) {
     medsFound.push("Insulin / Metformin");
   }
-  if (/\b(telmisartan|amlodipine|atenolol|bp\s+medicine|bp\s+dawai)\b/i.test(lower)) {
+  if (/\b(telmisartan|amlodipine|atenolol|bp\s+medicine|bp\s+dawai|bp\s+tablet)\b/i.test(lower)) {
     medsFound.push("BP medicine (Telmisartan / Amlodipine)");
+  }
+  if (/\b(azithromycin|amoxicillin|augmentin|cefixime|antibiotic)\b/i.test(lower)) {
+    medsFound.push("Antibiotic medication");
+  }
+  if (/\b(cough\s*syrup|benadryl|ascoril|syrup)\b/i.test(lower)) {
+    medsFound.push("Cough syrup");
+  }
+
+  // Preserve existing medicines and merge
+  if (existingMed && !/^(none|nil|no prior|none reported)/i.test(existingMed)) {
+    const existingList = existingMed.split(";").map((s) => s.trim()).filter(Boolean);
+    existingList.forEach((em) => {
+      if (!medsFound.some((m) => m.toLowerCase().includes(em.toLowerCase()) || em.toLowerCase().includes(m.toLowerCase()))) {
+        medsFound.unshift(em);
+      }
+    });
   }
 
   if (medsFound.length > 0) {
-    return medsFound.join("; ");
+    return Array.from(new Set(medsFound)).join("; ");
   }
 
   const genericMedMatch = lower.match(/\b(?:taking|take|taken|dawai\s+li|medicine\s+li)\s+([a-zA-Z0-9\s]{2,30})/i);
@@ -1445,10 +1626,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     /\b(cardiac arrest|heart attack|unconscious|behosh|not breathing|choking|drank poison|poisoning|drowning)\b/i.test(allContext);
 
   const isReferralReady =
-    userTurnsCount >= 3 ||
-    Boolean(raw.isReadyForSummary) ||
     isLifeThreateningCrisis ||
-    isDirect;
+    isDirect ||
+    (Boolean(raw.isReadyForSummary) && userTurnsCount >= 5) ||
+    userTurnsCount >= 6;
 
   if (!isReferralReady) {
     referralDestination = null;
@@ -1910,9 +2091,31 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     addDetectedFlag("Heavy uncontrolled bleeding");
   }
 
-  const detectedComorbidity = raw.comorbidity || raw.comorbidities || extractComorbiditiesFromText(allContext, prevState.comorbidity || prevState.comorbidities);
+  const extractedComorbid = extractComorbiditiesFromText(allContext, prevState.comorbidity || prevState.comorbidities);
+  const detectedComorbidity = 
+    (extractedComorbid && !/^(none|nil|none reported)/i.test(extractedComorbid))
+      ? extractedComorbid
+      : (raw.comorbidity && !/^(none|nil|none reported|known chronic|empty)/i.test(raw.comorbidity)
+          ? raw.comorbidity
+          : (prevState.comorbidity || "None reported by caller"));
+
   const detectedAllergies = raw.allergies || raw.allergy || extractAllergiesFromText(allContext, prevState.allergies);
-  const detectedMedications = raw.medications || raw.medication || extractMedicationsFromText(allContext, prevState.medications || prevState.medication);
+
+  const extractedMeds = extractMedicationsFromText(allContext, prevState.medications || prevState.medication);
+  const detectedMedications =
+    extractedMeds
+      ? extractedMeds
+      : (raw.medications && !/^(none|nil|empty|medicines taken)/i.test(raw.medications)
+          ? raw.medications
+          : (prevState.medications || ""));
+
+  const isReadyForSummary = Boolean(
+    isLifeThreateningCrisis ||
+    directIntent ||
+    (raw.isReadyForSummary && userTurnsCount >= 5) ||
+    (userTurnsCount >= 6 && isDurationAlreadyKnown) ||
+    (userTurnsCount >= 7)
+  );
 
   return {
     probingQuestion,
@@ -1932,18 +2135,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     allergies: detectedAllergies,
     medication: detectedMedications,
     medications: detectedMedications,
-    isReadyForSummary: Boolean(
-      raw.isReadyForSummary ||
-      userTurnsCount >= 3 ||
-      askedQuestionsList.length >= 3 ||
-      history.length >= 4 ||
-      ((askedQuestionsList.some((q) => /\b(move|walk|normally|daily activities|weight|turn head|stand|hilane|gardan)\b/i.test(q)) || severity === "High") &&
-       askedQuestionsList.some((q) => /\b(pre-existing|diabetes|high bp|asthma|blood pressure|comorbidit|pehle se)\b/i.test(q))) ||
-      is104PhoneDoctor
-    ),
+    isReadyForSummary,
+    initialChiefComplaint: prevState.initialChiefComplaint || raw.initialChiefComplaint || finalCondition || "Health complaint",
+    detectedLocation: raw.detectedLocation || prevState.detectedLocation || null,
+    nearestFacility: raw.nearestFacility || prevState.nearestFacility || null,
     clinicalSummary: sanitizeSymptomOrCondition(
       raw.clinicalSummary ||
-        `Caller presents with ${finalCondition || "symptoms"}. Evaluated Severity: ${severity}. Duration: ${duration}. Recommended Action: ${referralDestination || "Medical Evaluation"}.`,
+        `Caller presents with ${finalCondition || "symptoms"}. Evaluated Severity: ${severity}. Duration: ${duration}.${detectedComorbidity && !/none/i.test(detectedComorbidity) ? ` Comorbidity: ${detectedComorbidity}.` : ""}${detectedMedications ? ` Medication: ${detectedMedications}.` : ""} Recommended Action: ${referralDestination || "Medical Evaluation"}.`,
       userUtterances
     ),
   };
@@ -1981,6 +2179,92 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const hasAsked = (keywords) => {
     return askedQuestions.some((q) => keywords.some((kw) => q.includes(kw.toLowerCase())));
   };
+
+  const initialChiefComplaint =
+    prevState.initialChiefComplaint ||
+    prevState.symptom ||
+    (userMessages.length <= 1 ? (sanitizeSymptomOrCondition(prevState.suspectedCondition || cleanInput, cleanInput) || cleanInput) : "Fever & Health complaint");
+
+  // Check if caller provides Assam location, landmark, or 6-digit PIN code
+  const detectedLoc = detectAssamLocationFromText(cleanInput);
+  const isLastQuestionAskingLocation = askedQuestions.some((q, idx) =>
+    idx >= askedQuestions.length - 2 && /\b(location|landmark|pincode|address|pata|kahan|district|city)\b/i.test(q)
+  );
+
+  if (detectedLoc.found) {
+    const facs = findNearestFacilitiesForLocation({
+      lat: detectedLoc.lat,
+      lng: detectedLoc.lng,
+      pincode: detectedLoc.pincode,
+      district: detectedLoc.district,
+    });
+    const rec = buildFacilityRecommendationMessage({
+      locationName: detectedLoc.name,
+      nearestDispensary: facs.nearestDispensary,
+      nearestHospital: facs.nearestHospital,
+      conditionLabel: initialChiefComplaint || prevState.suspectedCondition || "your condition",
+      severity: prevState.severity || "Moderate",
+    });
+
+    return {
+      probingQuestion: rec.text,
+      suggestedAnswers: rec.options,
+      suspectedCondition: prevState.suspectedCondition || "Medical Consultation",
+      isPsychiatric: Boolean(prevState.isPsychiatric),
+      severity: prevState.severity || "Moderate",
+      severityScore: prevState.severityScore || 5,
+      referralDestination: isDispensary(rec.facility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralReason: `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${rec.facility?.name}.`,
+      is_dual_protocol: false,
+      call_referral_secondary: null,
+      redFlagsDetected: prevState.redFlagsDetected || [],
+      duration: prevState.duration || "Reported today",
+      comorbidity: prevState.comorbidity || "None reported by caller",
+      comorbidities: prevState.comorbidity || "None reported by caller",
+      allergies: prevState.allergies || "None reported by caller",
+      medication: prevState.medications || "",
+      medications: prevState.medications || "",
+      isReadyForSummary: true,
+      isReferralReady: true,
+      initialChiefComplaint,
+      detectedLocation: detectedLoc,
+      nearestFacility: rec.facility,
+      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}. Routed to nearest facility: ${rec.facility?.name} (${rec.facility?.roadKm ? `${rec.facility.roadKm} km` : "nearby"}). Address: ${rec.facility?.address || "Assam"}.`,
+    };
+  }
+
+  // If caller is answering a location question or entered an unrecognized locality:
+  if ((detectedLoc.needsPincode || (isLastQuestionAskingLocation && !detectedLoc.found)) && !/^(no|nahi|none|kuch nahi|not now|baad me)/i.test(cleanInput)) {
+    return {
+      probingQuestion: 'Ask the IP: "Could you please share your 6-digit postal PIN code so we can pinpoint the exact nearest ESIS Dispensary or hospital near your area?" (Hinglish: "Kripya apna 6-digit PIN code batayein taaki hum aapke ilaqe ka sabse nazdeeki ESIS Dispensary dhoondh sakein?")',
+      suggestedAnswers: [
+        "781001 (Guwahati)",
+        "781005 (Zoo Road / Japorigog)",
+        "781006 (Dispur)",
+        "781022 (Beltola / Six Mile)",
+      ],
+      suspectedCondition: prevState.suspectedCondition || "Medical Consultation",
+      isPsychiatric: Boolean(prevState.isPsychiatric),
+      severity: prevState.severity || "Moderate",
+      severityScore: prevState.severityScore || 5,
+      referralDestination: "ESIS Dispensary",
+      referralReason: "Awaiting caller PIN code to finalize nearest dispensary routing.",
+      is_dual_protocol: false,
+      call_referral_secondary: null,
+      redFlagsDetected: prevState.redFlagsDetected || [],
+      duration: prevState.duration || "Reported today",
+      comorbidity: prevState.comorbidity || "None reported by caller",
+      comorbidities: prevState.comorbidity || "None reported by caller",
+      allergies: prevState.allergies || "None reported by caller",
+      medication: prevState.medications || "",
+      medications: prevState.medications || "",
+      isReadyForSummary: false,
+      isReferralReady: false,
+      initialChiefComplaint,
+      isAwaitingPincode: true,
+      clinicalSummary: prevState.clinicalSummary || "Awaiting PIN code to calculate nearest healthcare facility.",
+    };
+  }
 
   // Direct Referral Preference Check First
   const directIntent = detectDirectCallerReferralIntent(cleanInput);
@@ -3234,39 +3518,65 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(cleanInput)
     );
 
-    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where"]) && !callerAlreadyReportedSymptoms) {
+    if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where", "how high", "fever level"]) && !callerAlreadyReportedSymptoms) {
       currentStep = {
-        title: "Main Complaint & Specific Symptoms",
-        question: 'Ask the IP: "Could you please describe where you are feeling pain or discomfort and what exact symptoms you are experiencing?" (Hinglish: "Kripya batayein aapko kahan dard ya takleef mehsoos ho rahi hai aur kya mukhya lakshan hain?")',
+        title: "Main Complaint & Symptom Specifics",
+        question: 'Ask the IP: "I understand you are feeling unwell. Could you please describe what exact symptoms you are experiencing, and whether there is any severe pain, chills, or discomfort?" (Hinglish: "Hum samajh sakte hain aap pareshan hain. Kripya batayein aapko kya mukhya takleef ho rahi hai, aur kya tez dard ya thand lag rahi hai?")',
         options: [
-          "Pain or injury in limbs / body",
-          "Chest discomfort or breathing difficulty",
-          "Stomach pain / gastric issue / nausea",
-          "Headache, dizziness, or fever",
-        ],
-        severity: "Moderate",
-      };
-    } else if (!hasAsked(["other symptoms", "fever, pain", "associated", "bukhar, dard", "chakkar"])) {
-      currentStep = {
-        title: "Associated Red Flags & Secondary Symptoms",
-        question: 'Ask the IP: "Are you experiencing any other symptoms such as severe pain, breathing difficulty, bleeding, or dizziness?" (Hinglish: "Kya aapko tez dard, saans lene me dikkat, khoon behna ya chakkar jaisi koi aur pareshani bhi hai?")',
-        options: [
-          "Severe pain and physical weakness",
-          "Shortness of breath / dizziness",
-          "Mild fever or stomach upset",
-          "No other emergency symptoms",
+          "Fever with chills and body weakness",
+          "Chest discomfort or heavy pressure",
+          "Stomach pain / cramps / nausea",
+          "Headache, dizziness, or uneasiness",
         ],
         severity: "Moderate",
       };
     } else if (!hasKnownDuration && !hasAsked(["since when", "how many days", "duration", "kab se"])) {
       currentStep = {
         title: "Complaint Duration & Onset",
-        question: 'Ask the IP: "Since when have you had this condition, and did it start suddenly today or a few days ago?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitne dino se ho rahi hai?")',
+        question: 'Ask the IP: "I am noting this down carefully. Since when have you been having this condition, and did it start suddenly today or a few days ago?" (Hinglish: "Yeh takleef kab se shuru hui hai aur kitne dino se ho rahi hai?")',
         options: [
           "Started suddenly today (< 24 hours)",
           "For the past 1 to 2 days",
           "For 3 to 7 days (Ongoing)",
           "More than a week / persistent",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["other symptoms", "fever, pain", "associated", "bukhar, dard", "chakkar", "vomiting, nausea", "sweating"])) {
+      currentStep = {
+        title: "Associated Red Flags & Secondary Symptoms",
+        question: 'Ask the IP: "Are you experiencing any other associated symptoms such as breathing difficulty, nausea, vomiting, dizziness, or cold sweating?" (Hinglish: "Kya aapko saans lene me dikkat, ulti, chakkar, ya thanda pasina jaisi koi aur pareshani bhi mehsoos ho rahi hai?")',
+        options: [
+          "Nausea, dizziness, or sweating",
+          "Shortness of breath / severe weakness",
+          "Body ache and shivering",
+          "No other emergency symptoms",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"])) {
+      currentStep = {
+        title: "Pre-existing Medical Conditions Check",
+        question:
+          'Ask the IP: "To guide you safely, do you have any pre-existing health conditions such as high blood pressure, diabetes/sugar, asthma, heart, or kidney disease?" (Hinglish: "Kya aapko pehle se high BP, diabetes/sugar, asthma, dil ya gurde ki koi purani bimari hai?")',
+        options: [
+          "History of High BP / hypertension",
+          "History of Diabetes / high sugar",
+          "History of Asthma / heart disease",
+          "No pre-existing medical conditions",
+        ],
+        severity: "Moderate",
+      };
+    } else if (!hasAsked(["taken any medicine", "pain reliever", "paracetamol", "dawai li", "medication", "regular medicine"])) {
+      currentStep = {
+        title: "Medications & Treatments Taken",
+        question:
+          'Ask the IP: "Have you taken any medicines or tablets so far for this (such as Paracetamol or painkiller), and did they provide any relief?" (Hinglish: "Kya aapne is takleef ke liye koi dawai ya goli li hai jaise Paracetamol, aur kya usse aaram mila?")',
+        options: [
+          "Took Paracetamol with mild relief",
+          "Took painkiller / antacid, but pain continues",
+          "Have not taken any medicines yet",
+          "Taking regular prescribed medicines daily",
         ],
         severity: "Moderate",
       };
@@ -3279,19 +3589,6 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Moderate discomfort, able to do light tasks",
           "Mild discomfort, managing daily routine",
           "Need doctor examination and medicines today",
-        ],
-        severity: "Moderate",
-      };
-    } else if (!hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"])) {
-      currentStep = {
-        title: "Comorbidity & Ongoing Medication Check",
-        question:
-          'Ask the IP: "Do you have any pre-existing health conditions such as high blood pressure, diabetes, asthma, or heart disease, and are you taking any regular medications for them?" (Hinglish: "Kya aapko pehle se high BP, diabetes/sugar, asthma ya dil ki koi bimari hai, aur kya aap koi regular dawai lete hain?")',
-        options: [
-          "History of High BP / taking BP medicine",
-          "History of Diabetes / on sugar medication",
-          "History of Asthma / using inhaler",
-          "No pre-existing health conditions or regular medicines",
         ],
         severity: "Moderate",
       };
@@ -3453,12 +3750,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "blood pressure", "purani bimari", "comorbidit"]);
 
   const isReadyForSummaryFallback = Boolean(
-    isSevere ||
     isLifeThreateningCrisis ||
-    hasAnsweredKeyQuestionsFallback ||
-    userTurnsCountFallback >= 3 ||
-    askedQuestions.length >= 3 ||
-    history.length >= 4
+    (userTurnsCountFallback >= 5 && hasAnsweredKeyQuestionsFallback) ||
+    (userTurnsCountFallback >= 6)
   );
 
   if (isReadyForSummaryFallback && !isLifeThreateningCrisis && !isSevere) {
@@ -3466,10 +3760,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       title: "Triage Evaluation Complete",
       question: `Ask the IP: "We have carefully noted all your symptoms and medical details regarding ${conditionLabel}. Please confirm your location so I can direct you to the nearest ESIS Dispensary for doctor consultation and medicines." (Hinglish: "Humne aapki ${conditionLabel} aur medical details note kar li hain. Kripya apna address/landmark batayein taaki najdeeki ESIS Dispensary ka margdarshan kiya ja sake.")`,
       options: [
-        "Please guide me to the nearest ESIS Dispensary",
-        "Connect me with 104 tele-doctor",
-        "Need directions to ESIC Hospital",
-        "Thank you, noted",
+        "In Guwahati (Paltan Bazar)",
+        "Zoo Road / Tiniali area",
+        "Dispur / Six Mile / Beltola",
+        "Share 6-digit PIN code",
       ],
       severity: "Moderate",
     };

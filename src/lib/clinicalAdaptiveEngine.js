@@ -3000,18 +3000,84 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
   }
 
   let detectedMedications = null;
-  if (/\b(no\s+medicin(?:e|es)|no\s+medication|haven'?t\s+taken|not\s+taken|koi\s+dawa\s+nahi|dawai\s+nahi|none|nil)\b/i.test(text)) {
+  if (/\b(no\s+medicin(?:e|es)|no\s+medication|haven'?t\s+taken|not\s+taken|koi\s+dawa\s+nahi|dawai\s+nahi|kuch\s+nahi\s+liya|none|nil|na\s+dawa)\b/i.test(text)) {
     detectedMedications = "";
   } else {
     const medsFound = [];
-    if (/\b(ondansetron|vomikind|domperidone|emset)\b/i.test(text)) medsFound.push("Tab. Ondansetron / Anti-emetic taken for vomiting");
-    if (/\b(ors|electral|electrolyte)\b/i.test(text)) medsFound.push("ORS oral rehydration started");
-    if (/\b(paracetamol|dolo|crocin|pcm)\b/i.test(text)) medsFound.push("Tab. Paracetamol taken");
-    if (/\b(combiflam|ibuprofen|diclofenac|painkiller)\b/i.test(text)) medsFound.push("Analgesic / Painkiller taken");
-    if (/\b(cetirizine|avil|allegra|levocet)\b/i.test(text)) medsFound.push("Antihistamine (Cetirizine/Avil) taken");
-    if (/\b(pantoprazole|pantocid|pan\s*40|antacid|digene|omez)\b/i.test(text)) medsFound.push("Antacid / PPI taken for acidity");
-    if (/\b(inhaler|asthalin|budecort)\b/i.test(text)) medsFound.push("Inhaler (Asthalin) used");
+    if (/\b(ondansetron|vomikind|domperidone|emset)\b/i.test(text)) medsFound.push("Tab. Ondansetron / Anti-emetic");
+    if (/\b(ors|electral|electrolyte)\b/i.test(text)) medsFound.push("ORS oral rehydration");
+    if (/\b(paracetamol|dolo|crocin|calpol|pcm)\b/i.test(text)) medsFound.push("Tab. Paracetamol");
+    if (/\b(combiflam|ibuprofen|diclofenac|aceclofenac|painkiller)\b/i.test(text)) medsFound.push("Analgesic / Painkiller");
+    if (/\b(cetirizine|avil|allegra|levocet|montair)\b/i.test(text)) medsFound.push("Antihistamine (Cetirizine/Avil)");
+    if (/\b(pantoprazole|pantocid|pan\s*40|omeprazole|omez|antacid|gelusil|digene)\b/i.test(text)) medsFound.push("Antacid / PPI");
+    if (/\b(inhaler|puff|asthalin|budecort|foracort)\b/i.test(text)) medsFound.push("Inhaler (Asthalin)");
+    if (/\b(sorbitrate|aspirin|ecospirin)\b/i.test(text)) medsFound.push("Aspirin / Sorbitrate");
+    if (/\b(insulin|metformin|glycomet)\b/i.test(text)) medsFound.push("Insulin / Metformin");
+    if (/\b(telmisartan|amlodipine|atenolol|bp\s+medicine|bp\s+dawai|bp\s+tablet)\b/i.test(text)) medsFound.push("BP medicine (Telmisartan/Amlodipine)");
+    if (/\b(azithromycin|amoxicillin|augmentin|cefixime|antibiotic)\b/i.test(text)) medsFound.push("Antibiotic medication");
+    if (/\b(cough\s*syrup|benadryl|ascoril|syrup)\b/i.test(text)) medsFound.push("Cough syrup");
     if (medsFound.length > 0) detectedMedications = medsFound.join("; ");
+  }
+
+  // 6c. Extract Pre-existing Comorbidities / Chronic Conditions from ANY turn
+  let detectedComorbidity = null;
+  if (!/\b(no\s+(?:known\s+)?(?:illness|disease|problem|comorbidit|history)|koi\s+bimari\s+nahi|kuch\s+nahi\s+hai|pehle\s+se\s+kuch\s+nahi)\b/i.test(text)) {
+    const conditions = [];
+    if (/\b(diabet(?:es|ic)|sugar|madhumeh|high blood sugar|type\s*2\s*diabetes|type\s*1\s*diabetes)\b/i.test(text)) {
+      conditions.push("Diabetes / High Blood Sugar");
+    }
+    if (/\b(hypertension|high\s*bp|blood\s*pressure|high\s*pressure|uchh\s*raktchap|bp\s*ki\s*bimari|bp\s*problem)\b/i.test(text)) {
+      conditions.push("Hypertension / High BP");
+    }
+    if (/\b(asthma|damah|dama\b|wheezing|copd|respiratory\s*disease)\b/i.test(text)) {
+      conditions.push("Bronchial Asthma / Respiratory condition");
+    }
+    if (/\b(heart\s*disease|cardiac|cad\b|heart\s*attack|dil\s*ki\s*bimari|angina|stent|bypass|heart\s*problem|dil\s*ka\s*mariz)\b/i.test(text)) {
+      conditions.push("Cardiovascular / Heart Disease");
+    }
+    if (/\b(kidney\s*disease|renal|ckd\b|dialysis|kidney\s*problem|gurde|kidney\s*stone)\b/i.test(text)) {
+      conditions.push("Chronic Kidney Disease / Renal illness");
+    }
+    if (/\b(thyroid|hypothyroid|hyperthyroid)\b/i.test(text)) {
+      conditions.push("Thyroid disorder");
+    }
+    if (/\b(liver\s*disease|cirrhosis|jaundice|hepatitis|liver\s*problem|fatty\s*liver)\b/i.test(text)) {
+      conditions.push("Liver disease / condition");
+    }
+    if (/\b(tuberculosis|tb\b|t\.b\.)\b/i.test(text)) {
+      conditions.push("Tuberculosis (TB)");
+    }
+    if (/\b(arthritis|gathiya|joint\s*pain\s*disease|rheumatoid)\b/i.test(text)) {
+      conditions.push("Arthritis / Gathiya");
+    }
+    if (/\b(stroke|paralysis|lakwa)\b/i.test(text)) {
+      conditions.push("Stroke / Paralysis history");
+    }
+    if (/\b(epilepsy|mirgi|seizure\s*disorder|fits\b)\b/i.test(text)) {
+      conditions.push("Epilepsy / Seizure disorder");
+    }
+    if (/\b(anemia|khoon\s*ki\s*kami|low\s*hemoglobin)\b/i.test(text)) {
+      conditions.push("Anemia");
+    }
+    if (/\b(cancer|tumor|chemo|malignan)\b/i.test(text)) {
+      conditions.push("Oncology / Cancer history");
+    }
+    if (/\b(ulcer|gerd|peptic\s*ulcer|acidity\s*problem)\b/i.test(text)) {
+      conditions.push("Peptic Ulcer / Acid Peptic Disease");
+    }
+
+    if (currentTriage?.comorbidity && !/^(none|nil|no pre|none reported)/i.test(currentTriage.comorbidity)) {
+      const existingList = currentTriage.comorbidity.split(";").map((s) => s.trim()).filter(Boolean);
+      existingList.forEach((ec) => {
+        if (!conditions.some((c) => c.toLowerCase().includes(ec.toLowerCase()) || ec.toLowerCase().includes(c.toLowerCase()))) {
+          conditions.unshift(ec);
+        }
+      });
+    }
+
+    if (conditions.length > 0) {
+      detectedComorbidity = Array.from(new Set(conditions)).join("; ");
+    }
   }
 
   const isGeneralComplaint = /\b(not feeling well|feeling unwell|tabiyat kharab|bimar|bimaar|sick|unwell|takleef|problem|ill|pareshani|pain|dard)\b/i.test(text);
@@ -3025,6 +3091,7 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     probingAnswer ||
     detectedAllergies ||
     detectedMedications ||
+    detectedComorbidity ||
     isGeneralComplaint
   );
 
@@ -3067,6 +3134,8 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     probingAnswer,
     detectedAllergies: detectedAllergies || null,
     detectedMedications: detectedMedications || null,
+    detectedComorbidity: detectedComorbidity || null,
+    initialChiefComplaint: currentTriage?.initialChiefComplaint || effectivePrimarySymptom || null,
   };
 }
 

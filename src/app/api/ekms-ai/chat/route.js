@@ -11,14 +11,14 @@ export async function POST(request) {
 
   try {
     const body = await request.json();
-    inputPrompt = body.prompt || body.message;
+    inputPrompt = body.prompt || body.message || body.text;
 
     if (!inputPrompt || typeof inputPrompt !== "string" || inputPrompt.trim().length === 0) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
     history = body.history || [];
-    const currentClinicalState = body.currentClinicalState || {};
+    const currentClinicalState = body.currentClinicalState || body.clinicalState || {};
     const currentTriage = body.currentTriage || {};
 
     state = {
@@ -43,6 +43,8 @@ export async function POST(request) {
       severity: doctorResult.severity,
       severityScore: doctorResult.severityScore,
       duration: doctorResult.duration,
+      comorbidity: doctorResult.comorbidity || doctorResult.comorbidities || "None reported",
+      comorbidities: doctorResult.comorbidities || doctorResult.comorbidity || "None reported",
       allergies: doctorResult.allergies,
       medication: doctorResult.medication,
       medications: doctorResult.medications,
@@ -54,16 +56,24 @@ export async function POST(request) {
       call_referral_secondary: doctorResult.call_referral_secondary || null,
       clinicalSummary: doctorResult.clinicalSummary,
       isReadyForSummary: doctorResult.isReadyForSummary,
+      isReferralReady: doctorResult.isReferralReady || doctorResult.isReadyForSummary,
+      initialChiefComplaint: doctorResult.initialChiefComplaint || state.initialChiefComplaint || null,
+      detectedLocation: doctorResult.detectedLocation || null,
+      nearestFacility: doctorResult.nearestFacility || null,
       triageSummary: {
         symptom: state.symptom || doctorResult.suspectedCondition,
         condition: doctorResult.suspectedCondition,
+        initialChiefComplaint: doctorResult.initialChiefComplaint || state.initialChiefComplaint || null,
         severity: doctorResult.severity,
         duration: doctorResult.duration,
+        comorbidity: doctorResult.comorbidity || doctorResult.comorbidities || "None reported",
         allergies: doctorResult.allergies,
         medication: doctorResult.medication || doctorResult.medications,
         associated: doctorResult.redFlagsDetected,
         referralDestination: doctorResult.referralDestination,
         isPsychiatric: doctorResult.isPsychiatric,
+        detectedLocation: doctorResult.detectedLocation || null,
+        facility: doctorResult.nearestFacility || null,
       },
       decision: { condition: doctorResult.suspectedCondition },
     });
@@ -81,6 +91,8 @@ export async function POST(request) {
         severity: fallback.severity,
         severityScore: fallback.severity === "High" ? 9 : 5,
         duration: fallback.duration || "Reported today",
+        comorbidity: fallback.comorbidity || fallback.comorbidities || "None reported",
+        comorbidities: fallback.comorbidities || fallback.comorbidity || "None reported",
         allergies: fallback.allergies || "None",
         medication: fallback.medication || fallback.medications || "None",
         medications: fallback.medications || fallback.medication || "None",
@@ -92,16 +104,24 @@ export async function POST(request) {
         call_referral_secondary: fallback.call_referral_secondary || null,
         clinicalSummary: fallback.clinicalSummary || "Clinical consultation in progress.",
         isReadyForSummary: fallback.isReadyForSummary || false,
+        isReferralReady: fallback.isReferralReady || fallback.isReadyForSummary || false,
+        initialChiefComplaint: fallback.initialChiefComplaint || state.initialChiefComplaint || null,
+        detectedLocation: fallback.detectedLocation || null,
+        nearestFacility: fallback.nearestFacility || null,
         triageSummary: {
           symptom: state.symptom || fallback.suspectedCondition,
           condition: fallback.suspectedCondition,
+          initialChiefComplaint: fallback.initialChiefComplaint || state.initialChiefComplaint || null,
           severity: fallback.severity,
           duration: fallback.duration || "Reported today",
+          comorbidity: fallback.comorbidity || fallback.comorbidities || "None reported",
           allergies: fallback.allergies || "None",
           medication: fallback.medication || fallback.medications || "None",
           associated: fallback.redFlagsDetected || [],
           referralDestination: fallback.referralDestination,
           isPsychiatric: fallback.isPsychiatric,
+          detectedLocation: fallback.detectedLocation || null,
+          facility: fallback.nearestFacility || null,
         },
         decision: { condition: fallback.suspectedCondition },
       }, { status: 200 });

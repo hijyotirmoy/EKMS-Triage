@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCases } from "@/lib/db";
+import { getCases, getCasesByPhone } from "@/lib/db";
 import { getCallerIdForPhone } from "@/lib/callerId";
 
 function normalizePhone(p) {
@@ -41,15 +41,8 @@ export async function GET(request) {
   }
 
   try {
-    const allCases = await getCases();
-    // Cases are sorted descending by created_at, find all matching cases for this caller
-    const matchingCases = allCases.filter((c) => {
-      const casePhone = normalizePhone(c.intake?.phone);
-      if (!casePhone || casePhone.length !== 10) return false;
-      return casePhone === queryPhone;
-    });
-
-    const callerId = getCallerIdForPhone(queryPhone, allCases);
+    const matchingCases = (await getCasesByPhone(queryPhone)) || [];
+    const callerId = getCallerIdForPhone(queryPhone, matchingCases);
 
     if (matchingCases.length === 0) {
       return NextResponse.json({ found: false, caller_id: callerId });
@@ -62,7 +55,8 @@ export async function GET(request) {
     const intake = latest.intake || {};
     const resLoc = latest.resolved_location || {};
 
-    const history = matchingCases.map((c) => ({
+    const history = matchingCases.map((c, i) => ({
+      id: c.id || `${c.case_ref || "case"}_${c.created_at || ""}_${i}`,
       case_ref: c.case_ref || "",
       caller_id: c.caller_id || c.intake?.caller_id || callerId,
       created_at: c.created_at || "",
