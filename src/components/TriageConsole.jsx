@@ -25,6 +25,7 @@ import { extractClinicalEntities, processTranscriptionForAi } from "../lib/clini
 import { broadcastEvent } from "../lib/broadcastSync";
 import { appendCaseToLocalCache, getCachedCases } from "../lib/clientCache";
 import { getCallerIdForPhone } from "../lib/callerId";
+import { AbhaCallerSection } from "./AbhaCallerSection";
 
 const EMPTY = {
   caller_name: "",
@@ -177,6 +178,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
   // 3. Auto-save intake draft to database on beforeunload / refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
+      // If a case is already triaged (result exists), do NOT auto-create a draft case!
+      if (result) return;
       const cleanPhone = String(form.phone || "").replace(/\D/g, "");
       if (cleanPhone.length >= 10 && (form.caller_name || form.symptom_notes)) {
         const draftPayload = JSON.stringify({
@@ -202,7 +205,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [form, ekmsContext]);
+  }, [form, ekmsContext, result]);
 
   // Caller history lookup by phone number - works instantly in 0ms without waiting
   const lookupCaller = useCallback(async (phoneNumber, force = false) => {
@@ -582,6 +585,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
     const payload = {
       ...form,
+      case_ref: result?.case_ref || undefined,
       caller_id: activeCallerId,
       agent_id: agentCode,
       symptom_notes: compiledNotes,
@@ -639,121 +643,12 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
     }
   };
 
-  const renderHistoryContent = () => {
-    if (!callerHistory || callerHistory.length === 0) return null;
-    const HISTORY_PER_PAGE = 10;
-    const totalPages = Math.ceil(callerHistory.length / HISTORY_PER_PAGE) || 1;
-    const currentPage = Math.min(Math.max(1, historyPage), totalPages);
-    const paginatedHistory = callerHistory.slice(
-      (currentPage - 1) * HISTORY_PER_PAGE,
-      currentPage * HISTORY_PER_PAGE
-    );
 
-    return (
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
-          <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-primary shrink-0" />
-            <h3 className="text-sm font-bold text-foreground">
-              Caller Past History ({callerHistory.length} {callerHistory.length === 1 ? "call" : "calls"} recorded)
-            </h3>
-          </div>
-          <span className="mono text-[11px] text-muted-foreground">
-            +91 {form.phone}
-          </span>
-        </div>
-
-        <div className="space-y-3.5">
-          {paginatedHistory.map((item, idx) => (
-            <div
-              key={item.id ? `hist_${item.id}_${idx}` : `${item.case_ref || "hist"}_${item.created_at || ""}_${idx}`}
-              className="rounded-lg border border-border/70 bg-card p-3.5 sm:p-4 shadow-2xs transition-colors hover:border-primary/50"
-            >
-              {/* Top Bar: Date, Time, Case Ref, Urgency Badge */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                    <CalendarClock className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span>
-                      {new Date(item.created_at).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-                  <span className="mono text-[11px] text-primary/80 font-bold">
-                    {item.caller_id || activeCallerId || item.case_ref}
-                  </span>
-                </div>
-                <UrgencyBadge level={item.urgency_level} score={item.urgency_score} size="sm" />
-              </div>
-
-              {/* Reason for Call / Symptoms */}
-              <div className="mt-3">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Reason for Call / Symptoms
-                </p>
-                <p className="mt-1 text-xs text-foreground/90 leading-relaxed font-medium">
-                  {item.reason || item.summary || "No complaint notes logged"}
-                </p>
-              </div>
-
-              {/* Navigation Provided by Agent */}
-              <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-400 p-3 text-xs shadow-2xs">
-                <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-950">
-                  <Navigation className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
-                  <span>Navigation Provided by Agent</span>
-                </div>
-                <p className="mt-1 text-xs font-semibold text-emerald-950 leading-relaxed">
-                  {item.navigation || item.recommended_action || "Standard consultation / triage guidance"}
-                </p>
-                {item.recommended_facility_type && (
-                  <p className="mt-1.5 text-[11px] text-emerald-900 font-bold border-t border-emerald-300 pt-1.5">
-                    Routed Facility: <span className="underline font-extrabold">{item.recommended_facility_type}</span>
-                    {item.nearest_facility ? ` (${item.nearest_facility})` : ""}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3">
-            <button
-              type="button"
-              disabled={currentPage === 1}
-              onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-              className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" /> Previous page
-            </button>
-
-            <span className="text-xs text-muted-foreground font-medium">
-              Page <strong className="text-foreground">{currentPage}</strong> of <strong>{totalPages}</strong> ({callerHistory.length} calls)
-            </span>
-
-            <button
-              type="button"
-              disabled={currentPage === totalPages}
-              onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
-              className="flex items-center gap-1.5 rounded-md border border-border/70 bg-secondary/40 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Next page <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] w-full max-w-full overflow-x-hidden min-w-0">
-      <form onSubmit={submit} className="panel p-3.5 sm:p-6 w-full max-w-full min-w-0" data-testid="intake-form">
+      <div className="space-y-6 w-full max-w-full min-w-0">
+        <form onSubmit={submit} className="panel p-3.5 sm:p-6 w-full max-w-full min-w-0" data-testid="intake-form">
         <div className="mb-3.5 sm:mb-4 flex items-center justify-between gap-4">
           <h2 className="text-xl font-bold sm:text-2xl">Caller intake</h2>
           <button
@@ -979,14 +874,18 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             </>
           )}
         </button>
-
-        {/* Desktop Caller Consultation History - rendered only on desktop (lg and above) inside the form */}
-        {callerHistory && callerHistory.length > 0 && (
-          <div className="hidden lg:block mt-6 border-t border-border/70 pt-5">
-            {renderHistoryContent()}
-          </div>
-        )}
       </form>
+
+      {/* Unified ABHA Health Locker & Caller Consultation History */}
+      <div className="w-full">
+        <AbhaCallerSection
+          form={form}
+          callerHistory={callerHistory}
+          currentAgent={currentAgent}
+          activeCallerId={activeCallerId}
+        />
+      </div>
+    </div>
 
       {/* Right Side: Live Scribe Window OR Triage Result Panel */}
       {(() => {
@@ -1118,12 +1017,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
               />
             )}
 
-            {/* Mobile Caller Consultation History - rendered AFTER Triage Outcome / Call Transcript on mobile (< lg) */}
-            {callerHistory && callerHistory.length > 0 && (
-              <div className="block lg:hidden mt-5 panel p-3.5 sm:p-5 w-full">
-                {renderHistoryContent()}
-              </div>
-            )}
+
           </div>
         );
       })()}

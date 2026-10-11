@@ -21,6 +21,11 @@ import { toast } from "sonner";
 import { extractClinicalEntities } from "@/lib/clinicalAdaptiveEngine";
 import { isWhisperHallucination } from "@/lib/speechRecognition";
 import { detectDirectCallerReferralIntent } from "@/lib/doctorChatEngine";
+import {
+  getCachedAiChatSession,
+  setCachedAiChatSession,
+  clearCachedAiChatSession,
+} from "@/lib/clientCache";
 
 const INITIAL_SYMPTOM_SHORTCUTS = [
   { icon: "❤️", label: "Chest Pain / Pressure", text: "Chest pain and pressure" },
@@ -71,6 +76,8 @@ function formatMsgTime(m) {
 
 export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   {
+    title,
+    chatSessionKey = "ekms_main_ai_chat_session",
     onComplaintChange,
     onSyncFields,
     initialNotes,
@@ -79,6 +86,9 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     currentAgent,
     triageResult,
     activeDirective,
+    fillHeight = false,
+    className = "",
+    customChatHeight = "",
   },
   ref
 ) {
@@ -171,10 +181,55 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     }
   };
 
+  // 1. Restore chat messages and clinical state from local cash memory for THIS specific session key
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        // Clear legacy shared key so old crosstalk doesn't bleed through
+        sessionStorage.removeItem("ekms_active_ai_chat_session");
+      }
+      const cached = getCachedAiChatSession(chatSessionKey);
+      if (cached && Array.isArray(cached.messages) && cached.messages.length > 0) {
+        setMessages(cached.messages);
+        messagesRef.current = cached.messages;
+        if (cached.clinicalState) {
+          setClinicalState(cached.clinicalState);
+          clinicalStateRef.current = cached.clinicalState;
+        }
+      } else {
+        setMessages([]);
+        messagesRef.current = [];
+        const emptyState = {
+          suspectedCondition: null,
+          differentialDiagnosis: [],
+          severity: null,
+          severityScore: null,
+          redFlagsDetected: [],
+          duration: null,
+          medication: null,
+          consultationAdvice: null,
+          clinicalSummary: null,
+          referralDestination: null,
+          referralReason: null,
+          isPsychiatric: false,
+          isReadyForSummary: false,
+        };
+        setClinicalState(emptyState);
+        clinicalStateRef.current = emptyState;
+      }
+    } catch (_) {}
+  }, [chatSessionKey]);
+
+  // 2. Persist chat messages & clinical state to cash memory on every turn under THIS session key
   useEffect(() => {
     messagesRef.current = messages;
     clinicalStateRef.current = clinicalState;
-  }, [messages, clinicalState]);
+    if (messages.length > 0) {
+      setCachedAiChatSession({ messages, clinicalState }, chatSessionKey);
+    } else {
+      clearCachedAiChatSession(chatSessionKey);
+    }
+  }, [messages, clinicalState, chatSessionKey]);
 
   // Auto scroll inside chat container
   useEffect(() => {
@@ -446,6 +501,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       };
       setClinicalState(emptyState);
       clinicalStateRef.current = emptyState;
+      clearCachedAiChatSession(chatSessionKey);
       onComplaintChange?.("", { triageState: emptyState, chatHistory: [] });
     },
     insertComplaintText: (text) => {
@@ -518,9 +574,13 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   }
 
   return (
-    <div className="rounded-xl border border-emerald-500/30 bg-card overflow-hidden shadow-sm w-full max-w-full min-w-0">
+    <div
+      className={`rounded-xl border border-emerald-500/30 bg-card overflow-hidden shadow-sm w-full max-w-full min-w-0 ${
+        fillHeight ? "flex flex-col h-full min-h-0" : ""
+      } ${className}`}
+    >
       {/* 1. EKMS AI Triage & Referral Header */}
-      <div className="border-b border-border/50 bg-secondary/30 px-3.5 py-2.5">
+      <div className="border-b border-border/50 bg-secondary/30 px-3.5 py-2.5 shrink-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300">
@@ -529,7 +589,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-bold tracking-tight text-foreground">
-                  EKMS AI
+                  {title || "EKMS AI"}
                 </span>
               </div>
             </div>
@@ -573,7 +633,13 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       {/* 2. Chat Conversation Box */}
       <div
         ref={chatContainerRef}
-        className="min-h-[380px] sm:min-h-[490px] max-h-[640px] space-y-3.5 p-3 sm:p-4 text-xs sm:text-sm overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className={`${
+          customChatHeight
+            ? customChatHeight
+            : fillHeight
+            ? "flex-1 min-h-0"
+            : "min-h-[380px] sm:min-h-[490px] max-h-[640px]"
+        } space-y-3.5 p-3 sm:p-4 text-xs sm:text-sm overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden`}
       >
         {/* Quick-Start Shortcuts */}
         {messages.length === 0 && (
@@ -764,7 +830,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       </div>
 
       {/* 4. Chat Input Box */}
-      <div className="border-t border-border bg-secondary/30 p-2.5">
+      <div className="border-t border-border bg-secondary/30 p-2.5 shrink-0">
         <div className="flex items-center gap-2">
           <input
             value={inputText}

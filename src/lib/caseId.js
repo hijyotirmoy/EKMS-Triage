@@ -68,16 +68,20 @@ export function caseIdToGlobalIndex(caseId) {
   return ((suffix - 1) * TWO_LETTER_COMBOS.length + l_idx) * 9999 + (num - 1);
 }
 
+let memoryMaxIndex = -1;
+
 /**
  * Generates a unique sequential Case ID for each new triage run:
- * Every triage execution (even from repeat callers) is counted as a distinct new case.
+ * Every triage execution is guaranteed a distinct new canonical Case ID (e.g. CA0181AB01, CA0182AB01).
  */
 export function generateNextCaseRef(existingCases = [], callerPhone = null) {
   let maxIndex = -1;
 
+  // 1. Scan argument cases
   if (Array.isArray(existingCases)) {
     for (const c of existingCases) {
-      const ref = c.case_ref || c.case_id || "";
+      if (!c) continue;
+      const ref = typeof c === "string" ? c : (c.case_ref || c.case_id || c.caseId || c.id || "");
       const idx = caseIdToGlobalIndex(ref);
       if (idx !== null && idx > maxIndex) {
         maxIndex = idx;
@@ -85,6 +89,74 @@ export function generateNextCaseRef(existingCases = [], callerPhone = null) {
     }
   }
 
-  const nextIndex = maxIndex + 1;
+  // 2. Scan all client local storage sources in browser environment
+  if (typeof window !== "undefined") {
+    try {
+      const cachedLast = parseInt(localStorage.getItem("ekms_last_case_index") || "-1", 10);
+      if (!isNaN(cachedLast) && cachedLast > maxIndex) {
+        maxIndex = cachedLast;
+      }
+
+      // Check ekms_cases
+      const ekmsCases = JSON.parse(localStorage.getItem("ekms_cases") || "[]");
+      if (Array.isArray(ekmsCases)) {
+        for (const c of ekmsCases) {
+          const idx = caseIdToGlobalIndex(c?.case_ref || c?.case_id || c?.id || "");
+          if (idx !== null && idx > maxIndex) maxIndex = idx;
+        }
+      }
+
+      // Check crm_inbound_triage_reports
+      const triageReports = JSON.parse(localStorage.getItem("crm_inbound_triage_reports") || "[]");
+      if (Array.isArray(triageReports)) {
+        for (const r of triageReports) {
+          const idx = caseIdToGlobalIndex(r?.caseId || r?.case_ref || r?.case_id || "");
+          if (idx !== null && idx > maxIndex) maxIndex = idx;
+          if (Array.isArray(r?.details?.responses)) {
+            const respCase = r.details.responses.find((q) => q.q === "Case ID")?.a;
+            const rIdx = caseIdToGlobalIndex(respCase);
+            if (rIdx !== null && rIdx > maxIndex) maxIndex = rIdx;
+          }
+        }
+      }
+
+      // Check crm_surveys_ben_* keys
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith("crm_surveys_ben_") || k.startsWith("crm_call_history"))) {
+          try {
+            const arr = JSON.parse(localStorage.getItem(k) || "[]");
+            if (Array.isArray(arr)) {
+              for (const item of arr) {
+                const idx = caseIdToGlobalIndex(item?.caseId || item?.case_ref || item?.case_id || "");
+                if (idx !== null && idx > maxIndex) maxIndex = idx;
+                if (Array.isArray(item?.details?.responses)) {
+                  const respCase = item.details.responses.find((q) => q.q === "Case ID")?.a;
+                  const rIdx = caseIdToGlobalIndex(respCase);
+                  if (rIdx !== null && rIdx > maxIndex) maxIndex = rIdx;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Scan memory state
+  if (memoryMaxIndex > maxIndex) {
+    maxIndex = memoryMaxIndex;
+  }
+
+  // Next index is strictly greater than all existing indexes
+  const nextIndex = maxIndex >= 0 ? maxIndex + 1 : 0;
+  memoryMaxIndex = nextIndex;
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("ekms_last_case_index", String(nextIndex));
+    } catch (_) {}
+  }
+
   return globalIndexToCaseId(nextIndex);
 }

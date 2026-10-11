@@ -23,6 +23,9 @@ import {
   Activity,
   History,
   CheckCircle2,
+  CalendarCheck,
+  Calendar,
+  Ambulance,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -108,75 +111,98 @@ const PAGE_SIZE = 50;
 const inputCls =
   "rounded-md border border-border/80 bg-secondary/50 px-3 py-2 text-sm outline-none transition-colors duration-200 focus:border-primary/70";
 
+export function getCaseBookedAppointment(c) {
+  if (!c) return null;
+  if (c.booked_appointment) return c.booked_appointment;
+  if (c.appointment) return c.appointment;
+  if (typeof window !== "undefined") {
+    try {
+      const keys = [
+        c.case_ref,
+        c.id,
+        c.case_id,
+        c.caller_id,
+        c.intake?.phone,
+      ].filter(Boolean);
+      for (const k of keys) {
+        const str = String(k).trim();
+        const saved =
+          localStorage.getItem(`ekms_appt_${str}`) ||
+          localStorage.getItem(`ekms_appt_${str.toUpperCase()}`) ||
+          localStorage.getItem(`ekms_appt_${str.toLowerCase()}`);
+        if (saved) {
+          return JSON.parse(saved);
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+export function normalizeFacilityTarget(text) {
+  if (!text) return "";
+  const s = String(text).toLowerCase().trim();
+  if (s.includes("108") || s.includes("ambulance") || s === "call_108") return "108_AMBULANCE";
+  if (s.includes("104") || s.includes("helpline") || s.includes("tele-doctor") || s.includes("tele_104") || s === "104_medical") return "104_MEDICAL";
+  if (s.includes("district") || s.includes("dist_hospital") || s.includes("govt dist") || s.includes("public health")) return "DIST_HOSPITAL";
+  if (s.includes("esic hospital") || s.includes("esic_hospital") || (s.includes("esic") && s.includes("hospital")) || s.includes("casualty")) return "ESIC_HOSPITAL";
+  if (s.includes("dispensary") || s.includes("esis") || s.includes("esis_dispensary")) return "ESIS_DISPENSARY";
+  if (s.includes("tie") || s.includes("empanelled") || s.includes("tie_up") || s.includes("tie_up_facility")) return "TIE_UP_FACILITY";
+  return s;
+}
+
 export function getReferralBadge(c) {
   const t = c?.triage || {};
   const dest = (
+    c?.forwarded_short_name ||
+    c?.forwarded_to ||
+    t.forwarded_to ||
     t.call_referral_primary ||
     t.referral_destination ||
     t.recommended_facility_type ||
     ""
-  ).toLowerCase();
+  );
+  const norm = normalizeFacilityTarget(dest);
 
-  if (t.call_108 || dest.includes("108") || dest.includes("ambulance")) {
-    return {
-      label: "108 Ambulance",
-      icon: "🚨",
-      color: "bg-rose-700 text-white border-rose-800",
-    };
+  switch (norm) {
+    case "108_AMBULANCE":
+      return {
+        label: "108 Ambulance",
+        icon: "🚨",
+        color: "bg-rose-700 text-white border-rose-800",
+      };
+    case "DIST_HOSPITAL":
+      return {
+        label: "Govt District Hospital",
+        icon: "🏥",
+        color: "bg-blue-800 text-white border-blue-900",
+      };
+    case "ESIC_HOSPITAL":
+      return {
+        label: "ESIC Hospital",
+        icon: "🏥",
+        color: "bg-amber-700 text-white border-amber-800",
+      };
+    case "TIE_UP_FACILITY":
+      return {
+        label: "Tie-Up Facility",
+        icon: "🏥",
+        color: "bg-cyan-700 text-white border-cyan-800",
+      };
+    case "104_MEDICAL":
+      return {
+        label: "104 Health Helpline",
+        icon: "📞",
+        color: "bg-blue-700 text-white border-blue-800",
+      };
+    case "ESIS_DISPENSARY":
+    default:
+      return {
+        label: c?.forwarded_short_name || "ESIS Dispensary",
+        icon: "🩺",
+        color: "bg-emerald-700 text-white border-emerald-800",
+      };
   }
-  if (dest.includes("tie") || dest.includes("empanelled")) {
-    return {
-      label: "Tie-Up Facility",
-      icon: "🏥",
-      color: "bg-cyan-700 text-white border-cyan-800",
-    };
-  }
-  if (dest.includes("hospital") || dest.includes("casualty")) {
-    return {
-      label: "ESIC Hospital",
-      icon: "🏥",
-      color: "bg-amber-700 text-white border-amber-800",
-    };
-  }
-  if (
-    dest.includes("104") ||
-    dest.includes("tele-doctor") ||
-    dest.includes("medical team") ||
-    dest.includes("health helpline") ||
-    dest.includes("advice")
-  ) {
-    return {
-      label: "104 Health Helpline",
-      icon: "📞",
-      color: "bg-blue-700 text-white border-blue-800",
-    };
-  }
-  if (dest.includes("sanjeevani") || dest.includes("telemedicine")) {
-    return {
-      label: "e-Sanjeevani Online Doctor",
-      icon: "💻",
-      color: "bg-sky-700 text-white border-sky-800",
-    };
-  }
-  if (dest.includes("pharmacy") || dest.includes("chemist")) {
-    return {
-      label: "Empanelled Pharmacy / Chemist",
-      icon: "💊",
-      color: "bg-teal-700 text-white border-teal-800",
-    };
-  }
-  if (dest.includes("doctor") || dest.includes("officer")) {
-    return {
-      label: "Medical Officer Escalation",
-      icon: "👨‍⚕️",
-      color: "bg-indigo-700 text-white border-indigo-800",
-    };
-  }
-  return {
-    label: "ESIS Dispensary",
-    icon: "🩺",
-    color: "bg-emerald-700 text-white border-emerald-800",
-  };
 }
 
 export function getSecondaryReferralBadge(c) {
@@ -371,6 +397,32 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
             const cId = String(c.id || "").trim().toUpperCase();
             if ((cRef && targetSet.has(cRef)) || (cId && targetSet.has(cId))) {
               return { ...c, ...event.payload, is_forwarded: true, status: "forwarded" };
+            }
+            return c;
+          });
+          setCachedCases(updated);
+          return updated;
+        });
+      } else if (event?.type === "CASE_APPOINTMENT_BOOKED" && event?.payload) {
+        const { case_ref, appointment } = event.payload;
+        setCases((prev) => {
+          const updated = prev.map((c) => {
+            if (String(c.case_ref).toUpperCase() === String(case_ref).toUpperCase()) {
+              return { ...c, booked_appointment: appointment };
+            }
+            return c;
+          });
+          setCachedCases(updated);
+          return updated;
+        });
+      } else if (event?.type === "CASE_APPOINTMENT_CANCELLED" && event?.payload) {
+        const { case_ref } = event.payload;
+        setCases((prev) => {
+          const updated = prev.map((c) => {
+            if (String(c.case_ref).toUpperCase() === String(case_ref).toUpperCase()) {
+              const copy = { ...c };
+              delete copy.booked_appointment;
+              return copy;
             }
             return c;
           });
@@ -658,21 +710,49 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
                       <div className="flex flex-col items-start gap-1">
                         {(() => {
                           const badge = getReferralBadge(c);
+                          const isForwarded = isCaseItemForwarded(c);
+                          const appt = getCaseBookedAppointment(c);
+                          const forwardedDest =
+                            c.forwarded_short_name ||
+                            (c.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : c.forwarded_to);
+
                           return (
-                            <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
-                            >
-                              <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
-                              <span className="truncate">{badge.label}</span>
-                            </span>
+                            <>
+                              <span
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-2xs border ${badge.color}`}
+                              >
+                                <span className="text-xs shrink-0 leading-none">{badge.icon}</span>
+                                <span className="truncate">{badge.label}</span>
+                              </span>
+
+                              {/* Green Forwarded badge: Shows where agent forwarded / sent clinical summary */}
+                              {isForwarded && (
+                                <span
+                                  title={`Clinical summary forwarded to ${forwardedDest || badge.label}`}
+                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-700 dark:text-emerald-300 shadow-2xs"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                  <span>Forwarded{forwardedDest ? ` (${forwardedDest})` : ""}</span>
+                                </span>
+                              )}
+
+                              {/* Booked appointment indicator badge */}
+                              {appt && (
+                                <span
+                                  title={`OPD Appointment Booked: ${appt.date || ""} ${appt.timeSlot ? `(${appt.timeSlot})` : ""} · Ref #${appt.referenceNo || appt.tokenNo || ""} at ${appt.facilityName || ""}`}
+                                  className="inline-flex items-center gap-1 rounded-md bg-orange-50 dark:bg-orange-950/70 border border-orange-300 dark:border-orange-800 px-2 py-0.5 text-[10.5px] font-extrabold text-orange-700 dark:text-orange-300 shadow-2xs whitespace-nowrap"
+                                >
+                                  <Calendar className="h-3.5 w-3.5 shrink-0 text-orange-600 dark:text-orange-400" />
+                                  <span>
+                                    {appt.date && appt.timeSlot
+                                      ? `${appt.date} (${appt.timeSlot})`
+                                      : appt.date || appt.timeSlot || `Ref: ${appt.referenceNo || appt.tokenNo}`}
+                                  </span>
+                                </span>
+                              )}
+                            </>
                           );
                         })()}
-                        {/* Green Forwarded badge: Shows instantly and never disappears */}
-                        {isCaseItemForwarded(c) && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-700 dark:text-emerald-300 shadow-2xs">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" /> Forwarded
-                          </span>
-                        )}
                       </div>
                     </td>
                     <td className="py-3 pr-3 text-[11px] text-muted-foreground whitespace-nowrap font-medium">
@@ -928,45 +1008,142 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCas
   const primaryBadge = getReferralBadge(caseItem);
   const secondaryBadge = getSecondaryReferralBadge(caseItem);
 
+  const bookedAppt = getCaseBookedAppointment(caseItem);
   const isCaseForwarded = Boolean(
-    forwardOverride || isCaseItemForwarded(caseItem)
+    forwardOverride || isCaseItemForwarded(caseItem) || caseItem.is_forwarded || caseItem.forwarded_at
   );
 
   const forwardedTarget = String(
-    forwardOverride?.forwarded_to ||
+    forwardOverride?.forwarded_facility_name ||
     forwardOverride?.forwarded_short_name ||
-    caseItem.forwarded_to ||
+    forwardOverride?.forwarded_to ||
+    caseItem.forwarded_facility_name ||
     caseItem.forwarded_short_name ||
+    caseItem.forwarded_to ||
     caseItem.dispatch_to ||
+    bookedAppt?.facilityName ||
+    bookedAppt?.facilityShortName ||
     ""
-  ).toLowerCase();
+  ).trim();
 
-  const primaryName = String(
-    triage.call_referral_primary ||
-    triage.referral_destination ||
-    nearest?.name ||
-    ""
-  ).toLowerCase();
+  const forwardedNorm = normalizeFacilityTarget(forwardedTarget);
 
-  const secondaryName = String(
-    triage.call_referral_secondary ||
-    triage.secondary_referral_destination ||
-    "104 Health Helpline"
-  ).toLowerCase();
+  const getCleanFacilityLabel = (norm, raw) => {
+    if (
+      raw &&
+      !raw.startsWith("ESIC_") &&
+      !raw.startsWith("DIST_") &&
+      !raw.startsWith("ESIS_") &&
+      !raw.startsWith("TIE_") &&
+      !raw.startsWith("104_") &&
+      !raw.startsWith("108_")
+    ) {
+      return raw;
+    }
+    switch (norm) {
+      case "ESIC_HOSPITAL":
+        return "ESIC Hospital (Secondary Care & Casualty)";
+      case "DIST_HOSPITAL":
+        return "Govt District Hospital / Public Health Desk";
+      case "ESIS_DISPENSARY":
+        return "ESIS Dispensary (Primary Care OPD)";
+      case "TIE_UP_FACILITY":
+        return "Empanelled Tie-Up Hospital";
+      case "104_MEDICAL":
+        return "104 Health Helpline (Tele-Doctor)";
+      case "108_AMBULANCE":
+        return "108 Emergency Ambulance";
+      default:
+        return raw || "ESIS Dispensary";
+    }
+  };
 
-  const isSentToSecondary = isCaseForwarded && Boolean(
-    forwardedTarget && (
-      (secondaryName.includes("104") && forwardedTarget.includes("104")) ||
-      (secondaryName.includes("hospital") && forwardedTarget.includes("hospital")) ||
-      (secondaryName.includes("108") && forwardedTarget.includes("108"))
-    ) && !(
-      (primaryName.includes("104") && forwardedTarget.includes("104")) ||
-      (primaryName.includes("hospital") && forwardedTarget.includes("hospital")) ||
-      (primaryName.includes("108") && forwardedTarget.includes("108"))
-    )
-  );
+  const initialPrimary = triage.call_referral_primary || triage.referral_destination || nearest?.name || "ESIS Dispensary";
+  const initialSecondary = triage.call_referral_secondary || triage.secondary_referral_destination || "104 Health Helpline";
 
-  const isSentToPrimary = isCaseForwarded && !isSentToSecondary;
+  let card1Name = initialPrimary;
+  let card1IsForwarded = false;
+  let card2Name = initialSecondary;
+  let card2IsForwarded = false;
+
+  if (isCaseForwarded && forwardedNorm) {
+    const rawPrimaryNorm = normalizeFacilityTarget(initialPrimary);
+    const rawSecondaryNorm = normalizeFacilityTarget(initialSecondary);
+
+    if (forwardedNorm === rawSecondaryNorm && forwardedNorm !== rawPrimaryNorm) {
+      card1Name = initialPrimary;
+      card1IsForwarded = false;
+      card2Name = getCleanFacilityLabel(forwardedNorm, forwardedTarget);
+      card2IsForwarded = true;
+    } else {
+      card1Name = getCleanFacilityLabel(forwardedNorm, forwardedTarget);
+      card1IsForwarded = true;
+      if (["ESIC_HOSPITAL", "DIST_HOSPITAL", "ESIS_DISPENSARY", "TIE_UP_FACILITY"].includes(forwardedNorm)) {
+        card2Name = "104 Health Helpline (24x7 Doctor on Call)";
+      } else if (forwardedNorm === "104_MEDICAL") {
+        card2Name = "ESIS Dispensary (Primary Care OPD)";
+      } else if (forwardedNorm === "108_AMBULANCE") {
+        card2Name = "ESIC Hospital Casualty (24x7 Emergency)";
+      }
+      card2IsForwarded = false;
+    }
+  }
+
+  const getDestinationMeta = (cardName, isForwarded) => {
+    const norm = normalizeFacilityTarget(cardName);
+    const is104 = norm === "104_MEDICAL" || String(cardName).includes("104");
+    const is108 = norm === "108_AMBULANCE" || String(cardName).includes("108");
+
+    if (is104) {
+      return {
+        type: "104",
+        subtext: "📞 24x7 Doctor on Call Tele-Consultation (Toll-Free)",
+        icon: PhoneCall,
+        iconColor: "text-blue-600",
+        borderClass: isForwarded
+          ? "border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 ring-1 ring-emerald-500/30"
+          : "border-blue-300 dark:border-blue-800 bg-white dark:bg-card",
+        distance: null,
+      };
+    }
+
+    if (is108) {
+      return {
+        type: "108",
+        subtext: "🚑 24x7 Emergency Ambulance Dispatch",
+        icon: Ambulance,
+        iconColor: "text-rose-600",
+        borderClass: isForwarded
+          ? "border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 ring-1 ring-emerald-500/30"
+          : "border-rose-300 dark:border-rose-800 bg-white dark:bg-card",
+        distance: null,
+      };
+    }
+
+    const facs = Array.isArray(caseItem.nearest_facilities) ? caseItem.nearest_facilities : [];
+    const cleanCard = String(cardName).toLowerCase();
+    const matchedFac = facs.find((f) => {
+      const fn = (f.name || "").toLowerCase();
+      return fn === cleanCard || cleanCard.includes(fn) || fn.includes(cleanCard);
+    });
+
+    let dist = matchedFac?.distance_km ?? nearest?.distance_km;
+    if (dist == null) dist = 0.5;
+
+    const isDisp = norm === "ESIS_DISPENSARY" || cleanCard.includes("dispensary");
+    const subtext = isDisp ? "OPD: Mon–Fri 10:00 AM – 4:00 PM" : "Open · IPD & Casualty: 24x7";
+
+    return {
+      type: "facility",
+      subtext,
+      icon: Building2,
+      iconColor: isDisp ? "text-emerald-600" : "text-purple-600",
+      borderClass: isForwarded
+        ? "border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 ring-1 ring-emerald-500/30"
+        : "border-emerald-300 dark:border-emerald-800 bg-white dark:bg-card",
+      distance: dist != null ? Math.round(Number(dist) * 10) / 10 : 0.5,
+    };
+  };
 
   // Scope transcript strictly to this single triage conversation
   const singleCaseTranscript = useMemo(() => {
@@ -1015,6 +1192,18 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCas
                     <CheckCircle2 className="h-3.5 w-3.5" /> Forwarded
                   </span>
                 )}
+                {(() => {
+                  const bAppt = getCaseBookedAppointment(caseItem);
+                  if (!bAppt) return null;
+                  return (
+                    <span className="inline-flex items-center gap-1 text-xs font-extrabold text-orange-800 dark:text-orange-200 bg-orange-100 dark:bg-orange-950/80 px-2.5 py-0.5 rounded-md border border-orange-500/50 shadow-2xs">
+                      <Calendar className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />{" "}
+                      {bAppt.date && bAppt.timeSlot
+                        ? `${bAppt.date} (${bAppt.timeSlot})`
+                        : `Ref: ${bAppt.referenceNo || bAppt.tokenNo}`}
+                    </span>
+                  );
+                })()}
               </div>
               <p className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="font-semibold text-foreground">
@@ -1243,50 +1432,163 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCas
 
             {/* Dual Forward Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              {/* Primary Destination Card */}
-              <div className="rounded-lg border border-emerald-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
-                    Primary Destination
+              {/* Primary / Card 1 Destination Card */}
+              {(() => {
+                const meta1 = getDestinationMeta(card1Name, card1IsForwarded);
+                const Icon1 = meta1.icon;
+                return (
+                  <div className={`rounded-lg border p-2.5 space-y-1 text-xs shadow-2xs ${meta1.borderClass}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
+                        {card1IsForwarded ? "Forwarded Destination" : "Primary Destination"}
+                      </div>
+                      {card1IsForwarded && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
+                          <CheckCircle2 className="h-3 w-3" /> Forwarded
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-foreground flex items-center gap-1.5 truncate">
+                      <Icon1 className={`h-3.5 w-3.5 ${meta1.iconColor} shrink-0`} />
+                      <span className="truncate">{card1Name}</span>
+                    </div>
+                    <div className="space-y-0.5 pt-0.5">
+                      {meta1.distance != null && (
+                        <p className="text-[10.5px] font-semibold text-emerald-800 dark:text-emerald-300 font-mono">
+                          📍 Distance: {meta1.distance} km
+                        </p>
+                      )}
+                      <p className="text-[10.5px] text-muted-foreground">
+                        {meta1.subtext}
+                      </p>
+                    </div>
                   </div>
-                  {isSentToPrimary && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
-                      <CheckCircle2 className="h-3 w-3" /> Forwarded
-                    </span>
-                  )}
-                </div>
-                <div className="font-bold text-foreground flex items-center gap-1 truncate">
-                  <Building2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  {triage.call_referral_primary || triage.referral_destination || nearest?.name || "ESIC Center"}
-                </div>
-                {nearest?.distance_km != null && (
-                  <p className="text-[10.5px] text-muted-foreground font-mono">
-                    📍 Distance: {nearest.distance_km} km
-                  </p>
-                )}
-              </div>
+                );
+              })()}
 
-              {/* Secondary Destination Card */}
-              <div className="rounded-lg border border-blue-300 bg-white dark:bg-card p-2.5 space-y-1 text-xs shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">
-                    Secondary Destination
+              {/* Secondary / Card 2 Destination Card */}
+              {(() => {
+                const meta2 = getDestinationMeta(card2Name, card2IsForwarded);
+                const Icon2 = meta2.icon;
+                return (
+                  <div className={`rounded-lg border p-2.5 space-y-1 text-xs shadow-2xs ${meta2.borderClass}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold text-blue-800 dark:text-blue-300 uppercase">
+                        {card2IsForwarded ? "Forwarded Destination" : "Secondary Destination"}
+                      </div>
+                      {card2IsForwarded && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
+                          <CheckCircle2 className="h-3 w-3" /> Forwarded
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-foreground flex items-center gap-1.5 truncate">
+                      <Icon2 className={`h-3.5 w-3.5 ${meta2.iconColor} shrink-0`} />
+                      <span className="truncate">{card2Name}</span>
+                    </div>
+                    <div className="space-y-0.5 pt-0.5">
+                      {meta2.distance != null && (
+                        <p className="text-[10.5px] font-semibold text-emerald-800 dark:text-emerald-300 font-mono">
+                          📍 Distance: {meta2.distance} km
+                        </p>
+                      )}
+                      <p className="text-[10.5px] text-muted-foreground">
+                        {meta2.subtext}
+                      </p>
+                    </div>
                   </div>
-                  {isSentToSecondary && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs">
-                      <CheckCircle2 className="h-3 w-3" /> Forwarded
+                );
+              })()}
+            </div>
+
+            {/* Booked OPD Appointment Card (Below Dual Forwards) */}
+            {(() => {
+              const bookedAppt = getCaseBookedAppointment(caseItem);
+              if (!bookedAppt) return null;
+              return (
+                <div className="mt-2.5 rounded-xl border border-orange-400/90 bg-linear-to-r from-orange-50/90 to-amber-50/70 dark:from-orange-950/50 dark:to-amber-950/40 p-3 sm:p-3.5 space-y-2 text-xs shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200/80 dark:border-orange-900/60 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarCheck className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                      <span className="font-extrabold uppercase text-[11px] text-orange-950 dark:text-orange-200 tracking-wider">
+                        Official OPD Appointment Booked
+                      </span>
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-orange-600 text-white px-2.5 py-0.5 text-xs font-mono font-black shadow-2xs">
+                      Ref No: {bookedAppt.referenceNo || bookedAppt.tokenNo}
                     </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-foreground font-medium pt-0.5">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                        Facility &amp; Department
+                      </span>
+                      <span className="font-bold flex items-center gap-1 mt-0.5 text-foreground">
+                        <Building2 className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                        {bookedAppt.facilityName}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground block">
+                        {bookedAppt.department}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                        Date, Time Slot &amp; Doctor
+                      </span>
+                      <span className="font-bold flex items-center gap-1 mt-0.5 text-foreground">
+                        <Calendar className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                        {bookedAppt.date} ({bookedAppt.timeSlot})
+                      </span>
+                      <span className="text-[11px] text-muted-foreground block">
+                        {bookedAppt.doctor}
+                      </span>
+                    </div>
+                  </div>
+
+                  {bookedAppt.chiefComplaint && (
+                    <div className="border-t border-orange-200/80 dark:border-orange-900/60 pt-2 text-[11px]">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                        Chief Reason:
+                      </span>
+                      <p className="text-foreground mt-0.5 font-medium leading-relaxed bg-white/70 dark:bg-card/70 p-2 rounded-lg border border-orange-200/60 dark:border-orange-900/40">
+                        {bookedAppt.chiefComplaint}
+                      </p>
+                    </div>
+                  )}
+
+                  {bookedAppt.redFlags && bookedAppt.redFlags.length > 0 && (
+                    <div className="text-[11px]">
+                      <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400 block">
+                        Clinical Red Flags:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {bookedAppt.redFlags.map((flag, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 rounded bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 px-2 py-0.5 text-[10.5px] font-bold text-rose-800 dark:text-rose-200"
+                          >
+                            • {typeof flag === "string" ? flag : flag.label || String(flag)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {bookedAppt.agentNotes && (
+                    <div className="text-[11px]">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                        Agent Visit Notes:
+                      </span>
+                      <p className="text-foreground mt-0.5 italic bg-white/70 dark:bg-card/70 p-2 rounded-lg border border-orange-200/60 dark:border-orange-900/40">
+                        {bookedAppt.agentNotes}
+                      </p>
+                    </div>
                   )}
                 </div>
-                <div className="font-bold text-foreground flex items-center gap-1 truncate">
-                  <PhoneCall className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                  {triage.call_referral_secondary || triage.secondary_referral_destination || "104 Health Helpline"}
-                </div>
-                <p className="text-[10.5px] text-muted-foreground">
-                  📞 24x7 Doctor on Call Tele-Consultation
-                </p>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         </div>
 

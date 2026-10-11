@@ -581,6 +581,18 @@ export class WebRtcCallSession {
         },
       });
 
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("ekms_incoming_call", JSON.stringify({
+            id: this.callId,
+            phoneNumber: callerInfo.phone,
+            callerInfo,
+            targetAgent,
+            timestamp: Date.now(),
+          }));
+        } catch (_) {}
+      }
+
       this.setState("ringing", { callId: this.callId, callerInfo });
 
       // Subscribe to real-time updates on Firestore
@@ -889,6 +901,12 @@ export class WebRtcCallSession {
         });
       } catch (e) {}
       this.sendSignal({ action: "hangup", callId: activeCallId });
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("ekms_incoming_call");
+      } catch (_) {}
     }
 
     if (this.peerConnection) {

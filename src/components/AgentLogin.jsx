@@ -115,6 +115,8 @@ export function AgentLogin({ onLoginSuccess }) {
         const jsonStr = JSON.stringify(sessionObj);
         sessionStorage.setItem("ekms_active_agent", jsonStr);
         localStorage.setItem("ekms_active_agent", jsonStr);
+        window.dispatchEvent(new Event("storage"));
+        window.dispatchEvent(new Event("ekms_auth_change"));
       } catch (_) {}
     }
 

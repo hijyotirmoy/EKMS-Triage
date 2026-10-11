@@ -27,13 +27,14 @@ export async function POST(request) {
       existingCases = [];
     }
 
-    // Check if an existing case for this phone already exists within the last 10 minutes
-    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    // Check if an existing case for this phone already exists within the last 24 hours or matches passed case_ref
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const query10 = cleanPhone.slice(-10);
     const recentCase = existingCases.find((c) => {
+      if (body.case_ref && (c.case_ref === body.case_ref || c.id === body.case_ref)) return true;
       const cp = String(c.intake?.phone || "").replace(/\D/g, "");
       const cp10 = cp.length >= 10 ? cp.slice(-10) : "";
-      return cp10.length === 10 && cp10 === query10 && (c.created_at || "") > tenMinAgo;
+      return cp10.length === 10 && cp10 === query10 && (c.created_at || "") > oneDayAgo;
     });
 
     if (recentCase) {

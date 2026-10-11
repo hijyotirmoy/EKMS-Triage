@@ -44,11 +44,20 @@ export async function PATCH(request) {
 
 export async function DELETE(request) {
   try {
-    const body = await request.json();
+    let body = {};
+    try {
+      body = await request.json();
+    } catch {
+      body = {};
+    }
+    const { searchParams } = new URL(request.url);
+    const queryRef = searchParams.get("case_ref") || searchParams.get("id");
     const refs = Array.isArray(body?.case_refs)
       ? body.case_refs
       : body?.case_ref
       ? [body.case_ref]
+      : queryRef
+      ? [queryRef]
       : [];
 
     if (!refs.length) {

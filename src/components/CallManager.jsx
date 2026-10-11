@@ -63,6 +63,11 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
   const vadIntervalRef = useRef(null);
   const onCallerConnectedRef = useRef(onCallerConnected);
   const onCallUpdateRef = useRef(onCallUpdate);
+  const callStateRef = useRef(callState);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -474,6 +479,14 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     const handleIncomingTranscript = (msg) => {
       if (!msg) return;
 
+      // Only process live transcripts if this tab is on an active connected call
+      if (callStateRef.current !== "connected") {
+        return;
+      }
+      if (msg.callId && activeCallIdRef.current && msg.callId !== activeCallIdRef.current) {
+        return;
+      }
+
       // Caller active speaking broadcast notification
       if (msg.type === "caller_speaking") {
         lastCallerSpeechRef.current = {
@@ -530,7 +543,41 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
       try {
         const channel1 = new BroadcastChannel("ekms-call-channel");
         bChannelRef.current = channel1;
-        channel1.onmessage = (event) => handleIncomingTranscript(event.data);
+        channel1.onmessage = (event) => {
+          const msg = event.data;
+          if (!msg) return;
+
+          // Call claimed by CRM: release Home page completely
+          if (msg.action === "call_claimed" || msg.type === "call_claimed") {
+            if (msg.claimedBy && msg.claimedBy !== "home") {
+              stopRingtone();
+              if (callSessionRef.current) {
+                callSessionRef.current.endCall(false);
+              }
+              setCallState("idle");
+              setIncomingCallData(null);
+              setActiveCaller(null);
+              activeCallIdRef.current = null;
+              setTranscripts([]);
+              setInterimTranscript(null);
+              onCallerConnectedRef.current?.(null);
+              return;
+            }
+          }
+
+          // Caller cancelled or rejected
+          if (msg.action === "hangup" || msg.action === "reject" || msg.type === "hangup") {
+            if (callStateRef.current === "incoming") {
+              stopRingtone();
+              setCallState("idle");
+              setIncomingCallData(null);
+              onCallerConnectedRef.current?.(null);
+            }
+            return;
+          }
+
+          handleIncomingTranscript(msg);
+        };
 
         const channel2 = new BroadcastChannel("ekms-scribe-channel");
         scribeChannelRef.current = channel2;
@@ -572,9 +619,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
         if (state === "incoming_call") {
           setCallState("incoming");
           setIncomingCallData(details.callData);
-          if (details.callData?.callerInfo) {
-            onCallerConnectedRef.current?.(details.callData.callerInfo);
-          }
+          // Caller info is ONLY populated when the call is actually accepted/connected on Home page
         } else if (state === "connected") {
           setCallState("connected");
           setIsOnHold(false);
@@ -685,9 +730,6 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
 
                   playRingtone("incoming");
                   session.setState("incoming_call", { callData });
-                  if (callData.callerInfo) {
-                    onCallerConnectedRef.current?.(callData.callerInfo);
-                  }
                   break;
                 }
               }
@@ -714,9 +756,6 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
             if (target === myAgent) {
               playRingtone("incoming");
               session.setState("incoming_call", { callData: data.activeCall });
-              if (data.activeCall.callerInfo) {
-                onCallerConnectedRef.current?.(data.activeCall.callerInfo);
-              }
             }
           }
         } catch (e) {}
@@ -762,6 +801,15 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     if (!incomingCallData) return;
     try {
       unlockMobileAudio();
+      const callId = incomingCallData.id;
+      if (bChannelRef.current && callId) {
+        bChannelRef.current.postMessage({
+          action: "call_claimed",
+          type: "call_claimed",
+          claimedBy: "home",
+          callId,
+        });
+      }
       await callSessionRef.current.acceptCall(incomingCallData);
     } catch (err) {
       toast.error(err.message || "Could not accept call. Please check microphone permission.");
@@ -775,6 +823,7 @@ export const CallManager = ({ agentId = "Agent 1", onCallerConnected, onCallUpda
     }
     setCallState("idle");
     setIncomingCallData(null);
+    onCallerConnectedRef.current?.(null);
     toast.info("Call declined", { id: "call-status" });
   };
 

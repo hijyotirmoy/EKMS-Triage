@@ -392,7 +392,7 @@ export async function POST(request) {
       existingCases = [];
     }
 
-    const case_ref = generateNextCaseRef(existingCases, intake.phone);
+    const case_ref = intake.case_ref || generateNextCaseRef(existingCases, intake.phone);
     const caller_id = intake.caller_id || getCallerIdForPhone(intake.phone, existingCases);
 
     const casePayload = {
@@ -427,12 +427,14 @@ export async function POST(request) {
       created_at: new Date().toISOString(),
     };
 
-    // 3. Save to Firebase safely
+    // 3. Save to Firebase safely (skipped when called from CRM so it never goes into case logs)
     let saved = {};
-    try {
-      saved = (await saveCase(casePayload).catch(() => ({}))) || {};
-    } catch {
-      saved = {};
+    if (!intake.skip_case_save && intake.source_app !== "crm") {
+      try {
+        saved = (await saveCase(casePayload).catch(() => ({}))) || {};
+      } catch {
+        saved = {};
+      }
     }
 
     return NextResponse.json({

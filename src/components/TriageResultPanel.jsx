@@ -12,6 +12,7 @@ import {
   Navigation,
   ShieldAlert,
   Stethoscope,
+  Check,
   CheckCircle2,
   PhoneCall,
   PhoneForwarded,
@@ -26,6 +27,8 @@ import {
   Layers,
   Crosshair,
   X,
+  Send,
+  CalendarCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { urgencyStyle } from "../lib/api";
@@ -35,6 +38,7 @@ import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { getCachedCases } from "../lib/clientCache";
 import { MapWrapper } from "./map/MapWrapper";
 import { ASSAM_DISTRICTS } from "../lib/districts";
+import defaultFacilities from "../data/facilities.json";
 import {
   isHospital,
   isDispensary,
@@ -61,6 +65,37 @@ const getFacilityPincode = (f) => {
   return match ? match[1] : null;
 };
 
+export function normalizeFacilityTarget(text, facilitiesList = []) {
+  if (!text) return "";
+  const s = String(text).toLowerCase().trim();
+  if (s.includes("108") || s.includes("ambulance") || s === "call_108") return "108_AMBULANCE";
+  if (s.includes("104") || s.includes("helpline") || s.includes("tele-doctor") || s.includes("tele_104") || s === "104_medical") return "104_MEDICAL";
+  if (s === "tie_up_facility" || s === "tie-up facility" || s === "tie_up") return "TIE_UP_FACILITY";
+  if (s === "esic_hospital" || s === "esic hospital") return "ESIC_HOSPITAL";
+  if (s === "esis_dispensary" || s === "esis dispensary") return "ESIS_DISPENSARY";
+  if (s === "dist_hospital" || s === "govt district hospital" || s === "district hospital") return "DIST_HOSPITAL";
+
+  // Check against passed facilities list (or known matches)
+  if (Array.isArray(facilitiesList) && facilitiesList.length > 0) {
+    const matched = facilitiesList.find((f) => {
+      const fn = (f.name || "").toLowerCase().trim();
+      return fn === s || s.includes(fn) || fn.includes(s);
+    });
+    if (matched) {
+      if (isTieUp(matched)) return "TIE_UP_FACILITY";
+      if (isEsicHospital(matched)) return "ESIC_HOSPITAL";
+      if (isGovtDistrictHospital(matched)) return "DIST_HOSPITAL";
+      if (isDispensary(matched)) return "ESIS_DISPENSARY";
+    }
+  }
+
+  if (s.includes("district") || s.includes("dist_hospital") || s.includes("govt dist") || s.includes("public health") || s.includes("civil hospital") || s.includes("medical college") || s.includes("gmch")) return "DIST_HOSPITAL";
+  if (s.includes("beltola") || s.includes("esic hospital") || s.includes("esic_hospital") || (s.includes("esic") && s.includes("hospital")) || s.includes("casualty")) return "ESIC_HOSPITAL";
+  if (s.includes("dispensary") || s.includes("esis") || s.includes("noonmati")) return "ESIS_DISPENSARY";
+  if (s.includes("tie") || s.includes("empanelled") || s.includes("khaklari") || s.includes("swasti") || s.includes("ayursundra") || s.includes("dispur hospital") || s.includes("narayana") || s.includes("hayat") || s.includes("excelcare") || s.includes("down town")) return "TIE_UP_FACILITY";
+  if (s.includes("hospital")) return "ESIC_HOSPITAL";
+  return s;
+}
 
 export const ACTION_DIRECTIVES = {
   CALL_108: {
@@ -348,6 +383,10 @@ export const TriageResultPanel = ({
   onDirectiveChange,
   callerHistory = [],
   onForwardSuccess,
+  onAppointmentBooked,
+  caseRef: propCaseRef,
+  isFreshTriage = false,
+  isCrmPage = false,
 }) => {
   if (loading) return <Loading />;
   if (!result) return <Empty />;
@@ -630,31 +669,15 @@ export const TriageResultPanel = ({
     return resolveDirectiveIds(t, result);
   }, [t, result]);
 
-  const [manualDirectiveId, setManualDirectiveId] = useState(null);
-  const activeDirective =
-    ACTION_DIRECTIVES[manualDirectiveId || directiveIds.primaryId] || ACTION_DIRECTIVES.ESIS_DISPENSARY;
-  const secondaryDirective =
-    ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
-
-  const [visibleFacilityCount, setVisibleFacilityCount] = useState(6);
-  const [drawerVisibleCount, setDrawerVisibleCount] = useState(6);
-
-  // Reset pagination to 6 when search / filter / pin / directive changes
-  useEffect(() => {
-    setVisibleFacilityCount(6);
-    setDrawerVisibleCount(6);
-  }, [searchPincode, droppedPinLocation, manualDirectiveId, effectiveLoc?.district, effectiveLoc?.pincode]);
-
-  useEffect(() => {
-    setDrawerVisibleCount(6);
-  }, [drawerSearchQuery]);
-
   const [forwardedStatus, setForwardedStatus] = useState(() => {
     const caseRef = result?.case_ref || result?.case_id || result?.id;
     if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
       return {
+        directiveId: result.forwarded_directive_id || result.dispatch_info?.directiveId,
+        targetTeamId: result.forwarded_team_id || result.dispatch_info?.targetTeamId,
         shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (result.forwarded_to?.includes("104") ? "104 Health Helpline" : (result.forwarded_to?.includes("108") ? "108 Ambulance" : result.forwarded_to))) || "Facility",
         teamName: result.forwarded_to || "ESIS Dispensary",
+        facilityName: result.forwarded_facility_name || result.forwarded_to,
         dispatchId: result.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
         timestamp: result.forwarded_at || new Date().toISOString(),
       };
@@ -668,8 +691,11 @@ export const TriageResultPanel = ({
           const parsed = JSON.parse(stored);
           if (parsed.is_forwarded && (parsed.case_ref === caseRef || parsed.dispatch_id)) {
             return {
+              directiveId: parsed.directive_id || parsed.forwarded_directive_id,
+              targetTeamId: parsed.target_team_id || parsed.forwarded_team_id,
               shortName: parsed.forwarded_short_name || "Facility",
               teamName: parsed.forwarded_to || "ESIS Dispensary",
+              facilityName: parsed.forwarded_facility_name || parsed.forwarded_to,
               dispatchId: parsed.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
               timestamp: parsed.forwarded_at || new Date().toISOString(),
             };
@@ -680,12 +706,161 @@ export const TriageResultPanel = ({
     return null;
   });
 
+  // Track appointment booking status for current case
+  const [bookedStatus, setBookedStatus] = useState(() => {
+    if (isFreshTriage || result?.is_fresh_triage) return null;
+    const caseRef = propCaseRef || result?.case_ref || result?.case_id || result?.id;
+    if (result?.booked_appointment) {
+      return result.booked_appointment;
+    }
+    if (typeof window !== "undefined" && caseRef) {
+      try {
+        const stored = localStorage.getItem(`ekms_appt_${caseRef}`);
+        if (stored) {
+          return JSON.parse(stored);
+        }
+      } catch (e) {}
+    }
+    return null;
+  });
+
   useEffect(() => {
-    const caseRef = result?.case_ref || result?.case_id || result?.id;
+    if (isFreshTriage || result?.is_fresh_triage) {
+      setBookedStatus(null);
+      return;
+    }
+    const caseRef = propCaseRef || result?.case_ref || result?.case_id || result?.id;
+    if (result?.booked_appointment) {
+      setBookedStatus(result.booked_appointment);
+      return;
+    }
+    if (typeof window !== "undefined" && caseRef) {
+      try {
+        const stored = localStorage.getItem(`ekms_appt_${caseRef}`);
+        if (stored) {
+          setBookedStatus(JSON.parse(stored));
+          return;
+        }
+      } catch (e) {}
+    }
+    setBookedStatus(null);
+  }, [result, propCaseRef, isFreshTriage]);
+
+  useEffect(() => {
+    const handleCaseBooked = (e) => {
+      const detail = e.detail;
+      const caseRef = result?.case_ref || result?.case_id || result?.id;
+      if (detail && (!detail.case_ref || detail.case_ref === caseRef)) {
+        setBookedStatus(detail.appointment);
+      }
+    };
+    const handleCaseCancelled = (e) => {
+      const detail = e.detail;
+      const caseRef = result?.case_ref || result?.case_id || result?.id;
+      if (detail && (!detail.case_ref || detail.case_ref === caseRef)) {
+        setBookedStatus(null);
+      }
+    };
+    window.addEventListener("CASE_APPOINTMENT_BOOKED", handleCaseBooked);
+    window.addEventListener("CASE_APPOINTMENT_CANCELLED", handleCaseCancelled);
+    return () => {
+      window.removeEventListener("CASE_APPOINTMENT_BOOKED", handleCaseBooked);
+      window.removeEventListener("CASE_APPOINTMENT_CANCELLED", handleCaseCancelled);
+    };
+  }, [result]);
+
+  const forwardedDirectiveId = useMemo(() => {
+    if (forwardedStatus?.directiveId && ACTION_DIRECTIVES[forwardedStatus.directiveId]) {
+      return forwardedStatus.directiveId;
+    }
+    if (forwardedStatus?.targetTeamId) {
+      if (forwardedStatus.targetTeamId === "108_AMBULANCE") return "CALL_108";
+      if (forwardedStatus.targetTeamId === "104_MEDICAL") return "TELE_104";
+      if (ACTION_DIRECTIVES[forwardedStatus.targetTeamId]) return forwardedStatus.targetTeamId;
+    }
+    const teamName =
+      forwardedStatus?.facilityName ||
+      forwardedStatus?.teamName ||
+      result?.forwarded_facility_name ||
+      result?.forwarded_to;
+    if (teamName) {
+      const norm = normalizeFacilityTarget(teamName, effectiveRawFacs);
+      if (norm === "108_AMBULANCE") return "CALL_108";
+      if (norm === "104_MEDICAL") return "TELE_104";
+      if (ACTION_DIRECTIVES[norm]) return norm;
+    }
+    return null;
+  }, [forwardedStatus, result, effectiveRawFacs]);
+
+  const bookedDirectiveId = useMemo(() => {
+    if (!bookedStatus) return null;
+    if (bookedStatus.facilityTeamId && ACTION_DIRECTIVES[bookedStatus.facilityTeamId]) {
+      return bookedStatus.facilityTeamId;
+    }
+    const facName = bookedStatus.facilityName || "";
+    if (facName) {
+      const norm = normalizeFacilityTarget(facName, effectiveRawFacs);
+      if (ACTION_DIRECTIVES[norm]) return norm;
+    }
+    return null;
+  }, [bookedStatus, effectiveRawFacs]);
+
+  // Strict locking: If forwarded or booked, lock directive strictly so agent cannot switch
+  const lockedDirectiveId = forwardedDirectiveId || bookedDirectiveId;
+
+  const [manualDirectiveId, setManualDirectiveId] = useState(null);
+
+  // When locked, activeDirective CANNOT be changed by manualDirectiveId
+  const activeDirective =
+    ACTION_DIRECTIVES[lockedDirectiveId || manualDirectiveId || directiveIds.primaryId] ||
+    ACTION_DIRECTIVES.ESIS_DISPENSARY;
+  const secondaryDirective =
+    ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
+
+  // 6 Forwarding Options List: Primary first, Secondary second, then remaining 4
+  const directiveList = useMemo(() => {
+    const pId = directiveIds.primaryId;
+    const sId = directiveIds.secondaryId;
+    const all = Object.values(ACTION_DIRECTIVES);
+    const primaryDir = all.find((d) => d.id === pId) || ACTION_DIRECTIVES.TELE_104;
+    const secondaryDir = all.find((d) => d.id === sId) || ACTION_DIRECTIVES.ESIC_HOSPITAL;
+    const remaining = all.filter((d) => d.id !== pId && d.id !== sId);
+    return [primaryDir, secondaryDir, ...remaining];
+  }, [directiveIds]);
+
+  const [visibleFacilityCount, setVisibleFacilityCount] = useState(6);
+  const [drawerVisibleCount, setDrawerVisibleCount] = useState(6);
+
+  // Reset manual directive when a new case is selected
+  useEffect(() => {
+    setManualDirectiveId(null);
+  }, [result?.case_ref, result?.case_id, result?.id]);
+
+  // Reset pagination to 6 when search / filter / pin / directive changes
+  useEffect(() => {
+    setVisibleFacilityCount(6);
+    setDrawerVisibleCount(6);
+  }, [searchPincode, droppedPinLocation, manualDirectiveId, effectiveLoc?.district, effectiveLoc?.pincode]);
+
+  useEffect(() => {
+    setDrawerVisibleCount(6);
+  }, [drawerSearchQuery]);
+
+  useEffect(() => {
+    if (isFreshTriage || result?.is_fresh_triage) {
+      if (!result?.is_forwarded) {
+        setForwardedStatus(null);
+        return;
+      }
+    }
+    const caseRef = propCaseRef || result?.case_ref || result?.case_id || result?.id;
     if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
       setForwardedStatus({
+        directiveId: result.forwarded_directive_id || result.dispatch_info?.directiveId,
+        targetTeamId: result.forwarded_team_id || result.dispatch_info?.targetTeamId,
         shortName: result.forwarded_short_name || (result.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (result.forwarded_to?.includes("104") ? "104 Health Helpline" : (result.forwarded_to?.includes("108") ? "108 Ambulance" : result.forwarded_to))) || "Facility",
         teamName: result.forwarded_to || "ESIS Dispensary",
+        facilityName: result.forwarded_facility_name || result.forwarded_to,
         dispatchId: result.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
         timestamp: result.forwarded_at || new Date().toISOString(),
       });
@@ -701,8 +876,11 @@ export const TriageResultPanel = ({
           const parsed = JSON.parse(stored);
           if (parsed.is_forwarded && (parsed.case_ref === caseRef || parsed.dispatch_id)) {
             setForwardedStatus({
+              directiveId: parsed.directive_id || parsed.forwarded_directive_id,
+              targetTeamId: parsed.target_team_id || parsed.forwarded_team_id,
               shortName: parsed.forwarded_short_name || "Facility",
               teamName: parsed.forwarded_to || "ESIS Dispensary",
+              facilityName: parsed.forwarded_facility_name || parsed.forwarded_to,
               dispatchId: parsed.dispatch_id || `DISP-${String(caseRef || "SENT").slice(-6)}`,
               timestamp: parsed.forwarded_at || new Date().toISOString(),
             });
@@ -713,8 +891,11 @@ export const TriageResultPanel = ({
         const cached = getCachedCases().find((c) => String(c.case_ref) === String(caseRef) || String(c.id) === String(caseRef));
         if (cached && (cached.is_forwarded || cached.forwarded_at || cached.status === "forwarded")) {
           setForwardedStatus({
+            directiveId: cached.forwarded_directive_id || cached.dispatch_info?.directiveId,
+            targetTeamId: cached.forwarded_team_id || cached.dispatch_info?.targetTeamId,
             shortName: cached.forwarded_short_name || (cached.forwarded_to?.includes("Dispensary") ? "ESIS Dispensary" : (cached.forwarded_to?.includes("104") ? "104 Health Helpline" : (cached.forwarded_to?.includes("108") ? "108 Ambulance" : cached.forwarded_to))) || "Facility",
             teamName: cached.forwarded_to || "ESIS Dispensary",
+            facilityName: cached.forwarded_facility_name || cached.forwarded_to,
             dispatchId: cached.dispatch_id || `DISP-${String(caseRef).slice(-6)}`,
             timestamp: cached.forwarded_at,
           });
@@ -726,6 +907,135 @@ export const TriageResultPanel = ({
     // Default to null if this case is not specifically forwarded
     setForwardedStatus(null);
   }, [result]);
+
+  // Listen to broadcast CASE_FORWARDED event
+  useEffect(() => {
+    const handleCaseForwarded = (e) => {
+      const detail = e.detail;
+      const caseRef = result?.case_ref || result?.case_id || result?.id;
+      if (detail && (!detail.case_ref || detail.case_ref === caseRef)) {
+        if (detail.dispatch_info) {
+          setForwardedStatus(detail.dispatch_info);
+        } else {
+          setForwardedStatus({
+            directiveId: detail.forwarded_directive_id || detail.directive_id,
+            targetTeamId: detail.forwarded_team_id || detail.target_team_id,
+            teamName: detail.forwarded_to,
+            shortName: detail.forwarded_short_name,
+            facilityName: detail.forwarded_facility_name || detail.forwarded_to,
+          });
+        }
+      }
+    };
+    window.addEventListener("CASE_FORWARDED", handleCaseForwarded);
+    return () => window.removeEventListener("CASE_FORWARDED", handleCaseForwarded);
+  }, [result]);
+
+
+  const isFacilityForwarded = (f) => {
+    if (!f || !f.name) return false;
+    const fwdName = (
+      forwardedStatus?.facilityName ||
+      forwardedStatus?.teamName ||
+      result?.forwarded_facility_name ||
+      result?.forwarded_to ||
+      ""
+    ).toLowerCase().trim();
+    if (!fwdName) return false;
+    if (fwdName.includes("104") || fwdName.includes("108")) return false;
+    const currentName = f.name.toLowerCase().trim();
+    return fwdName === currentName || fwdName.includes(currentName) || currentName.includes(fwdName);
+  };
+
+  const isFacilityBooked = (f) => {
+    if (!f || !f.name) return false;
+    const bookedName = (bookedStatus?.facilityName || "").toLowerCase().trim();
+    if (!bookedName) return false;
+    const currentName = f.name.toLowerCase().trim();
+    return bookedName === currentName || bookedName.includes(currentName) || currentName.includes(bookedName);
+  };
+
+  const [externalActionTrigger, setExternalActionTrigger] = useState(null);
+
+  const handleCardAction = (facility, actionType) => {
+    if (!facility) return;
+
+    // Rule 1: Check existing Forward lock
+    const lockedForward =
+      forwardedStatus?.facilityName ||
+      forwardedStatus?.teamName ||
+      forwardedStatus?.shortName ||
+      result?.forwarded_facility_name ||
+      result?.forwarded_to;
+
+    // Rule 2: Check existing Booked lock
+    const lockedBooked =
+      bookedStatus?.facilityName ||
+      result?.booked_appointment?.facilityName;
+
+    const facilityClean = (facility.name || "").toLowerCase().trim();
+
+    // If clinical summary is already forwarded:
+    if (lockedForward) {
+      const forwardClean = lockedForward.toLowerCase().trim();
+      const isTeleOrAmbulance = forwardClean.includes("104") || forwardClean.includes("108");
+
+      if (isTeleOrAmbulance) {
+        toast.warning(
+          `Case is already forwarded to ${lockedForward}. Once details are forwarded to a helpline or ambulance, you cannot book an appointment or switch to a medical facility.`
+        );
+        return;
+      }
+
+      const isSame =
+        forwardClean === facilityClean ||
+        forwardClean.includes(facilityClean) ||
+        facilityClean.includes(forwardClean);
+      if (!isSame) {
+        toast.warning(
+          `Cannot ${actionType === "forward" ? "forward to" : "book at"} ${facility.name}. Clinical summary is already forwarded to ${lockedForward}. Both referral and appointment must be for the same facility.`
+        );
+        return;
+      }
+    }
+
+    // If an appointment is already booked:
+    if (lockedBooked) {
+      const bookedClean = lockedBooked.toLowerCase().trim();
+      const isSame =
+        bookedClean === facilityClean ||
+        bookedClean.includes(facilityClean) ||
+        facilityClean.includes(bookedClean);
+      if (!isSame) {
+        toast.warning(
+          `Cannot ${actionType === "forward" ? "forward to" : "book at"} ${facility.name}. An OPD appointment is already booked at ${lockedBooked}. Both referral and appointment must be for the same facility.`
+        );
+        return;
+      }
+    }
+
+    // Determine directive matching this facility
+    const dirId = isTieUp(facility)
+      ? "TIE_UP_FACILITY"
+      : isEsicHospital(facility)
+      ? "ESIC_HOSPITAL"
+      : isGovtDistrictHospital(facility)
+      ? "DIST_HOSPITAL"
+      : "ESIS_DISPENSARY";
+
+    // Switch active directive if not locked
+    if (!lockedDirectiveId) {
+      setManualDirectiveId(dirId);
+      onDirectiveChange?.(dirId);
+    }
+
+    // Trigger the corresponding modal in CaseHandoverForwarding
+    setExternalActionTrigger({
+      type: actionType,
+      facility,
+      timestamp: Date.now(),
+    });
+  };
 
   useEffect(() => {
     if (activeDirective && onDirectiveChange) {
@@ -879,6 +1189,37 @@ export const TriageResultPanel = ({
       }
     }
 
+    // Pin booked or forwarded physical facility to the very top (index 0) of the directory
+    const activeTargetFacilityName = (
+      bookedStatus?.facilityName ||
+      result?.booked_appointment?.facilityName ||
+      forwardedStatus?.facilityName ||
+      result?.forwarded_facility_name ||
+      ""
+    ).toLowerCase().trim();
+
+    if (activeTargetFacilityName && !activeTargetFacilityName.includes("104") && !activeTargetFacilityName.includes("108")) {
+      let topFacility = orderedFacs.find((f) => {
+        const fn = (f.name || "").toLowerCase().trim();
+        return fn === activeTargetFacilityName || fn.includes(activeTargetFacilityName) || activeTargetFacilityName.includes(fn);
+      });
+      if (!topFacility && Array.isArray(defaultFacilities)) {
+        const fallback = defaultFacilities.find((f) => {
+          const fn = (f.name || "").toLowerCase().trim();
+          return fn === activeTargetFacilityName || fn.includes(activeTargetFacilityName) || activeTargetFacilityName.includes(fn);
+        });
+        if (fallback) {
+          topFacility = {
+            ...fallback,
+            distance_km: bookedStatus?.facilityDistanceKm ?? forwardedStatus?.facilityDistanceKm ?? fallback.distance_km ?? 0.5,
+          };
+        }
+      }
+      if (topFacility) {
+        orderedFacs = [topFacility, ...orderedFacs.filter((f) => (f.id ? f.id !== topFacility.id : f.name !== topFacility.name))];
+      }
+    }
+
     const seenKeys = new Set();
     const dedupedFacs = [];
     for (const f of orderedFacs) {
@@ -902,6 +1243,9 @@ export const TriageResultPanel = ({
     isWeekend,
     droppedPinLocation,
     effectiveLoc,
+    bookedStatus,
+    forwardedStatus,
+    result,
   ]);
 
   const modalDrawerFacilities = useMemo(() => {
@@ -1020,8 +1364,14 @@ export const TriageResultPanel = ({
   );
 
   const forwardedTeamStr = String(
+    forwardedStatus?.targetTeamId ||
+    forwardedStatus?.directiveId ||
+    forwardedStatus?.facilityName ||
     forwardedStatus?.shortName ||
     forwardedStatus?.teamName ||
+    result?.forwarded_directive_id ||
+    result?.forwarded_team_id ||
+    result?.forwarded_facility_name ||
     result?.forwarded_short_name ||
     result?.forwarded_to ||
     ""
@@ -1035,20 +1385,23 @@ export const TriageResultPanel = ({
     result?.status === "forwarded"
   );
 
-  const secondaryStr = String(secondaryReferralDest || "").toLowerCase();
-  const isSentToSecondary = Boolean(
+  const forwardedNorm = normalizeFacilityTarget(forwardedTeamStr, dynamicFacilities);
+  const primaryNorm = normalizeFacilityTarget(primaryReferralDest || activeDirective?.id || activeDirective?.badge, dynamicFacilities);
+  const secondaryNorm = normalizeFacilityTarget(secondaryReferralDest || effectiveSecondaryDirective?.id || effectiveSecondaryDirective?.badge, dynamicFacilities);
+
+  const isSentToPrimary = Boolean(
     isCaseForwarded &&
-    secondaryStr &&
-    (
-      (secondaryStr.includes("104") && forwardedTeamStr.includes("104")) ||
-      (secondaryStr.includes("108") && forwardedTeamStr.includes("108")) ||
-      (secondaryStr.includes("hospital") && forwardedTeamStr.includes("hospital")) ||
-      (secondaryStr.includes("dispensary") && forwardedTeamStr.includes("dispensary")) ||
-      (secondaryStr.includes("tie") && forwardedTeamStr.includes("tie"))
-    )
+    forwardedNorm &&
+    primaryNorm &&
+    forwardedNorm === primaryNorm
   );
 
-  const isSentToPrimary = Boolean(isCaseForwarded && !isSentToSecondary);
+  const isSentToSecondary = Boolean(
+    isCaseForwarded &&
+    forwardedNorm &&
+    secondaryNorm &&
+    forwardedNorm === secondaryNorm
+  );
 
   return (
     <div className="space-y-5 rise w-full max-w-full min-w-0" data-testid="triage-result">
@@ -1118,12 +1471,11 @@ export const TriageResultPanel = ({
           <p className="mt-4 text-base font-semibold leading-snug" data-testid="triage-summary-en">
             {t.summary_en}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground/80">{s.label}</p>
 
           {/* Unified Clinical Assessment & Action items directly inside Triage outcome panel */}
           <div className="mt-5 space-y-4 pt-1">
 
-            {/* 2. Clinical Assessment Overview Grid */}
+            {/* 1. Clinical Assessment Overview Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div className="rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-border shadow-2xs">
                 <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">
@@ -1153,156 +1505,9 @@ export const TriageResultPanel = ({
                   {severityAndDuration}
                 </span>
               </div>
-
-              {/* Recommended Call Referral 01 (Primary Immediate Destination) */}
-              <div className="col-span-1 sm:col-span-2 rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-emerald-500/40 shadow-2xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-400">
-                    Recommended Call Referral 01 (Primary Immediate Destination)
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {Boolean(isSentToPrimary) && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
-                        <CheckCircle2 className="h-3 w-3" /> Forwarded
-                      </span>
-                    )}
-                    <span className="rounded bg-emerald-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
-                      Primary
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 font-extrabold text-emerald-950 dark:text-emerald-200 text-sm">
-                  <PhoneForwarded className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                  <span>{primaryReferralDest}</span>
-                </div>
-                {primaryReferralReason && (
-                  <p className="mt-1 text-xs text-foreground/80 font-medium leading-relaxed">
-                    {primaryReferralReason}
-                  </p>
-                )}
-              </div>
-
-              {/* Recommended Call Referral 02 (Co-Occurring / Secondary Referral) */}
-              {secondaryReferralDest && (
-                <div className="col-span-1 sm:col-span-2 rounded-lg bg-background/95 dark:bg-slate-900 p-2.5 border border-blue-400/50 shadow-2xs">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] uppercase font-bold text-blue-800 dark:text-blue-400">
-                      Recommended Call Referral 02 (Co-Occurring / Secondary Referral)
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {Boolean(isSentToSecondary) && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/50 shadow-2xs animate-in fade-in duration-200">
-                          <CheckCircle2 className="h-3 w-3" /> Forwarded
-                        </span>
-                      )}
-                      <span className="rounded bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider">
-                        Secondary
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 font-extrabold text-blue-950 dark:text-blue-200 text-sm">
-                    <PhoneForwarded className="h-4 w-4 text-blue-700 dark:text-blue-400 shrink-0" />
-                    <span>{secondaryReferralDest}</span>
-                  </div>
-                  {secondaryReferralReason && (
-                    <p className="mt-1 text-xs text-foreground/80 font-medium leading-relaxed">
-                      {secondaryReferralReason}
-                    </p>
-                  )}
-                </div>
-              )}
             </div>
 
-            {/* 4. Decision Switcher Buttons (Redesigned with clean responsive grid and modern clinical controls) */}
-            <div className="rounded-xl border border-current/15 bg-background/80 dark:bg-slate-900/80 backdrop-blur-sm p-4 shadow-2xs space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-black uppercase tracking-wider text-foreground block">
-                      Decision Switcher
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-medium">
-                      Select or switch referral destination channel
-                    </span>
-                  </div>
-                </div>
-                {manualDirectiveId && (
-                  <button
-                    type="button"
-                    onClick={() => setManualDirectiveId(null)}
-                    className="inline-flex items-center gap-1.5 text-[10px] font-bold text-primary hover:text-primary/90 transition-colors bg-primary/10 hover:bg-primary/15 px-2.5 py-1 rounded-full cursor-pointer shadow-2xs"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    <span>Reset to AI Primary</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Clean structured responsive grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.values(ACTION_DIRECTIVES).map((dir) => {
-                  const isSelected = dir.id === activeDirective.id;
-                  const isPrimary = dir.id === directiveIds.primaryId;
-                  const isSecondary = dir.id === directiveIds.secondaryId;
-                  return (
-                    <button
-                      key={dir.id}
-                      type="button"
-                      onClick={() => setManualDirectiveId(dir.id)}
-                      className={`group relative flex items-center justify-between gap-2 rounded-xl p-2.5 text-left text-xs font-bold transition-all duration-200 cursor-pointer ${
-                        isSelected
-                          ? `${dir.badgeColor} ring-2 ring-offset-1 ring-current shadow-md scale-[1.01]`
-                          : "bg-background/95 dark:bg-slate-800/90 text-foreground border border-border/80 hover:bg-secondary/70 hover:border-foreground/25 hover:shadow-2xs"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-base shrink-0 leading-none">{dir.icon}</span>
-                        <div className="min-w-0">
-                          <p className="truncate tracking-tight leading-snug">{dir.badge}</p>
-                          <p
-                            className={`text-[10px] font-medium truncate ${
-                              isSelected ? "text-white/80" : "text-muted-foreground"
-                            }`}
-                          >
-                            {dir.category || "Referral Directive"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 flex items-center gap-1">
-                        {isPrimary && (
-                          <span
-                            className={`rounded text-[9px] font-extrabold px-1.5 py-0.5 border ${
-                              isSelected
-                                ? "bg-white/20 text-white border-white/30"
-                                : "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-400/40"
-                            }`}
-                          >
-                            ⭐ Primary
-                          </span>
-                        )}
-                        {isSecondary && !isPrimary && (
-                          <span
-                            className={`rounded text-[9px] font-extrabold px-1.5 py-0.5 border ${
-                              isSelected
-                                ? "bg-white/20 text-white border-white/30"
-                                : "bg-blue-500/15 text-blue-800 dark:text-blue-300 border-blue-400/40"
-                            }`}
-                          >
-                            ⭐ Secondary
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 5. Point-wise Clinical Red Flags Box (AI Processed based on IP condition) */}
+            {/* 2. Point-wise Clinical Red Flags Box (Directly below Chief Complaint & Severity) */}
             <div
               className={`rounded-xl border p-3.5 shadow-2xs ${
                 allRedFlags.length > 0
@@ -1365,36 +1570,173 @@ export const TriageResultPanel = ({
               )}
             </div>
 
-            {/* 6. Directive Guidance Summary */}
-            {activeDirective.summary && (
-              <p className="text-xs sm:text-sm font-semibold leading-relaxed">
-                {activeDirective.summary}
-              </p>
-            )}
+            {/* 3. All 6 Referral & Forwarding Options (Horizontal responsive grid replacing separate boxes & Decision Switcher) */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
+                  <span>Recommended Referral &amp; Forwarding Channels</span>
+                  {lockedDirectiveId && (
+                    <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      🔒 Locked to {forwardedStatus?.shortName || forwardedStatus?.teamName || bookedStatus?.facilityName || "dispatched channel"}
+                    </span>
+                  )}
+                </span>
+                {manualDirectiveId && !lockedDirectiveId && (
+                  <button
+                    type="button"
+                    onClick={() => setManualDirectiveId(null)}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/80 transition bg-primary/10 px-2.5 py-0.5 rounded-full cursor-pointer shadow-2xs"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Reset to AI Primary</span>
+                  </button>
+                )}
+              </div>
 
-            {/* 7. Action Steps for Agent Checklist */}
-            <div className="space-y-1.5 rounded-lg bg-background/90 p-3 border border-current/15 text-xs text-foreground shadow-2xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                Action Steps for Agent:
-              </span>
-              {activeDirective.checklist.map((step, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
-                  <span className="font-semibold leading-snug">{step}</span>
-                </div>
-              ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {directiveList.map((dir) => {
+                  const isSelected = dir.id === activeDirective.id;
+                  const isPrimary = dir.id === directiveIds.primaryId;
+                  const isSecondary = dir.id === directiveIds.secondaryId;
+                  const isLockedOther = Boolean(lockedDirectiveId && dir.id !== lockedDirectiveId);
+                  const dirNorm = normalizeFacilityTarget(dir.id || dir.badge, dynamicFacilities);
+                  const isDirForwarded = Boolean(
+                    isCaseForwarded && (
+                      (forwardedStatus?.directiveId && dir.id === forwardedStatus.directiveId) ||
+                      (forwardedStatus?.targetTeamId && (
+                        dir.id === forwardedStatus.targetTeamId ||
+                        (dir.id === "CALL_108" && forwardedStatus.targetTeamId === "108_AMBULANCE") ||
+                        (dir.id === "TELE_104" && forwardedStatus.targetTeamId === "104_MEDICAL")
+                      )) ||
+                      (forwardedNorm && dirNorm && dirNorm === forwardedNorm)
+                    )
+                  );
+
+                  const routingHint = isPrimary
+                    ? primaryReferralReason || dir.summary || dir.category
+                    : isSecondary
+                    ? secondaryReferralReason || dir.summary || dir.category
+                    : dir.summary || dir.category;
+
+                  return (
+                    <button
+                      key={dir.id}
+                      type="button"
+                      disabled={isLockedOther}
+                      onClick={() => {
+                        if (lockedDirectiveId) {
+                          const lockedName =
+                            forwardedStatus?.facilityName ||
+                            forwardedStatus?.teamName ||
+                            forwardedStatus?.shortName ||
+                            bookedStatus?.facilityName ||
+                            "selected channel";
+                          toast.warning(
+                            `Channel locked to ${lockedName}. Once clinical details are ${forwardedStatus ? "forwarded" : "booked"}, switching channels or selecting another facility is disabled.`
+                          );
+                          return;
+                        }
+                        setManualDirectiveId(dir.id);
+                        onDirectiveChange?.(dir.id);
+                      }}
+                      className={`group relative rounded-xl p-3 text-left transition-all duration-200 border flex flex-col justify-between gap-2.5 shadow-2xs ${
+                        isSelected
+                          ? `${dir.badgeColor} ring-2 ring-offset-1 ring-current shadow-md scale-[1.01] cursor-default`
+                          : isLockedOther
+                          ? "bg-muted/40 dark:bg-slate-900/40 border-border/50 text-muted-foreground opacity-50 cursor-not-allowed border-dashed"
+                          : "bg-background/95 dark:bg-slate-900 border-border/80 hover:bg-secondary/70 hover:border-foreground/30 text-foreground hover:shadow-xs cursor-pointer"
+                      }`}
+                    >
+                      {/* Top row: Label and Badges */}
+                      <div className="flex items-center justify-between gap-1.5 w-full">
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider truncate ${
+                            isSelected ? "text-white/90" : "text-muted-foreground"
+                          }`}
+                        >
+                          {dir.category || "Referral Directive"}
+                        </span>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isDirForwarded && (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 shadow-2xs">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> Forwarded
+                            </span>
+                          )}
+                          {isPrimary && (
+                            <span
+                              className={`rounded text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider shadow-2xs ${
+                                isSelected ? "bg-white/20 text-white border border-white/30" : "bg-emerald-700 text-white"
+                              }`}
+                            >
+                              ⭐ Primary
+                            </span>
+                          )}
+                          {isSecondary && !isPrimary && (
+                            <span
+                              className={`rounded text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider shadow-2xs ${
+                                isSelected ? "bg-white/20 text-white border border-white/30" : "bg-blue-700 text-white"
+                              }`}
+                            >
+                              ⭐ Secondary
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Main Title Row with Icon */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-base shrink-0 leading-none">{dir.icon}</span>
+                        <p
+                          className={`text-sm font-extrabold tracking-tight leading-snug truncate ${
+                            isSelected ? "text-white" : "text-foreground"
+                          }`}
+                        >
+                          {dir.badge}
+                        </p>
+                      </div>
+
+                      {/* Clinical routing note */}
+                      {routingHint && (
+                        <p
+                          className={`text-[11px] font-medium leading-relaxed line-clamp-2 pt-1 border-t ${
+                            isSelected ? "text-white/85 border-white/20" : "text-muted-foreground border-border/50"
+                          }`}
+                        >
+                          {routingHint}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Referral Forwarding Dispatch Button & Confirmation */}
             <CaseHandoverForwarding
               result={result}
+              caseRef={propCaseRef || result?.case_ref}
+              isFreshTriage={isFreshTriage || Boolean(result?.is_fresh_triage)}
               activeDirective={activeDirective}
               allRedFlags={allRedFlags}
               callerIntake={callerIntake}
               callerHistory={callerHistory}
+              externalTrigger={externalActionTrigger}
+              dynamicFacilities={dynamicFacilities}
+              effectiveLoc={effectiveLoc}
+              searchPincode={searchPincode}
+              isCrmPage={isCrmPage}
               onForwardSuccess={(statusData) => {
                 setForwardedStatus(statusData);
                 onForwardSuccess?.(statusData);
+              }}
+              onAppointmentBooked={(bookingData) => {
+                setBookedStatus(bookingData);
+                onAppointmentBooked?.(bookingData);
+              }}
+              onAppointmentCancelled={() => {
+                setBookedStatus(null);
               }}
             />
           </div>
@@ -1592,6 +1934,29 @@ export const TriageResultPanel = ({
                   : "";
 
                 const isSelectedOnMap = selectedFacilityForMap?.id === f.id || selectedFacilityForMap?.name === f.name;
+                const isForwarded = isFacilityForwarded(f);
+                const isBooked = isFacilityBooked(f);
+
+                const lockedForwardTarget =
+                  forwardedStatus?.facilityName ||
+                  forwardedStatus?.teamName ||
+                  forwardedStatus?.shortName ||
+                  result?.forwarded_facility_name ||
+                  result?.forwarded_to;
+                const lockedBookedTarget =
+                  bookedStatus?.facilityName ||
+                  result?.booked_appointment?.facilityName;
+
+                const isForwardedTo104Or108 = Boolean(
+                  lockedForwardTarget &&
+                  (lockedForwardTarget.includes("104") || lockedForwardTarget.includes("108"))
+                );
+
+                const isFacilityLockedOut = Boolean(
+                  isForwardedTo104Or108 ||
+                  (lockedForwardTarget && !isForwarded) ||
+                  (lockedBookedTarget && !isBooked)
+                );
 
                 return (
                   <li
@@ -1627,6 +1992,14 @@ export const TriageResultPanel = ({
                             </span>
                           )}
                         </div>
+
+                        {(f.distance_km != null || f.maps_url) && (
+                          <span className="inline-flex items-center text-xs font-bold text-slate-700 dark:text-slate-300 bg-secondary/80 dark:bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-border/70 shrink-0">
+                            {f.distance_km != null
+                              ? `Approx ${formatApproxKm(f.distance_km)} KM`
+                              : "Approx -- KM"}
+                          </span>
+                        )}
                       </div>
 
                       <p className="flex items-center gap-2 text-sm font-bold text-foreground">
@@ -1655,15 +2028,70 @@ export const TriageResultPanel = ({
                           )}
                         </div>
 
-                        {(f.distance_km != null || f.maps_url) && (
-                          <span
-                            className="inline-flex items-center text-[11.5px] font-bold text-slate-700 dark:text-slate-300"
-                          >
-                            {f.distance_km != null
-                              ? `Approx ${formatApproxKm(f.distance_km)} KM`
-                              : "Approx -- KM"}
-                          </span>
-                        )}
+                        {/* Forward & Book Buttons for Facility Card */}
+                        <div className="flex items-center gap-1.5 ml-1">
+                          {isForwarded ? (
+                            <button
+                              type="button"
+                              onClick={() => handleCardAction(f, "forward")}
+                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-bold transition cursor-pointer shadow-2xs active:scale-95"
+                              title={`Clinical summary forwarded to ${f.name}`}
+                            >
+                              <Check className="h-3 w-3" />
+                              <span>Forwarded</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isFacilityLockedOut}
+                              onClick={() => handleCardAction(f, "forward")}
+                              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-bold transition shadow-2xs ${
+                                isFacilityLockedOut
+                                  ? "border-border/50 bg-muted/40 text-muted-foreground/50 opacity-40 cursor-not-allowed"
+                                  : "border-primary/50 bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary cursor-pointer active:scale-95"
+                              }`}
+                              title={
+                                isFacilityLockedOut
+                                  ? `Forwarding locked to ${lockedForwardTarget || lockedBookedTarget || "dispatched destination"}`
+                                  : `Forward clinical summary to ${f.name}`
+                              }
+                            >
+                              <Send className="h-3 w-3" />
+                              <span>Forward</span>
+                            </button>
+                          )}
+
+                          {isBooked ? (
+                            <button
+                              type="button"
+                              onClick={() => handleCardAction(f, "book")}
+                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 text-[11px] font-bold transition cursor-pointer shadow-2xs active:scale-95"
+                              title={`OPD appointment booked at ${f.name}`}
+                            >
+                              <Check className="h-3 w-3" />
+                              <span>Booked</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isFacilityLockedOut}
+                              onClick={() => handleCardAction(f, "book")}
+                              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-bold transition shadow-2xs ${
+                                isFacilityLockedOut
+                                  ? "border-border/50 bg-muted/40 text-muted-foreground/50 opacity-40 cursor-not-allowed"
+                                  : "border-orange-500/60 bg-orange-500/10 hover:bg-orange-600 hover:text-white text-orange-700 dark:text-orange-400 cursor-pointer active:scale-95"
+                              }`}
+                              title={
+                                isFacilityLockedOut
+                                  ? `Booking locked to ${lockedForwardTarget || lockedBookedTarget || "dispatched destination"}`
+                                  : `Book OPD appointment at ${f.name}`
+                              }
+                            >
+                              <CalendarCheck className="h-3 w-3" />
+                              <span>Book</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </li>
@@ -1986,7 +2414,7 @@ export const TriageResultPanel = ({
                             </p>
                           )}
 
-                          {/* Footer row: District, Pincode, Approx KM, and Phone */}
+                          {/* Footer row: District, Pincode, and Phone */}
                           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/80 dark:border-slate-700/60 text-[10.5px]">
                             <div className="flex flex-wrap items-center gap-1.5">
                               {f.district && (
@@ -2000,9 +2428,7 @@ export const TriageResultPanel = ({
                                 </span>
                               )}
                               {f.distance_km != null && (
-                                <span
-                                  className="inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-700 dark:text-slate-300 font-bold"
-                                >
+                                <span className="inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-700 dark:text-slate-300 font-bold">
                                   Approx {formatApproxKm(f.distance_km)} KM
                                 </span>
                               )}

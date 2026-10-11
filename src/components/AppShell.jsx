@@ -13,6 +13,8 @@ import {
   PhoneCall,
   X,
   BrainCircuit,
+  LayoutDashboard,
+  Home,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { api } from "@/lib/api";
@@ -32,11 +34,16 @@ import { subscribeToSync } from "@/lib/broadcastSync";
 
 
 const NAV_ITEMS = [
-  { id: "home", href: "/", label: "Live Intake & Triage", icon: PhoneCall },
+  { id: "home", href: "/", label: "Home", icon: Home },
+  { id: "crm", href: "/crm", label: "CRM View", icon: LayoutDashboard },
   { id: "cases", href: "/cases", label: "Triage Case", icon: FileText },
   { id: "facilities", href: "/facilities", label: "Triage Facility", icon: Building2 },
   { id: "feedback", href: "/feedback", label: "AI Learning & Feedback", icon: BrainCircuit },
 ];
+
+// In-memory module cache for instant 0ms page transitions without SSR hydration mismatches
+let cachedAgentInMemory = null;
+let cachedAuthInitialized = false;
 
 export function AppShell({ activePage = "home", children }) {
   const router = useRouter();
@@ -48,25 +55,46 @@ export function AppShell({ activePage = "home", children }) {
   const [callSession, setCallSession] = useState(null);
 
   // Authentication State
-  const [currentAgent, setCurrentAgent] = useState(null);
-  const [authInitialized, setAuthInitialized] = useState(false);
+  const [currentAgent, setCurrentAgent] = useState(() => cachedAgentInMemory);
+  const [authInitialized, setAuthInitialized] = useState(() => cachedAuthInitialized);
 
-  // Load active agent on mount
+  // Load and synchronize active agent across Main Page and CRM
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem("ekms_active_agent") || localStorage.getItem("ekms_active_agent");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed?.agentId && parsed?.sessionId) {
-          setCurrentAgent(parsed);
-          try {
-            sessionStorage.setItem("ekms_active_agent", stored);
-          } catch (_) {}
+    const syncActiveAgent = () => {
+      try {
+        const stored = sessionStorage.getItem("ekms_active_agent") || localStorage.getItem("ekms_active_agent");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.agentId && parsed?.sessionId) {
+            cachedAgentInMemory = parsed;
+            setCurrentAgent(parsed);
+            return;
+          }
         }
-      }
-    } catch (e) {}
+        cachedAgentInMemory = null;
+        setCurrentAgent(null);
+      } catch (e) {}
+    };
+
+    syncActiveAgent();
+    cachedAuthInitialized = true;
     setAuthInitialized(true);
+
+    window.addEventListener("storage", syncActiveAgent);
+    window.addEventListener("ekms_auth_change", syncActiveAgent);
+    return () => {
+      window.removeEventListener("storage", syncActiveAgent);
+      window.removeEventListener("ekms_auth_change", syncActiveAgent);
+    };
   }, []);
+
+  // Prefetch routes in background for instant 0ms transitions
+  useEffect(() => {
+    router.prefetch("/cases");
+    router.prefetch("/facilities");
+    router.prefetch("/crm");
+    router.prefetch("/");
+  }, [router]);
 
   // Real-time single active session watcher via Firestore
   useEffect(() => {
@@ -89,6 +117,7 @@ export function AppShell({ activePage = "home", children }) {
               toast.error(
                 `Your session was terminated because ${currentAgent.agentId} logged in from another device/tab.`
               );
+              cachedAgentInMemory = null;
               sessionStorage.removeItem("ekms_active_agent");
               localStorage.removeItem("ekms_active_agent");
               setCurrentAgent(null);
@@ -109,16 +138,30 @@ export function AppShell({ activePage = "home", children }) {
   }, [currentAgent]);
 
   const handleLogout = async () => {
-    if (currentAgent?.agentId) {
-      try {
-        const db = getFirestoreDb();
-        await deleteDoc(doc(db, "sessions", currentAgent.agentId));
-      } catch (e) {}
-    }
+    cachedAgentInMemory = null;
+    cachedAuthInitialized = true;
+    const agentId = currentAgent?.agentId;
+
+    // Synchronously clear all active agent & CRM session keys
     sessionStorage.removeItem("ekms_active_agent");
     localStorage.removeItem("ekms_active_agent");
+    sessionStorage.removeItem("crm_logged_in");
+    localStorage.removeItem("crm_logged_in");
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("ekms_auth_change"));
+    }
     setCurrentAgent(null);
     toast.info("Logged out successfully");
+
+    // Clean up firestore session asynchronously in background without blocking logout
+    if (agentId) {
+      try {
+        const db = getFirestoreDb();
+        deleteDoc(doc(db, "sessions", agentId)).catch(() => {});
+      } catch (e) {}
+    }
   };
 
   const loadMeta = useCallback(() => {
@@ -210,7 +253,7 @@ export function AppShell({ activePage = "home", children }) {
   const handleCallerConnected = useCallback((info) => {
     setIncomingCallerInfo(info ? { ...info, _ts: Date.now() } : null);
     // If not on home page when call connects, optionally navigate to home to log the call
-    if (activePage !== "home") {
+    if (info && activePage !== "home") {
       router.push("/");
     }
   }, [activePage, router]);
@@ -255,7 +298,13 @@ export function AppShell({ activePage = "home", children }) {
           </div>
         </header>
 
-        <AgentLogin onLoginSuccess={setCurrentAgent} />
+        <AgentLogin
+          onLoginSuccess={(agent) => {
+            cachedAgentInMemory = agent;
+            cachedAuthInitialized = true;
+            setCurrentAgent(agent);
+          }}
+        />
       </div>
     );
   }
@@ -304,8 +353,51 @@ export function AppShell({ activePage = "home", children }) {
 
           <div className="ml-auto flex items-center gap-2 sm:gap-2.5">
             {/* Cases count link -> opens /cases */}
+            {/* 1. CRM View Toggle Switch (First position, to the left of Triage Case) */}
+            <Link
+              href={activePage === "crm" ? "/" : "/crm"}
+              prefetch={true}
+              onClick={() => {
+                if (activePage !== "crm") {
+                  try {
+                    sessionStorage.removeItem("crm_authenticated_session");
+                  } catch (_) {}
+                }
+              }}
+              className={`flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-bold transition shadow-2xs ${
+                activePage === "crm"
+                  ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/40"
+                  : "border-border text-foreground/80 hover:border-primary/60 hover:text-foreground hover:bg-secondary/60"
+              }`}
+              title={
+                activePage === "crm"
+                  ? "CRM View is ON (Click to toggle OFF & return to Standard Triage)"
+                  : "CRM View is OFF (Click to toggle ON & open Piramal CRM)"
+              }
+            >
+              <LayoutDashboard
+                className={`h-3.5 w-3.5 ${
+                  activePage === "crm" ? "text-emerald-700" : "text-muted-foreground"
+                }`}
+              />
+              <span className="hidden xs:inline sm:inline">CRM View</span>
+              <span
+                className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors duration-200 ${
+                  activePage === "crm" ? "bg-emerald-600" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow-xs transition-transform duration-200 ${
+                    activePage === "crm" ? "translate-x-3.5" : "translate-x-0.5"
+                  }`}
+                />
+              </span>
+            </Link>
+
+            {/* 2. Triage Case logs link -> opens /cases */}
             <Link
               href="/cases"
+              prefetch={true}
               data-testid="header-case-count"
               className={`hidden sm:flex rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "cases"
@@ -315,12 +407,13 @@ export function AppShell({ activePage = "home", children }) {
               title="Open Triage Case logs page"
             >
               <span>Triage Case</span>
-              <span className="font-bold text-emerald-800">({totalCaseCount})</span>
+              <span suppressHydrationWarning className="font-bold text-emerald-800">({totalCaseCount})</span>
             </Link>
 
-            {/* Facilities count link -> opens /facilities */}
+            {/* 3. Facilities count link -> opens /facilities */}
             <Link
               href="/facilities"
+              prefetch={true}
               className={`hidden sm:flex rounded-full border px-2.5 py-1 text-[11px] font-bold transition cursor-pointer items-center gap-1.5 shadow-2xs ${
                 activePage === "facilities"
                   ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-500/30"
@@ -329,26 +422,14 @@ export function AppShell({ activePage = "home", children }) {
               title="Open Triage Facility directory page"
             >
               <span>Triage Facility</span>
-              <span className="font-bold text-emerald-800">({meta?.facility_count ?? "—"})</span>
+              <span suppressHydrationWarning className="font-bold text-emerald-800">({meta?.facility_count ?? "—"})</span>
             </Link>
 
-            {/* Logged in Agent Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
+            {/* 4. Logged in Agent Badge */}
+            <div suppressHydrationWarning className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-950 shadow-2xs">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-              <span>{currentAgent.agentId}</span>
+              <span suppressHydrationWarning>{currentAgent.agentId}</span>
             </div>
-
-            {/* IP Caller link */}
-            <a
-              href="/caller"
-              target="_blank"
-              rel="noreferrer"
-              className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-600/60 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-950 transition-all duration-200 hover:bg-emerald-100 hover:shadow-xs shadow-2xs"
-              title="Open Triage Caller portal in new tab/window"
-            >
-              <PhoneCall className="h-3 w-3 text-emerald-700" />
-              Triage Caller
-            </a>
 
             {/* Hamburger Menu Button */}
             <button
@@ -432,7 +513,15 @@ export function AppShell({ activePage = "home", children }) {
                   <Link
                     key={id}
                     href={href}
-                    onClick={() => setMenuOpen(false)}
+                    prefetch={true}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (id === "crm") {
+                        try {
+                          sessionStorage.removeItem("crm_authenticated_session");
+                        } catch (_) {}
+                      }
+                    }}
                     className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-sm font-semibold transition-all ${
                       isActive
                         ? "bg-primary text-primary-foreground shadow-xs"
