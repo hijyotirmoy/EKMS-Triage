@@ -15,7 +15,7 @@ const SAMPLE = {
   duration: "Less than 2 hours",
   severity_reported: 9,
   city: "Guwahati",
-  district: "Kamrup Metropolitan",
+  district: "Kamrup Metro",
   pincode: "781005",
   source_app: "worker-app-android",
 };

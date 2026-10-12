@@ -96,6 +96,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [showSummaryCard, setShowSummaryCard] = useState(false);
+  const [selectedOptions, setSelectedOptions] = useState([]);
 
   const getActiveAgentLabel = () => {
     let agentId = currentAgent?.agentId;
@@ -790,29 +791,85 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                     </div>
                   </div>
 
-                  {/* Clickable Suggested Answers */}
+                  {/* Clickable Suggested Answers (Supports single or multi-selection) */}
                   {m.options && m.options.length > 0 && (
-                    <div className="border-t border-emerald-500/30 pt-2.5 space-y-1.5">
+                    <div className="border-t border-emerald-500/30 pt-2.5 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-1 text-[10.5px] sm:text-[11px] font-bold text-emerald-950">
-                        <span>Likely Answers from IP (Click to select):</span>
-                        <span className="text-[10px] text-slate-600 font-medium">
-                          or type exact answer below
+                        <span className="flex items-center gap-1.5">
+                          <span>Likely Answers from IP:</span>
+                          <span className="text-[10px] font-normal text-emerald-800 bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-600/30">
+                            Select one or more
+                          </span>
                         </span>
+                        {selectedOptions.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOptions([])}
+                            className="text-[10px] text-rose-600 hover:text-rose-800 font-semibold cursor-pointer underline"
+                          >
+                            Clear selected ({selectedOptions.length})
+                          </button>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {m.options.map((opt, idx) => (
+                        {m.options.map((opt, idx) => {
+                          const isSelected = selectedOptions.includes(opt);
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              disabled={loading}
+                              onClick={() => {
+                                setSelectedOptions((prev) => {
+                                  if (prev.includes(opt)) {
+                                    return prev.filter((o) => o !== opt);
+                                  } else {
+                                    return [...prev, opt];
+                                  }
+                                });
+                              }}
+                              className={`group flex items-center gap-1.5 rounded-full border px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10.5px] sm:text-[11px] font-semibold transition-all active:scale-95 text-left disabled:opacity-50 cursor-pointer ${
+                                isSelected
+                                  ? "border-emerald-700 bg-emerald-700 text-white shadow-xs font-bold"
+                                  : "border-emerald-600/50 bg-white text-emerald-950 hover:-translate-y-0.5 hover:border-emerald-700 hover:bg-emerald-50 hover:shadow-xs"
+                              }`}
+                            >
+                              <span
+                                className={`h-2 w-2 rounded-full border shrink-0 transition-colors ${
+                                  isSelected
+                                    ? "bg-white border-white"
+                                    : "bg-emerald-600/20 border-emerald-600"
+                                }`}
+                              />
+                              <span>{opt}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Send Selected Options Button when 1 or more options selected */}
+                      {selectedOptions.length > 0 && (
+                        <div className="flex items-center gap-2 pt-1 animate-in fade-in duration-150">
                           <button
-                            key={idx}
                             type="button"
                             disabled={loading}
-                            onClick={() => handleUserSubmit(opt)}
-                            className="group flex items-center gap-1.5 rounded-full border border-emerald-600/50 bg-white px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10.5px] sm:text-[11px] font-semibold text-emerald-950 transition-all hover:-translate-y-0.5 hover:border-emerald-700 hover:bg-emerald-100 hover:shadow-xs active:scale-95 text-left disabled:opacity-50"
+                            onClick={() => {
+                              const combined = selectedOptions.join(", ");
+                              setSelectedOptions([]);
+                              handleUserSubmit(combined);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
                           >
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 shrink-0" />
-                            <span>{opt}</span>
+                            <Send className="h-3 w-3" />
+                            <span>
+                              Submit Selected Answer{selectedOptions.length > 1 ? "s" : ""} ({selectedOptions.length})
+                            </span>
                           </button>
-                        ))}
-                      </div>
+                          <span className="text-[10px] text-slate-500 italic">
+                            or click any option again to deselect
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

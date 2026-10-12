@@ -19,16 +19,18 @@ const CrmIntegratedView = dynamic(
 function BeneficiaryContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
+  const phone = searchParams.get("phone");
+  const targetIdentifier = id || phone;
 
   useEffect(() => {
-    document.title = id ? `Beneficiary - ${id}` : "Beneficiary";
-  }, [id]);
+    document.title = targetIdentifier ? `Beneficiary - ${targetIdentifier}` : "Beneficiary";
+  }, [targetIdentifier]);
 
   return (
     <CrmIntegratedView
       initialNav="Beneficiary"
-      initialBeneficiaryViewMode={id ? "form" : "list"}
-      initialBeneficiaryId={id}
+      initialBeneficiaryViewMode={targetIdentifier ? "form" : "list"}
+      initialBeneficiaryId={targetIdentifier}
     />
   );
 }

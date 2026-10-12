@@ -80,7 +80,7 @@ import { generateNextCaseRef } from "@/lib/caseId";
 import { extractCallerReportedProblems } from "@/lib/triageEngine";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { TriageResultPanel } from "./TriageResultPanel";
-import { AbhaCallerSection } from "./AbhaCallerSection";
+import { CallerHistorySection } from "./CallerHistorySection";
 
 // ================= RANDOMIZED DEMO DATASETS =================
 
@@ -693,7 +693,7 @@ export const ASSAM_DISTRICTS = [
   "Hojai",
   "Jorhat",
   "Kamrup",
-  "Kamrup Metropolitan",
+  "Kamrup Metro",
   "Karbi Anglong",
   "Karimganj",
   "Kokrajhar",
@@ -711,6 +711,47 @@ export const ASSAM_DISTRICTS = [
   "West Karbi Anglong",
   "Bajali",
 ];
+
+export const ASSAM_DISTRICT_DEFAULT_PINS = {
+  "BAKSA": "781372",
+  "BARPETA": "781301",
+  "BISWANATH": "784176",
+  "BONGAIGAON": "783380",
+  "CACHAR": "788001",
+  "CHARAIDEO": "785690",
+  "CHIRANG": "783385",
+  "DARRANG": "784125",
+  "DHEMAJI": "787057",
+  "DHUBRI": "783301",
+  "DIBRUGARH": "786001",
+  "DIMA HASAO": "788819",
+  "GOALPARA": "783101",
+  "GOLAGHAT": "785621",
+  "HAILAKANDI": "788151",
+  "HOJAI": "782435",
+  "JORHAT": "785001",
+  "KAMRUP": "781101",
+  "KAMRUP METROPOLITAN": "781001",
+  "KAMRUP METRO": "781001",
+  "KARBI ANGLONG": "782460",
+  "KARIMGANJ": "788710",
+  "KOKRAJHAR": "783370",
+  "LAKHIMPUR": "787001",
+  "MAJULI": "785104",
+  "MARIGAON": "782105",
+  "MORIGAON": "782105",
+  "NAGAON": "782001",
+  "NALBARI": "781335",
+  "SIVASAGAR": "785640",
+  "SONITPUR": "784001",
+  "SOUTH SALMARA-MANKACHAR": "783127",
+  "SOUTH SALMARA MANCACHAR": "783127",
+  "TAMULPUR": "781367",
+  "TINSUKIA": "786125",
+  "UDALGURI": "784509",
+  "WEST KARBI ANGLONG": "782448",
+  "BAJALI": "781325",
+};
 
 // 4. Real Beneficiary Records from Frappe CRM (all 32 task beneficiaries with realistic Assam districts & phone numbers)
 const DEMO_BENEFICIARIES = [
@@ -1192,7 +1233,7 @@ const DEMO_BENEFICIARIES = [
     "center": "Asam Center 1",
     "phoneNumber": "+91 60029 81245",
     "cleanPhone": "6002981245",
-    "district": "Kamrup Metropolitan",
+    "district": "Kamrup Metro",
     "branching": "Child",
     "registrationDate": "15-05-2026 10:00",
     "gender": "Male",
@@ -1530,7 +1571,7 @@ const DEMO_BENEFICIARIES = [
     "center": "Asam Center 1",
     "phoneNumber": "+91 98647 81290",
     "cleanPhone": "9864781290",
-    "district": "Kamrup Metropolitan",
+    "district": "Kamrup Metro",
     "branching": "Child",
     "registrationDate": "15-05-2026 10:00",
     "gender": "Female",
@@ -1548,24 +1589,29 @@ const DEMO_BENEFICIARIES = [
   }
 ];
 
-// Filter helper: ONLY actual connected calls should show in Call History
+// Filter helper: ONLY genuine calls (excluding blank form opened placeholders) should show in Call History
 function filterOnlyCalls(list) {
   if (!Array.isArray(list)) return [];
   return list.filter((item) => {
-    const t = String(item.type || "").toLowerCase();
-    const ct = String(item.callType || "").toLowerCase();
-    const st = String(item.status || "").toLowerCase();
-    const dur = String(item.duration || "");
+    if (!item) return false;
+    const dur = String(item.duration || "").trim();
     const notes = String(item.notes || "").toLowerCase();
+    const st = String(item.status || "").toLowerCase();
+    const camp = String(item.campaign || "").toLowerCase();
 
-    // If explicitly marked as not connected, or duration is 0, or notes say "no call", do not show
-    if (item.callConnected === false || st.includes("not connected") || notes.includes("no call") || dur === "00:00" || dur === "0") {
+    // Never show dummy 00:00 placeholders generated purely by opening an empty form without calling
+    if ((dur === "00:00" || dur === "0" || !dur) && (notes.includes("form opened") || notes.includes("beneficiary form opened"))) {
       return false;
     }
-    const isConn = item.callConnected === true || (st.includes("connected") && !st.includes("not connected"));
-    if (!isConn) return false;
 
-    return !t.includes("form saved") && !ct.includes("form saved") && !t.includes("survey submitted");
+    // Exclude abandoned / missed calls unless they are part of a real triage case or triage campaign
+    if (st.includes("not connected") || notes.includes("no call connected") || st.includes("missed") || item.callConnected === false) {
+      if (!item.caseId && !camp.includes("triage")) {
+        return false;
+      }
+    }
+
+    return true;
   });
 }
 
@@ -2036,36 +2082,325 @@ export function CrmIntegratedView({
   });
   const [callHistory, setCallHistory] = useState([]);
   const [callHistoryExpanded, setCallHistoryExpanded] = useState(true);
+  const [surveyHistory, setSurveyHistory] = useState([]);
+  const [surveyModalOpen, setSurveyModalOpen] = useState(false);
+  const [selectedSurvey, setSelectedSurvey] = useState(null);
+  const [selectedSurveyRowId, setSelectedSurveyRowId] = useState(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  const [selectedCallHistoryId, setSelectedCallHistoryId] = useState(null);
+  const [esicModalOpen, setEsicModalOpen] = useState(false);
   const [triageReportsVersion, setTriageReportsVersion] = useState(0);
 
-  // Filter helper: ONLY actual calls (incoming calls, triage calls) should show in Call History
-  // Sync / load call history for the active beneficiary profile
+  // Helper to detect any legacy default / mock forms
+  const isMockSurveyRecord = useCallback((item) => {
+    if (!item) return false;
+    const c = String(item.campaign || "").trim().toLowerCase();
+    const f = String(item.form || "").trim().toLowerCase();
+    const d = String(item.submittedDate || "").trim();
+    return (
+      c.includes("test outbound") ||
+      f.includes("test outbound") ||
+      c.includes("not connected_preventive") ||
+      f.includes("preventive health screening") ||
+      d === "01-09-2026"
+    );
+  }, []);
+
+  // Unified history loader: loads both calls and surveys across all persistent storage sources
+  const loadBeneficiaryHistory = useCallback((targetBenId, phoneDigits = null) => {
+    if (typeof window === "undefined") return { calls: [], surveys: [] };
+    const curId = String(targetBenId || "").trim();
+    let curPhone = (phoneDigits || "").toString().replace(/\D/g, "").slice(-10);
+
+    // Auto-detect phone number if missing but curId is present
+    if (!curPhone && curId) {
+      try {
+        const stored = JSON.parse(localStorage.getItem("crm_beneficiaries_registry") || "[]");
+        const match = stored.find((b) => b && (String(b.id) === curId || String(b.beneficiaryId) === curId));
+        if (match && (match.phoneNumber || match.phone)) {
+          curPhone = String(match.phoneNumber || match.phone).replace(/\D/g, "").slice(-10);
+        }
+      } catch (_) {}
+      if (!curPhone) {
+        try {
+          const reports = JSON.parse(localStorage.getItem("crm_inbound_triage_reports") || "[]");
+          const match = reports.find((r) => r && (String(r.beneficiaryId) === curId || String(r.id) === curId));
+          if (match && (match.details?.phone || match.phone)) {
+            curPhone = String(match.details?.phone || match.phone).replace(/\D/g, "").slice(-10);
+          }
+        } catch (_) {}
+      }
+      if (!curPhone) {
+        try {
+          const calls = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
+          const match = calls.find((c) => c && (String(c.beneficiaryId) === curId || String(c.id) === curId));
+          if (match && (match.cleanPhone || match.phoneNumber)) {
+            curPhone = String(match.cleanPhone || match.phoneNumber).replace(/\D/g, "").slice(-10);
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!curId && !curPhone) return { calls: [], surveys: [] };
+
+    const deletedReportIds = (() => {
+      try {
+        const d = JSON.parse(localStorage.getItem("crm_deleted_report_ids") || "[]");
+        return Array.isArray(d) ? d.map(String) : [];
+      } catch (_) { return []; }
+    })();
+
+    const deletedCallIds = (() => {
+      try {
+        const d = JSON.parse(localStorage.getItem("crm_deleted_call_ids") || "[]");
+        return Array.isArray(d) ? new Set(d.map(String)) : new Set();
+      } catch (_) { return new Set(); }
+    })();
+
+    // Helper to verify a call record has not been deleted/tombstoned
+    const isCallActive = (c) => {
+      if (!c || !c.id) return false;
+      const idStr = String(c.id);
+      const caseIdStr = c.caseId ? String(c.caseId) : "";
+      if (deletedCallIds.has(idStr)) return false;
+      if (caseIdStr && deletedCallIds.has(caseIdStr)) return false;
+      if (idStr.startsWith("call_triage_")) {
+        const rawTriageId = idStr.replace("call_triage_", "");
+        if (deletedCallIds.has(rawTriageId) || deletedReportIds.includes(rawTriageId)) return false;
+      }
+      return true;
+    };
+
+    // --- 1. CALLS ---
+    const callMap = new Map();
+
+    // A. From crm_call_history_${curId}
+    if (curId) {
+      try {
+        const raw = localStorage.getItem(`crm_call_history_${curId}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((c) => {
+              if (c && c.id && isCallActive(c)) callMap.set(String(c.id), c);
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // B. From crm_call_history_phone_${curPhone}
+    if (curPhone) {
+      try {
+        const raw = localStorage.getItem(`crm_call_history_phone_${curPhone}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((c) => {
+              if (c && c.id && isCallActive(c)) callMap.set(String(c.id), c);
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // C. From crm_all_call_logs
+    try {
+      const rawAll = localStorage.getItem("crm_all_call_logs");
+      if (rawAll) {
+        const listAll = JSON.parse(rawAll);
+        if (Array.isArray(listAll)) {
+          listAll.forEach((c) => {
+            if (!c || !c.id || !isCallActive(c)) return;
+            const cBen = String(c.beneficiaryId || "").trim();
+            const cPh = (c.cleanPhone || c.phoneNumber || "").toString().replace(/\D/g, "").slice(-10);
+            if ((curId && cBen === curId) || (curPhone && cPh === curPhone)) {
+              if (!callMap.has(String(c.id))) {
+                callMap.set(String(c.id), { ...c, beneficiaryId: c.beneficiaryId || curId });
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+
+    // D. From crm_inbound_triage_reports (synthesize call record if no explicit call log exists)
+    try {
+      const rawReports = localStorage.getItem("crm_inbound_triage_reports");
+      if (rawReports) {
+        const reportsList = JSON.parse(rawReports);
+        if (Array.isArray(reportsList)) {
+          reportsList.forEach((r) => {
+            if (!r || !r.id) return;
+            const rIdStr = String(r.id);
+            const rCaseIdStr = r.caseId ? String(r.caseId) : "";
+            const callKey = `call_triage_${r.id}`;
+            if (
+              deletedReportIds.includes(rIdStr) ||
+              (rCaseIdStr && deletedReportIds.includes(rCaseIdStr)) ||
+              deletedCallIds.has(rIdStr) ||
+              deletedCallIds.has(callKey) ||
+              (rCaseIdStr && deletedCallIds.has(rCaseIdStr))
+            ) {
+              return;
+            }
+            const rBen = String(r.beneficiaryId || "").trim();
+            const rPh = (r.details?.phone || r.phone || r.cleanPhone || "").toString().replace(/\D/g, "").slice(-10);
+            if ((curId && rBen === curId) || (curPhone && rPh === curPhone)) {
+              const hasExisting = Array.from(callMap.values()).some(
+                (c) => (r.caseId && c.caseId === r.caseId) || String(c.id) === String(r.id) || String(c.id) === callKey
+              );
+              if (!hasExisting) {
+                const complaint = (r.details?.responses?.find((q) => q.q === "Summary" || q.q === "Chief Complaint")?.a) || "Inbound triage consultation completed";
+                callMap.set(callKey, {
+                  id: callKey,
+                  beneficiaryId: curId || rBen,
+                  caseId: r.caseId || "",
+                  fullName: r.name || "Beneficiary",
+                  phoneNumber: curPhone ? `+91-${curPhone}` : "+91-6002283107",
+                  cleanPhone: curPhone,
+                  type: "Inbound Call",
+                  callType: "",
+                  campaign: r.campaign || "Inbound Triage",
+                  date: r.submittedDate || new Date(r.createdAt || Date.now()).toLocaleDateString("en-GB").replace(/\//g, "-"),
+                  time: r.timeAndDate ? r.timeAndDate.split(" ").slice(-2).join(" ") : "12:00 PM",
+                  timestamp: r.timeAndDate || `${r.submittedDate || "10-10-2026"} 12:00 PM`,
+                  createdAt: r.createdAt || Date.now(),
+                  status: "Connected",
+                  duration: "02:30",
+                  callConnected: true,
+                  agent: r.agent || "Agent 1",
+                  notes: complaint,
+                });
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+
+    const calls = filterOnlyCalls(Array.from(callMap.values())).sort((a, b) => {
+      const ta = new Date(a.createdAt || a.timestamp || a.date || 0).getTime();
+      const tb = new Date(b.createdAt || b.timestamp || b.date || 0).getTime();
+      return tb - ta;
+    });
+
+    // --- 2. SURVEYS ---
+    const surveyMap = new Map();
+
+    // A. From crm_surveys_ben_${curId}
+    if (curId) {
+      try {
+        const raw = localStorage.getItem(`crm_surveys_ben_${curId}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((s) => {
+              if (s && s.id && !isMockSurveyRecord(s)) {
+                surveyMap.set(String(s.id), s);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // B. From crm_surveys_ben_${curPhone}
+    if (curPhone) {
+      try {
+        const raw = localStorage.getItem(`crm_surveys_ben_${curPhone}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((s) => {
+              if (s && s.id && !isMockSurveyRecord(s)) {
+                surveyMap.set(String(s.id), s);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // C. From crm_inbound_triage_reports
+    try {
+      const rawReports = localStorage.getItem("crm_inbound_triage_reports");
+      if (rawReports) {
+        const reportsList = JSON.parse(rawReports);
+        if (Array.isArray(reportsList)) {
+          reportsList.forEach((r) => {
+            if (!r || !r.id || isMockSurveyRecord(r)) return;
+            const rIdStr = String(r.id);
+            const rCaseIdStr = r.caseId ? String(r.caseId) : "";
+            if (deletedReportIds.includes(rIdStr) || (rCaseIdStr && deletedReportIds.includes(rCaseIdStr))) {
+              return;
+            }
+            const rBen = String(r.beneficiaryId || "").trim();
+            const rPh = (r.details?.phone || r.phone || r.cleanPhone || "").toString().replace(/\D/g, "").slice(-10);
+            if ((curId && rBen === curId) || (curPhone && rPh === curPhone)) {
+              if (!surveyMap.has(String(r.id))) {
+                const urgency = (r.details?.responses?.find((q) => q.q === "Triage Urgency Level")?.a) || "";
+                surveyMap.set(String(r.id), {
+                  id: r.id,
+                  createdAt: r.createdAt || Date.now(),
+                  campaign: r.campaign || "Inbound Triage",
+                  form: r.form || "Inbound Triage Form",
+                  followup: (urgency === "Emergency" || urgency === "Urgent") ? "Yes" : "No",
+                  submittedDate: r.submittedDate || "10-10-2026",
+                  agent: r.agent || "Agent 1",
+                  timeAndDate: r.timeAndDate || `${r.submittedDate || "10-10-2026"} 12:00 PM`,
+                  details: r.details,
+                });
+              }
+            }
+          });
+        }
+      }
+    } catch (_) {}
+
+    // C. From crm_beneficiaries_registry
+    try {
+      const reg = JSON.parse(localStorage.getItem("crm_beneficiaries_registry") || "[]");
+      if (Array.isArray(reg)) {
+        const b = reg.find((x) => x && (String(x.id) === curId || String(x.beneficiaryId) === curId));
+        if (b && Array.isArray(b.surveys)) {
+          b.surveys.forEach((s) => {
+            if (s && s.id && !isMockSurveyRecord(s) && !surveyMap.has(String(s.id))) {
+              surveyMap.set(String(s.id), s);
+            }
+          });
+        }
+      }
+    } catch (_) {}
+
+    const surveys = Array.from(surveyMap.values()).sort((a, b) => {
+      const ta = new Date(a.createdAt || a.timeAndDate || a.submittedDate || 0).getTime();
+      const tb = new Date(b.createdAt || b.timeAndDate || b.submittedDate || 0).getTime();
+      return tb - ta;
+    });
+
+    return { calls, surveys };
+  }, [isMockSurveyRecord]);
+
+  // Sync / load call history & survey history for the active beneficiary profile
   useEffect(() => {
     const benId = beneficiaryData.beneficiaryId;
     if (!benId) {
       setCallHistory([]);
+      setSurveyHistory([]);
       return;
     }
 
-    // 1. Check local cache memory first (0ms, 0 Firestore reads)
-    let localHistory = [];
-    try {
-      const stored = getCachedCrmCallHistory(benId);
-      if (stored) {
-        localHistory = filterOnlyCalls(stored).filter(
-          (item) => !item.beneficiaryId || String(item.beneficiaryId) === String(benId)
-        );
-      }
-    } catch (_) {}
-
-    if (localHistory && Array.isArray(localHistory) && localHistory.length > 0) {
-      setCallHistory(localHistory);
-      return; // 0 Firebase reads! Cache memory hit.
+    // 1. Instant synchronous load across all local storage sources (0ms, 0 Firestore reads)
+    const { calls: localCalls, surveys: localSurveys } = loadBeneficiaryHistory(benId, beneficiaryData.phoneNumber);
+    if (localCalls && localCalls.length > 0) {
+      setCallHistory(localCalls);
+    }
+    if (localSurveys && localSurveys.length > 0) {
+      setSurveyHistory(localSurveys);
     }
 
-    setCallHistory([]);
-
-    // 2. Only fetch from remote Firestore if cache has 0 records
+    // 2. Fetch remote Firestore calls in the background and merge without overwriting
     const fetchRemoteHistory = async () => {
       try {
         const crmDb = getCrmFirestoreDb();
@@ -2074,21 +2409,26 @@ export function CrmIntegratedView({
         const q = query(historyRef, where("beneficiaryId", "==", benId));
         const snap = await getDocs(q);
         if (!snap.empty) {
-          const list = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-          const filtered = filterOnlyCalls(list).filter(
+          const remoteList = [];
+          snap.forEach((d) => remoteList.push({ id: d.id, ...d.data() }));
+          const filtered = filterOnlyCalls(remoteList).filter(
             (item) => !item.beneficiaryId || String(item.beneficiaryId) === String(benId)
           );
-          filtered.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-          setCallHistory(filtered);
-          setCachedCrmCallHistory(benId, filtered);
+          setCallHistory((prev) => {
+            const map = new Map();
+            filtered.forEach((c) => map.set(String(c.id), c));
+            (prev || []).forEach((c) => map.set(String(c.id), c));
+            const merged = Array.from(map.values()).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            setCachedCrmCallHistory(benId, merged);
+            return merged;
+          });
         }
       } catch (err) {
         console.warn("CRM DB call history fetch warning:", err);
       }
     };
     fetchRemoteHistory();
-  }, [beneficiaryData.beneficiaryId]);
+  }, [beneficiaryData.beneficiaryId, beneficiaryData.phoneNumber, loadBeneficiaryHistory]);
 
   // Real-time cross-tab synchronization for call history & triage reports (0 Firestore reads)
   useEffect(() => {
@@ -2111,9 +2451,16 @@ export function CrmIntegratedView({
       if (
         e.key === "crm_deleted_report_ids" ||
         e.key === "crm_inbound_triage_reports" ||
-        (e.key && e.key.startsWith("crm_surveys_ben_"))
+        (e.key && e.key.startsWith("crm_surveys_ben_")) ||
+        (e.key && e.key.startsWith("crm_call_history_")) ||
+        e.key === "crm_all_call_logs"
       ) {
         setTriageReportsVersion((v) => v + 1);
+        if (beneficiaryData.beneficiaryId) {
+          const { calls, surveys } = loadBeneficiaryHistory(beneficiaryData.beneficiaryId, beneficiaryData.phoneNumber);
+          if (calls.length > 0) setCallHistory(calls);
+          if (surveys.length > 0) setSurveyHistory(surveys);
+        }
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -2122,33 +2469,7 @@ export function CrmIntegratedView({
       unsub();
       window.removeEventListener("storage", handleStorage);
     };
-  }, [beneficiaryData.beneficiaryId]);
-
-  // Derived visible call history (strictly ONLY actual connected calls for THIS active beneficiary)
-  const visibleCallHistory = useMemo(() => {
-    const curBenId = beneficiaryData.beneficiaryId;
-    return (callHistory || []).filter((item) => {
-      // STRICT ISOLATION: Must belong strictly to the current beneficiary
-      if (curBenId && item.beneficiaryId && String(item.beneficiaryId) !== String(curBenId)) {
-        return false;
-      }
-
-      const t = String(item.type || "").toLowerCase();
-      const ct = String(item.callType || "").toLowerCase();
-      const st = String(item.status || "").toLowerCase();
-      const dur = String(item.duration || "");
-      const notes = String(item.notes || "").toLowerCase();
-
-      // Only show if call was actually connected
-      if (item.callConnected === false || st.includes("not connected") || notes.includes("no call") || dur === "00:00" || dur === "0") {
-        return false;
-      }
-      const isConn = item.callConnected === true || (st.includes("connected") && !st.includes("not connected"));
-      if (!isConn) return false;
-
-      return !t.includes("form saved") && !ct.includes("form saved") && !t.includes("survey submitted");
-    });
-  }, [callHistory, beneficiaryData.beneficiaryId]);
+  }, [beneficiaryData.beneficiaryId, beneficiaryData.phoneNumber, loadBeneficiaryHistory]);
 
   // CZ-Bar Call & Connection States (accessible across all handlers and forms)
   const [czPhoneNumber, setCzPhoneNumber] = useState("");
@@ -2200,6 +2521,76 @@ export function CrmIntegratedView({
   const [activeTriageCaseRef, setActiveTriageCaseRef] = useState(null);
   const triageChatRef = useRef(null);
   const crmChatExpiryTimers = useRef({});
+
+  // Derived visible call history (strictly ONLY actual connected calls for THIS active beneficiary)
+  const visibleCallHistory = useMemo(() => {
+    const curBenId = String(beneficiaryData.beneficiaryId || beneficiaryData.id || "").trim();
+    const curPhone = (beneficiaryData.phoneNumber || "").replace(/\D/g, "").slice(-10);
+
+    const deletedCallIds = (() => {
+      try {
+        const d = JSON.parse(localStorage.getItem("crm_deleted_call_ids") || "[]");
+        return Array.isArray(d) ? new Set(d.map(String)) : new Set();
+      } catch (_) { return new Set(); }
+    })();
+
+    const deletedReportIds = (() => {
+      try {
+        const d = JSON.parse(localStorage.getItem("crm_deleted_report_ids") || "[]");
+        return Array.isArray(d) ? new Set(d.map(String)) : new Set();
+      } catch (_) { return new Set(); }
+    })();
+
+    return (callHistory || []).filter((item) => {
+      if (!item) return false;
+
+      // Filter out deleted calls / reports
+      const itemIdStr = String(item.id || "");
+      const itemCaseIdStr = item.caseId ? String(item.caseId) : "";
+      if (deletedCallIds.has(itemIdStr)) return false;
+      if (itemCaseIdStr && deletedCallIds.has(itemCaseIdStr)) return false;
+      if (itemIdStr.startsWith("call_triage_")) {
+        const rawId = itemIdStr.replace("call_triage_", "");
+        if (deletedCallIds.has(rawId) || deletedReportIds.has(rawId)) return false;
+      }
+
+      // STRICT ISOLATION: Must belong strictly to the current beneficiary
+      const iBenId = String(item.beneficiaryId || "").trim();
+      const iPhone = (item.cleanPhone || item.phoneNumber || "").toString().replace(/\D/g, "").slice(-10);
+      if (curBenId || curPhone) {
+        const matchesBen = curBenId && iBenId && curBenId === iBenId;
+        const matchesPhone = curPhone && iPhone && curPhone === iPhone;
+        if (!matchesBen && !matchesPhone) return false;
+      }
+
+      const st = String(item.status || "").toLowerCase();
+      const dur = String(item.duration || "").trim();
+      const notes = String(item.notes || "").toLowerCase();
+
+      // Only filter out fake 00:00 placeholders from blank form opening
+      if ((dur === "00:00" || dur === "0" || !dur) && (notes.includes("form opened") || notes.includes("beneficiary form opened"))) {
+        return false;
+      }
+
+      if (st.includes("not connected") || notes.includes("no call connected") || st.includes("missed") || item.callConnected === false) {
+        if (!item.caseId && !String(item.campaign || "").toLowerCase().includes("triage")) {
+          return false;
+        }
+      }
+
+      // Hide present triage case while that triage is in progress
+      if (inboundTriageModalOpen) {
+        const activeRef = activeTriageCaseRef || triageOutcome?.case_ref || triageOutcome?.case_id;
+        const itemCaseId = item.caseId ? String(item.caseId) : "";
+        const itemId = item.id ? String(item.id) : "";
+        if (activeRef && (itemCaseId === String(activeRef) || itemId === String(activeRef))) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [callHistory, beneficiaryData.beneficiaryId, beneficiaryData.phoneNumber, beneficiaryData.id, inboundTriageModalOpen, activeTriageCaseRef, triageOutcome, triageReportsVersion]);
 
   // crmOnlyCallHistory is defined below loadAllTriageReports
 
@@ -2327,9 +2718,9 @@ export function CrmIntegratedView({
       phone: cleanPhone || "6002283107",
       age: beneficiaryData.age ? Number(beneficiaryData.age) : 33,
       sex: beneficiaryData.gender || "Male",
-      district: beneficiaryData.district || "Kamrup Metropolitan",
-      pincode: beneficiaryData.pinCode || "781001",
-      city: beneficiaryData.village || beneficiaryData.block || beneficiaryData.addressLine1 || "Guwahati",
+      district: beneficiaryData.district ? String(beneficiaryData.district).trim() : "",
+      pincode: beneficiaryData.pinCode ? String(beneficiaryData.pinCode).trim() : "",
+      city: beneficiaryData.village || beneficiaryData.block || beneficiaryData.addressLine1 || "",
       symptom_notes: triageNotes,
     };
   }, [beneficiaryData, triageNotes]);
@@ -2671,9 +3062,9 @@ export function CrmIntegratedView({
         age: beneficiaryData.age ? Number(beneficiaryData.age) : 33,
         sex: beneficiaryData.gender || "Male",
         symptom_notes: combinedNotes,
-        district: beneficiaryData.district || "Kamrup Metropolitan",
-        pincode: beneficiaryData.pinCode || "781001",
-        city: beneficiaryData.village || beneficiaryData.block || beneficiaryData.addressLine1 || "Guwahati",
+        district: beneficiaryData.district ? String(beneficiaryData.district).trim() : "",
+        pincode: beneficiaryData.pinCode ? String(beneficiaryData.pinCode).trim() : "",
+        city: beneficiaryData.village || beneficiaryData.block || beneficiaryData.addressLine1 || "",
         severity_reported: activeCtx?.triageState?.severityScore || 7,
         ekms_ai_context: activeCtx,
         source_app: "crm", // CRITICAL: NEVER saves to cases / case logs!
@@ -2721,8 +3112,8 @@ export function CrmIntegratedView({
           age: beneficiaryData.age ? Number(beneficiaryData.age) : 33,
           sex: beneficiaryData.gender || "Male",
           symptom_notes: combinedNotes,
-          district: beneficiaryData.district || "Kamrup Metropolitan",
-          pincode: beneficiaryData.pinCode || "781001",
+          district: beneficiaryData.district ? String(beneficiaryData.district).trim() : "",
+          pincode: beneficiaryData.pinCode ? String(beneficiaryData.pinCode).trim() : "",
         },
         triage: {
           urgency_level: isRed ? "Emergency" : "Urgent",
@@ -2778,30 +3169,8 @@ export function CrmIntegratedView({
       saveTriageRecordAutomatically(outcomeToSave, currentCaseId);
     }
   };
-  const [surveyModalOpen, setSurveyModalOpen] = useState(false);
-  const [selectedSurvey, setSelectedSurvey] = useState(null);
-  const [esicModalOpen, setEsicModalOpen] = useState(false);
   const DEFAULT_SURVEY_HISTORY = useMemo(() => [], []);
 
-  const [surveyHistory, setSurveyHistory] = useState([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
-  const [selectedSurveyRowId, setSelectedSurveyRowId] = useState(null);
-  const [selectedCallHistoryId, setSelectedCallHistoryId] = useState(null);
-
-  // Helper to detect any legacy default / mock forms
-  const isMockSurveyRecord = useCallback((item) => {
-    if (!item) return false;
-    const c = String(item.campaign || "").trim().toLowerCase();
-    const f = String(item.form || "").trim().toLowerCase();
-    const d = String(item.submittedDate || "").trim();
-    return (
-      c.includes("test outbound") ||
-      f.includes("test outbound") ||
-      c.includes("not connected_preventive") ||
-      f.includes("preventive health screening") ||
-      d === "01-09-2026"
-    );
-  }, []);
 
   // Inbound Triage Report states
   const [selectedReport, setSelectedReport] = useState(() => {
@@ -3165,6 +3534,14 @@ export function CrmIntegratedView({
         return false;
       }
 
+      // Hide present triage case while that triage is in progress
+      if (inboundTriageModalOpen) {
+        const activeRef = activeTriageCaseRef || triageOutcome?.case_ref || triageOutcome?.case_id;
+        if (activeRef && (rCaseIdStr === String(activeRef) || rIdStr === String(activeRef))) {
+          return false;
+        }
+      }
+
       // Check if it's an inbound triage report (where triage output was generated)
       const isTriage =
         r.form === "Inbound Triage Form" ||
@@ -3254,6 +3631,9 @@ export function CrmIntegratedView({
     beneficiaryData.lastName,
     surveyHistory,
     triageReportsList,
+    inboundTriageModalOpen,
+    activeTriageCaseRef,
+    triageOutcome,
   ]);
 
   const handleDeleteSingleTriageReport = (reportId, benId, caseId) => {
@@ -3302,11 +3682,10 @@ export function CrmIntegratedView({
         }
       }
 
-      // 4. Remove linked call logs from callHistory state & localStorage
+      // 4. Remove synthetic triage call logs from callHistory state
       setCallHistory((prev) => {
         const next = (prev || []).filter((c) => {
-          if (String(c.id) === idStr) return false;
-          if (caseIdStr && (String(c.caseId) === caseIdStr || String(c.case_ref) === caseIdStr)) return false;
+          if (String(c.id) === idStr || String(c.id) === `call_triage_${idStr}`) return false;
           return true;
         });
         if (beneficiaryData?.beneficiaryId) {
@@ -3319,8 +3698,7 @@ export function CrmIntegratedView({
         const storedCalls = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
         if (Array.isArray(storedCalls)) {
           const updatedCalls = storedCalls.filter((c) => {
-            if (String(c.id) === idStr) return false;
-            if (caseIdStr && (String(c.caseId) === caseIdStr || String(c.case_ref) === caseIdStr)) return false;
+            if (String(c.id) === idStr || String(c.id) === `call_triage_${idStr}`) return false;
             return true;
           });
           localStorage.setItem("crm_all_call_logs", JSON.stringify(updatedCalls));
@@ -3391,12 +3769,12 @@ export function CrmIntegratedView({
         }
       }
 
-      // 4. Remove linked call logs from callHistory state & localStorage
+      // 4. Remove synthetic triage call logs from callHistory state
       setCallHistory((prev) => {
         const next = (prev || []).filter((c) => {
           if (idsToDelete.has(String(c.id))) return false;
-          if (c.caseId && casesToDelete.has(String(c.caseId))) return false;
-          if (c.case_ref && casesToDelete.has(String(c.case_ref))) return false;
+          const rawId = String(c.id).replace("call_triage_", "");
+          if (idsToDelete.has(rawId)) return false;
           return true;
         });
         if (beneficiaryData?.beneficiaryId) {
@@ -3410,8 +3788,8 @@ export function CrmIntegratedView({
         if (Array.isArray(storedCalls)) {
           const updatedCalls = storedCalls.filter((c) => {
             if (idsToDelete.has(String(c.id))) return false;
-            if (c.caseId && casesToDelete.has(String(c.caseId))) return false;
-            if (c.case_ref && casesToDelete.has(String(c.case_ref))) return false;
+            const rawId = String(c.id).replace("call_triage_", "");
+            if (idsToDelete.has(rawId)) return false;
             return true;
           });
           localStorage.setItem("crm_all_call_logs", JSON.stringify(updatedCalls));
@@ -3479,20 +3857,42 @@ export function CrmIntegratedView({
     try {
       const idStr = String(callId);
 
+      // Find the call object to inspect its caseId and beneficiaryId
+      const stored = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
+      const targetCall = stored.find((c) => String(c.id) === idStr) ||
+        callHistory.find((c) => String(c.id) === idStr);
+      const caseIdStr = targetCall?.caseId ? String(targetCall.caseId) : "";
+      const effectiveBenId = benId || targetCall?.beneficiaryId || beneficiaryData?.beneficiaryId;
+
       // 1. Add to permanent tombstone list
       let deletedIds = [];
       try {
         deletedIds = JSON.parse(localStorage.getItem("crm_deleted_call_ids") || "[]");
         if (!Array.isArray(deletedIds)) deletedIds = [];
       } catch (_) {}
-      if (!deletedIds.includes(idStr)) {
-        deletedIds.push(idStr);
-        localStorage.setItem("crm_deleted_call_ids", JSON.stringify(deletedIds));
+      if (!deletedIds.includes(idStr)) deletedIds.push(idStr);
+      if (idStr.startsWith("call_triage_")) {
+        const rawTriageId = idStr.replace("call_triage_", "");
+        if (!deletedIds.includes(rawTriageId)) deletedIds.push(rawTriageId);
+      }
+      if (caseIdStr && !deletedIds.includes(caseIdStr)) {
+        deletedIds.push(caseIdStr);
+      }
+      localStorage.setItem("crm_deleted_call_ids", JSON.stringify(deletedIds));
+
+      // Also ensure caseId is marked in deleted reports if it corresponds to a triage case
+      if (caseIdStr) {
+        try {
+          const delReps = JSON.parse(localStorage.getItem("crm_deleted_report_ids") || "[]");
+          if (!delReps.includes(caseIdStr)) {
+            delReps.push(caseIdStr);
+            localStorage.setItem("crm_deleted_report_ids", JSON.stringify(delReps));
+          }
+        } catch (_) {}
       }
 
       // 2. Remove from crm_all_call_logs
-      const stored = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
-      const updated = stored.filter((c) => String(c.id) !== idStr);
+      const updated = stored.filter((c) => String(c.id) !== idStr && (!caseIdStr || String(c.caseId || "") !== caseIdStr));
       localStorage.setItem("crm_all_call_logs", JSON.stringify(updated));
       setCallLogsList(updated);
       setSelectedCallLogIds((prev) => prev.filter((id) => String(id) !== idStr));
@@ -3504,18 +3904,36 @@ export function CrmIntegratedView({
           try {
             const history = JSON.parse(localStorage.getItem(key) || "[]");
             if (Array.isArray(history)) {
-              const updatedHistory = history.filter((c) => String(c.id) !== idStr);
+              const updatedHistory = history.filter((c) => String(c.id) !== idStr && (!caseIdStr || String(c.caseId || "") !== caseIdStr));
               if (updatedHistory.length !== history.length) {
                 localStorage.setItem(key, JSON.stringify(updatedHistory));
-                const keyBenId = key.replace("crm_call_history_", "");
-                if (beneficiaryData?.beneficiaryId === keyBenId) {
-                  setCallHistory(updatedHistory);
-                }
               }
             }
           } catch (_) {}
         }
       }
+
+      // 4. Immediately update active callHistory state
+      setCallHistory((prev) => (prev || []).filter((c) => String(c.id) !== idStr && (!caseIdStr || String(c.caseId || "") !== caseIdStr)));
+
+      if (effectiveBenId) {
+        try {
+          const currentH = JSON.parse(localStorage.getItem(`crm_call_history_${effectiveBenId}`) || "[]");
+          const cleanedH = (currentH || []).filter((c) => String(c.id) !== idStr && (!caseIdStr || String(c.caseId || "") !== caseIdStr));
+          setCachedCrmCallHistory(effectiveBenId, cleanedH);
+        } catch (_) {}
+      }
+
+      // 5. Delete from CRM Firestore if present
+      try {
+        const crmDb = getCrmFirestoreDb();
+        if (crmDb) {
+          deleteDoc(doc(crmDb, "crm_call_history", idStr)).catch(() => {});
+        }
+      } catch (_) {}
+
+      setTriageReportsVersion((v) => v + 1);
+      broadcastEvent("CRM_CALL_HISTORY_UPDATED", { deletedId: idStr, caseId: caseIdStr });
 
       toast.success("Call log deleted successfully");
     } catch (_) {
@@ -3528,6 +3946,19 @@ export function CrmIntegratedView({
   const handleBulkDeleteCallLogs = () => {
     try {
       const idsToDelete = new Set(selectedCallLogIds.map(String));
+      const stored = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
+      const casesToDelete = new Set();
+
+      stored.forEach((c) => {
+        if (idsToDelete.has(String(c.id)) && c.caseId) {
+          casesToDelete.add(String(c.caseId));
+        }
+      });
+      callHistory.forEach((c) => {
+        if (idsToDelete.has(String(c.id)) && c.caseId) {
+          casesToDelete.add(String(c.caseId));
+        }
+      });
 
       // 1. Add to permanent tombstone list
       let deletedIds = [];
@@ -3537,12 +3968,28 @@ export function CrmIntegratedView({
       } catch (_) {}
       idsToDelete.forEach((id) => {
         if (!deletedIds.includes(id)) deletedIds.push(id);
+        if (id.startsWith("call_triage_")) {
+          const rawTriageId = id.replace("call_triage_", "");
+          if (!deletedIds.includes(rawTriageId)) deletedIds.push(rawTriageId);
+        }
+      });
+      casesToDelete.forEach((cid) => {
+        if (!deletedIds.includes(cid)) deletedIds.push(cid);
       });
       localStorage.setItem("crm_deleted_call_ids", JSON.stringify(deletedIds));
 
+      if (casesToDelete.size > 0) {
+        try {
+          const delReps = JSON.parse(localStorage.getItem("crm_deleted_report_ids") || "[]");
+          casesToDelete.forEach((cid) => {
+            if (!delReps.includes(cid)) delReps.push(cid);
+          });
+          localStorage.setItem("crm_deleted_report_ids", JSON.stringify(delReps));
+        } catch (_) {}
+      }
+
       // 2. Remove from crm_all_call_logs
-      const stored = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
-      const updated = stored.filter((c) => !idsToDelete.has(String(c.id)));
+      const updated = stored.filter((c) => !idsToDelete.has(String(c.id)) && (!c.caseId || !casesToDelete.has(String(c.caseId))));
       localStorage.setItem("crm_all_call_logs", JSON.stringify(updated));
       setCallLogsList(updated);
 
@@ -3553,21 +4000,40 @@ export function CrmIntegratedView({
           try {
             const history = JSON.parse(localStorage.getItem(key) || "[]");
             if (Array.isArray(history)) {
-              const updatedHistory = history.filter((c) => !idsToDelete.has(String(c.id)));
+              const updatedHistory = history.filter((c) => !idsToDelete.has(String(c.id)) && (!c.caseId || !casesToDelete.has(String(c.caseId))));
               if (updatedHistory.length !== history.length) {
                 localStorage.setItem(key, JSON.stringify(updatedHistory));
-                const keyBenId = key.replace("crm_call_history_", "");
-                if (beneficiaryData?.beneficiaryId === keyBenId) {
-                  setCallHistory(updatedHistory);
-                }
               }
             }
           } catch (_) {}
         }
       }
 
+      // 4. Immediately update active callHistory state
+      setCallHistory((prev) => (prev || []).filter((c) => !idsToDelete.has(String(c.id)) && (!c.caseId || !casesToDelete.has(String(c.caseId)))));
+
+      if (beneficiaryData?.beneficiaryId) {
+        try {
+          const currentH = JSON.parse(localStorage.getItem(`crm_call_history_${beneficiaryData.beneficiaryId}`) || "[]");
+          const cleanedH = (currentH || []).filter((c) => !idsToDelete.has(String(c.id)) && (!c.caseId || !casesToDelete.has(String(c.caseId))));
+          setCachedCrmCallHistory(beneficiaryData.beneficiaryId, cleanedH);
+        } catch (_) {}
+      }
+
+      // 5. Delete from CRM Firestore if present
+      try {
+        const crmDb = getCrmFirestoreDb();
+        if (crmDb) {
+          idsToDelete.forEach((id) => {
+            deleteDoc(doc(crmDb, "crm_call_history", id)).catch(() => {});
+          });
+        }
+      } catch (_) {}
+
       const count = selectedCallLogIds.length;
       setSelectedCallLogIds([]);
+      setTriageReportsVersion((v) => v + 1);
+      broadcastEvent("CRM_CALL_HISTORY_UPDATED", { deletedCount: count });
       toast.success(`${count} call logs deleted successfully`);
     } catch (_) {
       toast.error("Failed to delete call logs");
@@ -3702,30 +4168,17 @@ export function CrmIntegratedView({
     } catch (_) {}
   }, [isMockSurveyRecord]);
 
-  // Load survey history specifically for the active beneficiary profile so it only contains real submitted forms
+  // Secondary sync for survey history to ensure newly added surveys or reports are immediately reflected
   useEffect(() => {
     const benId = beneficiaryData.beneficiaryId;
     if (!benId || typeof window === "undefined") return;
     try {
-      const stored = localStorage.getItem(`crm_surveys_ben_${benId}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter((it) => !isMockSurveyRecord(it));
-          setSurveyHistory(filtered);
-          return;
-        }
-      }
-      const reg = JSON.parse(localStorage.getItem("crm_beneficiaries_registry") || "[]");
-      const foundBen = reg.find((b) => b.id === benId || b.beneficiaryId === benId);
-      if (foundBen && foundBen.surveys && Array.isArray(foundBen.surveys)) {
-        const filtered = foundBen.surveys.filter((it) => !isMockSurveyRecord(it));
-        setSurveyHistory(filtered);
-        return;
+      const { surveys } = loadBeneficiaryHistory(benId, beneficiaryData.phoneNumber);
+      if (surveys && surveys.length > 0) {
+        setSurveyHistory(surveys);
       }
     } catch (_) {}
-    setSurveyHistory([]);
-  }, [beneficiaryData.beneficiaryId, isMockSurveyRecord]);
+  }, [beneficiaryData.beneficiaryId, beneficiaryData.phoneNumber, loadBeneficiaryHistory]);
 
   const [esicFormErrors, setEsicFormErrors] = useState({});
   const [esicFormData, setEsicFormData] = useState({
@@ -4001,10 +4454,35 @@ export function CrmIntegratedView({
   };
 
   const updateBeneficiaryField = (field, val) => {
-    setBeneficiaryData((prev) => ({
-      ...prev,
-      [field]: val,
-    }));
+    setBeneficiaryData((prev) => {
+      const next = {
+        ...prev,
+        [field]: val,
+      };
+
+      // When district is changed, automatically update pinCode to the representative pincode of that district
+      if (field === "district" && val) {
+        const cleanD = String(val).toUpperCase().trim();
+        const defPin = ASSAM_DISTRICT_DEFAULT_PINS[cleanD];
+        if (defPin) {
+          next.pinCode = defPin;
+        }
+      }
+
+      // When pincode is changed with 6 digits, if it belongs to a known district, auto-sync the district
+      if (field === "pinCode" && /^\d{6}$/.test(String(val).trim())) {
+        const pinStr = String(val).trim();
+        for (const [distKey, defPin] of Object.entries(ASSAM_DISTRICT_DEFAULT_PINS)) {
+          if (defPin === pinStr) {
+            const matchedDist = ASSAM_DISTRICTS.find((d) => d.toUpperCase() === distKey) || distKey;
+            next.district = matchedDist;
+            break;
+          }
+        }
+      }
+
+      return next;
+    });
     if (formErrors[field]) {
       setFormErrors((prev) => ({ ...prev, [field]: false }));
     }
@@ -5361,13 +5839,16 @@ export function CrmIntegratedView({
 
   const populateBeneficiaryForm = (ben) => {
     if (!ben) return;
-    setCallHistory([]);
-    setSurveyHistory([]);
+    const benId = ben.id || ben.beneficiaryId || "";
+    const cleanPh = (ben.phoneNumber || ben.phone || "").replace(/\D/g, "").slice(-10);
+    const { calls: bCalls, surveys: bSurveys } = loadBeneficiaryHistory(benId, cleanPh);
+    setCallHistory(bCalls || []);
+    setSurveyHistory(bSurveys || []);
     setBeneficiaryData({
-      beneficiaryId: ben.id || "",
+      beneficiaryId: benId,
       state: ben.state || "Assam",
       center: ben.center || "Asam Center 1",
-      phoneNumber: (ben.phoneNumber || "").replace("+91-", "").replace("+91", "").trim(),
+      phoneNumber: (ben.phoneNumber || ben.phone || "").replace("+91-", "").replace("+91", "").trim(),
       branching: ben.branching || "Child",
       firstName: ben.firstName || ben.fullName?.split(" ")[0] || ben.fullName || "",
       lastName: ben.lastName || ben.fullName?.split(" ").slice(1).join(" ") || "",
@@ -5418,7 +5899,7 @@ export function CrmIntegratedView({
       const parts = benName.split(" ");
       const firstName = parts.length > 1 ? parts.slice(0, -1).join(" ") : parts[0] || "Beneficiary";
       const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
-      const dist = ASSAM_DISTRICTS[Math.floor(Math.random() * ASSAM_DISTRICTS.length)] || "Kamrup Metropolitan";
+      const dist = ASSAM_DISTRICTS[Math.floor(Math.random() * ASSAM_DISTRICTS.length)] || "Kamrup Metro";
       const randDigits = String(Math.floor(10000000 + Math.random() * 90000000));
       const phone = `+91 98${randDigits.slice(0, 3)} ${randDigits.slice(3)}`;
       ben = {
@@ -5476,15 +5957,51 @@ export function CrmIntegratedView({
           let found = null;
           try {
             const stored = JSON.parse(localStorage.getItem("crm_beneficiaries_registry") || "[]");
-            found = stored.find((b) => b.id === id);
+            found = stored.find((b) => b && (String(b.id) === String(id) || String(b.beneficiaryId) === String(id)));
           } catch (_) {}
           if (!found) {
-            found = beneficiaries.find((b) => b.id === id);
+            found = beneficiaries.find((b) => b && (String(b.id) === String(id) || String(b.beneficiaryId) === String(id)));
+          }
+          if (!found) {
+            try {
+              const reps = JSON.parse(localStorage.getItem("crm_inbound_triage_reports") || "[]");
+              const mRep = reps.find((r) => r && (String(r.beneficiaryId) === String(id) || String(r.id) === String(id)));
+              if (mRep) {
+                found = {
+                  id,
+                  beneficiaryId: id,
+                  fullName: mRep.name || "Beneficiary",
+                  phoneNumber: mRep.details?.phone || mRep.phone || "",
+                  district: mRep.details?.district || mRep.district || "",
+                  state: mRep.details?.state || "Assam",
+                };
+              }
+            } catch (_) {}
+          }
+          if (!found) {
+            try {
+              const calls = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
+              const mCall = calls.find((c) => c && (String(c.beneficiaryId) === String(id) || String(c.id) === String(id)));
+              if (mCall) {
+                found = {
+                  id,
+                  beneficiaryId: id,
+                  fullName: mCall.fullName || "Beneficiary",
+                  phoneNumber: mCall.phoneNumber || mCall.cleanPhone || "",
+                  district: mCall.district || "",
+                  state: "Assam",
+                };
+              }
+            } catch (_) {}
           }
           if (found) {
             populateBeneficiaryForm(found);
             document.title = `${found.fullName} - ${found.id}`;
           } else {
+            const { calls: bCalls, surveys: bSurveys } = loadBeneficiaryHistory(id, "");
+            setCallHistory(bCalls || []);
+            setSurveyHistory(bSurveys || []);
+            setBeneficiaryData((prev) => ({ ...prev, beneficiaryId: id }));
             setBeneficiaryViewMode("form");
             document.title = `Beneficiary - ${id}`;
           }
@@ -5527,28 +6044,115 @@ export function CrmIntegratedView({
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [beneficiaries]);
+  }, [beneficiaries, loadBeneficiaryHistory]);
 
 
   const initialIdLoadedRef = useRef(false);
   useEffect(() => {
     if (initialBeneficiaryId && !initialIdLoadedRef.current) {
       initialIdLoadedRef.current = true;
+      const targetQuery = String(initialBeneficiaryId).trim();
+      const cleanDigits = targetQuery.replace(/\D/g, "").slice(-10);
       let found = null;
+
+      // 1. Check registry in localStorage
       if (typeof window !== "undefined") {
         try {
           const stored = JSON.parse(localStorage.getItem("crm_beneficiaries_registry") || "[]");
-          found = stored.find((b) => b.id === initialBeneficiaryId);
+          found = stored.find((b) => {
+            if (!b) return false;
+            const bId = String(b.id || b.beneficiaryId || "");
+            const bPhone = (b.cleanPhone || b.phoneNumber || "").toString().replace(/\D/g, "").slice(-10);
+            return bId === targetQuery || (cleanDigits && bPhone === cleanDigits);
+          });
         } catch (_) {}
       }
-      if (!found) {
-        found = beneficiaries.find((b) => b.id === initialBeneficiaryId);
+
+      // 2. Check phone specific localStorage record
+      if (!found && cleanDigits && typeof window !== "undefined") {
+        try {
+          const rawPhoneRec = localStorage.getItem(`crm_beneficiary_phone_${cleanDigits}`);
+          if (rawPhoneRec) {
+            found = JSON.parse(rawPhoneRec);
+          }
+        } catch (_) {}
       }
+
+      // 3. Check beneficiaries state
+      if (!found) {
+        found = beneficiaries.find((b) => {
+          if (!b) return false;
+          const bId = String(b.id || b.beneficiaryId || "");
+          const bPhone = (b.cleanPhone || b.phoneNumber || "").toString().replace(/\D/g, "").slice(-10);
+          return bId === targetQuery || (cleanDigits && bPhone === cleanDigits);
+        });
+      }
+
+      // 4. Check inbound triage reports
+      if (!found && typeof window !== "undefined") {
+        try {
+          const reps = JSON.parse(localStorage.getItem("crm_inbound_triage_reports") || "[]");
+          const mRep = reps.find((r) => {
+            if (!r) return false;
+            const rId = String(r.beneficiaryId || r.id || "");
+            const rPhone = (r.details?.phone || r.phone || r.cleanPhone || "").toString().replace(/\D/g, "").slice(-10);
+            return rId === targetQuery || (cleanDigits && rPhone === cleanDigits);
+          });
+          if (mRep) {
+            found = {
+              id: mRep.beneficiaryId || targetQuery,
+              beneficiaryId: mRep.beneficiaryId || targetQuery,
+              fullName: mRep.name || "Beneficiary",
+              phoneNumber: mRep.details?.phone || mRep.phone || (cleanDigits ? `+91-${cleanDigits}` : ""),
+              cleanPhone: cleanDigits || (mRep.details?.phone || mRep.phone || "").replace(/\D/g, "").slice(-10),
+              district: mRep.details?.district || mRep.district || "",
+              state: mRep.details?.state || "Assam",
+              center: mRep.details?.center || "Asam Center 1",
+            };
+          }
+        } catch (_) {}
+      }
+
+      // 5. Check call logs
+      if (!found && typeof window !== "undefined") {
+        try {
+          const calls = JSON.parse(localStorage.getItem("crm_all_call_logs") || "[]");
+          const mCall = calls.find((c) => {
+            if (!c) return false;
+            const cId = String(c.beneficiaryId || c.id || "");
+            const cPhone = (c.phoneNumber || c.cleanPhone || "").toString().replace(/\D/g, "").slice(-10);
+            return cId === targetQuery || (cleanDigits && cPhone === cleanDigits);
+          });
+          if (mCall) {
+            found = {
+              id: mCall.beneficiaryId || targetQuery,
+              beneficiaryId: mCall.beneficiaryId || targetQuery,
+              fullName: mCall.fullName || "Beneficiary",
+              phoneNumber: mCall.phoneNumber || mCall.cleanPhone || (cleanDigits ? `+91-${cleanDigits}` : ""),
+              cleanPhone: cleanDigits || (mCall.cleanPhone || mCall.phoneNumber || "").replace(/\D/g, "").slice(-10),
+              district: mCall.district || "",
+              state: "Assam",
+              center: "Asam Center 1",
+            };
+          }
+        } catch (_) {}
+      }
+
       if (found) {
         handleOpenBeneficiaryDetail(found);
+      } else {
+        const { calls: bCalls, surveys: bSurveys } = loadBeneficiaryHistory(targetQuery, cleanDigits);
+        setCallHistory(bCalls || []);
+        setSurveyHistory(bSurveys || []);
+        setBeneficiaryData((prev) => ({
+          ...prev,
+          beneficiaryId: targetQuery,
+          phoneNumber: cleanDigits ? `+91-${cleanDigits}` : prev.phoneNumber,
+        }));
+        setBeneficiaryViewMode("form");
       }
     }
-  }, [initialBeneficiaryId]);
+  }, [initialBeneficiaryId, beneficiaries, loadBeneficiaryHistory]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -8273,6 +8877,7 @@ export function CrmIntegratedView({
                               <th className="py-2.5 px-3 font-semibold whitespace-nowrap">Duration</th>
                               <th className="py-2.5 px-3 font-semibold whitespace-nowrap">Status</th>
                               <th className="py-2.5 px-3 font-semibold text-left w-full pl-6">Notes</th>
+                              <th className="py-2.5 px-3 font-semibold text-center whitespace-nowrap">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#f1f3f5] text-[#1f272e]">
@@ -8288,7 +8893,7 @@ export function CrmIntegratedView({
                               return (
                                 <tr
                                   key={item.id || idx}
-                                  className="hover:bg-[#fcfdfe] transition"
+                                  className="hover:bg-[#fcfdfe] transition group"
                                 >
                                   <td className="py-2.5 px-3 text-center font-mono text-[11.5px] text-slate-400 whitespace-nowrap">
                                     {idx + 1}
@@ -8312,6 +8917,24 @@ export function CrmIntegratedView({
                                   </td>
                                   <td className="py-2.5 px-3 text-[12px] text-slate-700 pl-6">
                                     {noteText}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDeleteCallLogModal({
+                                          isOpen: true,
+                                          type: "single",
+                                          id: item.id,
+                                          name: item.fullName || beneficiaryData.fullName || "Call Record",
+                                          count: 1,
+                                        });
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
+                                      title="Delete call log"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -8904,21 +9527,22 @@ export function CrmIntegratedView({
                         </div>
                       </div>
 
-                      {/* Bottom Section: Call History & ABHA Record (revealed upon scrolling) */}
+                      {/* Bottom Section: Caller Call History (revealed upon scrolling) */}
                       <div className="w-full p-2.5 sm:p-4 bg-slate-50 border-t border-slate-200">
-                        <AbhaCallerSection
+                        <CallerHistorySection
                           form={{
                             caller_name: `${beneficiaryData.firstName || ""} ${beneficiaryData.lastName || ""}`.trim() || beneficiaryData.fullName || beneficiaryData.name || "Beneficiary",
                             phone: (beneficiaryData.phoneNumber ? beneficiaryData.phoneNumber.replace(/\D/g, "").slice(-10) : "") || "6002283107",
                             age: beneficiaryData.age || "33",
                             sex: beneficiaryData.gender || "Male",
-                            district: beneficiaryData.district || "Kamrup Metropolitan",
+                            district: beneficiaryData.district || "",
                             pincode: beneficiaryData.pinCode || "",
                             symptom_notes: triageNotes || "",
                           }}
                           callerHistory={crmOnlyCallHistory}
                           currentAgent={{ agentId: activeAgentId || "Agent 1" }}
                           activeCallerId={beneficiaryData.beneficiaryId || beneficiaryData.id || "261008-41439"}
+                          activeCaseRef={inboundTriageModalOpen ? (activeTriageCaseRef || triageOutcome?.case_ref) : null}
                         />
                       </div>
                     </div>

@@ -780,45 +780,6 @@ export function CaseHandoverForwarding({
     return Boolean(result?.source === "crm" || result?.isCrmCall || callerIntake?.source === "crm");
   }, [isCrmPage, result, callerIntake]);
 
-  // Switch in Point 3: 'calls' | 'abha'
-  const [activeHistoryTab, setActiveHistoryTab] = useState("calls");
-
-  // ABHA Profile State & Fetcher
-  const [abhaProfile, setAbhaProfile] = useState(null);
-  const [isAbhaLoading, setIsAbhaLoading] = useState(false);
-
-  useEffect(() => {
-    const rawTarget = String(intakeData.phone || "").replace(/\D/g, "");
-    const target10 = rawTarget.length >= 10 ? rawTarget.slice(-10) : "";
-    if (!target10 || target10.length !== 10) {
-      setAbhaProfile(null);
-      return;
-    }
-
-    try {
-      const cached = localStorage.getItem(`abha_cache_${target10}`);
-      if (cached) {
-        setAbhaProfile(JSON.parse(cached));
-      }
-    } catch (_) {}
-
-    if (modalOpen) {
-      setIsAbhaLoading(true);
-      fetch(`/api/abha?phone=${target10}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data?.profile) {
-            setAbhaProfile(data.profile);
-            try {
-              localStorage.setItem(`abha_cache_${target10}`, JSON.stringify(data.profile));
-            } catch (_) {}
-          }
-        })
-        .catch(() => {})
-        .finally(() => setIsAbhaLoading(false));
-    }
-  }, [intakeData.phone, modalOpen]);
-
   // Helper: check if record is from CRM
   const isCrmRecord = (item) => {
     if (item.source === "crm" || item.isCrmCall) return true;
@@ -1085,14 +1046,6 @@ export function CaseHandoverForwarding({
           .join("\n\n");
       } else {
         historySection += "• No previous consultation history recorded for this caller.";
-      }
-    }
-
-    if (abhaProfile) {
-      historySection += `\n\n[Ayushman Bharat Health Account (ABHA)]\n• ABHA Address: ${abhaProfile.abha_address || "None"}\n• ABHA Number: ${abhaProfile.abha_number || "None"}\n• Aadhaar KYC: ${abhaProfile.verification_status || "Verified"}`;
-      if (Array.isArray(abhaProfile.medical_history?.past_prescriptions) && abhaProfile.medical_history.past_prescriptions.length > 0) {
-        historySection += `\n• Linked Prescriptions (${abhaProfile.medical_history.past_prescriptions.length}): ` +
-          abhaProfile.medical_history.past_prescriptions.map((p) => `${p.id || "Rx"} (${p.diagnosis || "General"})`).join(", ");
       }
     }
 
@@ -2157,13 +2110,9 @@ ${historySection}`;
         <div class="label">Consultation Date &amp; Time Slot</div>
         <div class="value" style="color: #ea580c;">${bookedAppointment.date} &nbsp;(${bookedAppointment.timeSlot})</div>
       </div>
-      <div class="info-cell">
+      <div class="info-cell" style="grid-column: span 2;">
         <div class="label">OPD Department / Clinic</div>
         <div class="value">${bookedAppointment.department}</div>
-      </div>
-      <div class="info-cell" style="grid-column: span 2;">
-        <div class="label">Assigned Medical Officer / Physician</div>
-        <div class="value">${bookedAppointment.doctor}</div>
       </div>
       ${
         bookedAppointment.patientAddress
@@ -2275,7 +2224,7 @@ ${historySection}`;
                   OPD Appointment Confirmed · Reference No: {bookedAppointment.referenceNo || bookedAppointment.tokenNo}
                 </p>
                 <p className="text-[11px] font-mono text-orange-800 dark:text-orange-300">
-                  {bookedAppointment.facilityName} · {bookedAppointment.date} at {bookedAppointment.timeSlot} ({bookedAppointment.doctor})
+                  {bookedAppointment.facilityName} · {bookedAppointment.date} at {bookedAppointment.timeSlot} ({bookedAppointment.department})
                 </p>
               </div>
             </div>
@@ -2782,49 +2731,17 @@ ${historySection}`;
                       3. Past History of the Caller
                     </h3>
 
-                    {/* Switch: Call History vs ABHA Health Record */}
-                    <div className="inline-flex items-center p-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-900/60 shadow-2xs gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setActiveHistoryTab("calls")}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          activeHistoryTab === "calls"
-                            ? "bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <History className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                        <span>Call History</span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-300 font-extrabold">
-                          {displayedCallHistory.length}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setActiveHistoryTab("abha")}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          activeHistoryTab === "abha"
-                            ? "bg-emerald-600 text-white shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        <span>ABHA Health Record</span>
-                        {abhaProfile ? (
-                          <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
-                        ) : (
-                          <span className="text-[9.5px] px-1 py-0.2 rounded bg-muted/80 text-muted-foreground font-semibold">
-                            ABDM
-                          </span>
-                        )}
-                      </button>
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-900/60 shadow-2xs text-indigo-700 dark:text-indigo-300">
+                      <History className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Recorded Calls</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-300 font-extrabold ml-1">
+                        {displayedCallHistory.length}
+                      </span>
                     </div>
                   </div>
 
-                  {/* TAB 1: CALL HISTORY */}
-                  {activeHistoryTab === "calls" && (
-                    <div className="space-y-3">
+                  {/* CALL HISTORY */}
+                  <div className="space-y-3">
                       {displayedCallHistory.length > 0 ? (
                         <div className="space-y-3">
                           {displayedCallHistory.map((item, idx) => {
@@ -2978,185 +2895,7 @@ ${historySection}`;
                         </div>
                       )}
                     </div>
-                  )}
-
-                  {/* TAB 2: ABHA HEALTH RECORD */}
-                  {activeHistoryTab === "abha" && (
-                    <div className="space-y-3">
-                      {isAbhaLoading ? (
-                        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/30 dark:bg-emerald-950/20 p-6 flex flex-col items-center justify-center gap-2 text-center">
-                          <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
-                          <p className="text-xs font-bold text-foreground">Fetching ABHA Records from ABDM Gateway...</p>
-                        </div>
-                      ) : abhaProfile ? (
-                        <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-linear-to-br from-emerald-50/60 via-card to-teal-50/50 dark:from-emerald-950/40 dark:via-card dark:to-teal-950/20 p-4 sm:p-5 space-y-4 shadow-2xs">
-                          {/* Saffron / White / Green subtle ribbon */}
-                          <div className="flex h-1.5 w-full rounded-full overflow-hidden">
-                            <div className="w-1/3 bg-[#FF9933]" />
-                            <div className="w-1/3 bg-white" />
-                            <div className="w-1/3 bg-[#138808]" />
-                          </div>
-
-                          {/* Profile Overview Header */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200/60 dark:border-emerald-900/40 pb-3">
-                            <div className="flex items-start gap-3">
-                              <div className="h-11 w-11 rounded-xl bg-emerald-700 text-white flex items-center justify-center font-black text-sm shrink-0 shadow-xs">
-                                <User className="h-6 w-6" />
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="text-sm sm:text-base font-extrabold text-foreground">
-                                    {abhaProfile.name || editData.callerName}
-                                  </h4>
-                                  <span className="inline-flex items-center gap-1 rounded bg-emerald-100 dark:bg-emerald-900/70 px-2 py-0.5 text-[10.5px] font-extrabold text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                                    <ShieldCheck className="h-3 w-3 text-emerald-600" />
-                                    Aadhaar KYC Verified
-                                  </span>
-                                </div>
-                                <p className="text-xs text-muted-foreground font-medium">
-                                  {abhaProfile.age ? `${abhaProfile.age} Y / ` : ""}{abhaProfile.sex || "N/A"} • {abhaProfile.district || "Assam"}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-1.5 rounded-lg border border-border/80 bg-background/90 px-2.5 py-1 text-[11px] font-mono text-muted-foreground shadow-2xs">
-                                <QrCode className="h-4 w-4 text-foreground/80 shrink-0" />
-                                <span>ABDM Token Active</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Grid with ABHA Identifier Details */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                            <div className="rounded-lg border border-border/70 bg-card p-2.5 shadow-2xs">
-                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                                ABHA Address
-                              </span>
-                              <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
-                                {abhaProfile.abha_address || "None"}
-                              </span>
-                            </div>
-                            <div className="rounded-lg border border-border/70 bg-card p-2.5 shadow-2xs">
-                              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                                14-Digit ABHA Number
-                              </span>
-                              <span className="font-mono font-bold text-foreground">
-                                {abhaProfile.abha_number || "None"}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Allergies & Chronic Conditions */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="rounded-lg border border-border/70 bg-card p-3 space-y-1.5 shadow-2xs">
-                              <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 block">
-                                Known Allergies
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {Array.isArray(abhaProfile.medical_history?.allergies) && abhaProfile.medical_history.allergies.length > 0 ? (
-                                  abhaProfile.medical_history.allergies.map((a, i) => (
-                                    <span
-                                      key={i}
-                                      className="rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 px-2 py-0.5 text-[10.5px] font-bold text-amber-900 dark:text-amber-300"
-                                    >
-                                      {a.allergen} ({a.severity})
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">None documented</span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="rounded-lg border border-border/70 bg-card p-3 space-y-1.5 shadow-2xs">
-                              <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 block">
-                                Chronic Conditions
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {Array.isArray(abhaProfile.medical_history?.chronic_conditions) && abhaProfile.medical_history.chronic_conditions.length > 0 ? (
-                                  abhaProfile.medical_history.chronic_conditions.map((c, i) => (
-                                    <span
-                                      key={i}
-                                      className="rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 px-2 py-0.5 text-[10.5px] font-bold text-rose-900 dark:text-rose-300"
-                                    >
-                                      {c.condition} • {c.status}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">None documented</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Linked e-Prescriptions / FHIR Records */}
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                                <FileText className="h-3.5 w-3.5 text-emerald-600" />
-                                Linked Medical History &amp; e-Prescriptions
-                              </span>
-                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
-                                <BadgeCheck className="h-3 w-3 text-emerald-600" />
-                                FHIR LINKED
-                              </span>
-                            </div>
-
-                            {Array.isArray(abhaProfile.medical_history?.past_prescriptions) && abhaProfile.medical_history.past_prescriptions.length > 0 ? (
-                              <div className="space-y-2">
-                                {abhaProfile.medical_history.past_prescriptions.map((p, pIdx) => (
-                                  <div
-                                    key={pIdx}
-                                    className="rounded-lg border border-border/80 bg-card/90 p-3 text-xs space-y-1.5 shadow-2xs"
-                                  >
-                                    <div className="flex flex-wrap items-center justify-between gap-1 border-b border-border/40 pb-1.5">
-                                      <span className="font-bold text-foreground">
-                                        {p.doctor || "Physician"} • <span className="text-muted-foreground">{p.hospital || "Hospital"}</span>
-                                      </span>
-                                      <span className="font-mono text-[11px] text-muted-foreground">
-                                        {p.date}
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-foreground/90 font-medium">
-                                      Diagnosis: <strong className="text-foreground">{p.diagnosis || "General Consult"}</strong>
-                                    </p>
-                                    {Array.isArray(p.medicines) && p.medicines.length > 0 && (
-                                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                        {p.medicines.map((m, mIdx) => (
-                                          <span
-                                            key={mIdx}
-                                            className="rounded bg-secondary/80 border border-border/60 px-2 py-0.5 text-[10.5px] font-medium text-foreground"
-                                          >
-                                            💊 {m.name} ({m.dosage}) - {m.frequency}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-                                No prior hospital e-prescriptions linked under this ABHA profile.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-5 text-center space-y-2">
-                          <ShieldCheck className="mx-auto h-7 w-7 text-muted-foreground/60" />
-                          <h4 className="text-xs sm:text-sm font-bold text-foreground">
-                            No ABHA Profile Linked to +91 {intakeData.phone || "Caller"}
-                          </h4>
-                          <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                            The caller has not linked their Ayushman Bharat Digital Mission (ABDM) health locker yet. ABDM verification can be initiated from the ABHA panel in the triage interface.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                  </div>
 
               </div>
 
@@ -3295,13 +3034,10 @@ ${historySection}`;
 
                         <div>
                           <span className="text-[10.5px] uppercase font-bold text-muted-foreground block">
-                            Department &amp; Doctor
+                            OPD Department
                           </span>
                           <span className="font-bold text-foreground block mt-0.5">
                             {bookedAppointment.department}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {bookedAppointment.doctor}
                           </span>
                         </div>
 
@@ -3498,42 +3234,24 @@ ${historySection}`;
                       </div>
                     ) : null}
 
-                    {/* Department & Doctor */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-foreground uppercase tracking-wider mb-1">
-                          OPD Department / Clinic
-                        </label>
-                        <select
-                          value={apptDepartment}
-                          onChange={(e) => setApptDepartment(e.target.value)}
-                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 transition cursor-pointer"
-                        >
-                          <option value="General Medicine / Primary Care OPD">General Medicine / Primary Care OPD</option>
-                          <option value="Diabetic & NCD Clinic">Diabetic & NCD Clinic</option>
-                          <option value="Pediatrics & Child Health">Pediatrics & Child Health</option>
-                          <option value="Emergency Casualty & Observation">Emergency Casualty & Observation</option>
-                          <option value="Dental OPD">Dental OPD</option>
-                          <option value="Orthopedics & Physical Medicine">Orthopedics & Physical Medicine</option>
-                          <option value="Obstetrics & Gynecology (OBG)">Obstetrics & Gynecology (OBG)</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-foreground uppercase tracking-wider mb-1">
-                          Medical Officer / Physician
-                        </label>
-                        <select
-                          value={apptDoctor}
-                          onChange={(e) => setApptDoctor(e.target.value)}
-                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 transition cursor-pointer"
-                        >
-                          <option value="Dr. A. K. Sharma, MBBS (Medical Officer - Incharge)">Dr. A. K. Sharma, MBBS (Medical Officer)</option>
-                          <option value="Dr. P. Baruah, MD (Senior Physician)">Dr. P. Baruah, MD (Senior Physician)</option>
-                          <option value="Dr. R. Goswami, MBBS, DGO (Consultant)">Dr. R. Goswami, MBBS, DGO (Consultant)</option>
-                          <option value="Duty Medical Officer (General OPD)">Duty Medical Officer (General OPD)</option>
-                        </select>
-                      </div>
+                    {/* Department */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-foreground uppercase tracking-wider mb-1">
+                        OPD Department / Clinic
+                      </label>
+                      <select
+                        value={apptDepartment}
+                        onChange={(e) => setApptDepartment(e.target.value)}
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 transition cursor-pointer"
+                      >
+                        <option value="General Medicine / Primary Care OPD">General Medicine / Primary Care OPD</option>
+                        <option value="Diabetic & NCD Clinic">Diabetic & NCD Clinic</option>
+                        <option value="Pediatrics & Child Health">Pediatrics & Child Health</option>
+                        <option value="Emergency Casualty & Observation">Emergency Casualty & Observation</option>
+                        <option value="Dental OPD">Dental OPD</option>
+                        <option value="Orthopedics & Physical Medicine">Orthopedics & Physical Medicine</option>
+                        <option value="Obstetrics & Gynecology (OBG)">Obstetrics & Gynecology (OBG)</option>
+                      </select>
                     </div>
 
                     {/* Date Selection */}
@@ -3952,8 +3670,8 @@ ${historySection}`;
                       <span>{bookedAppointment.date} at {bookedAppointment.timeSlot}</span>
                     </p>
                     <p className="text-muted-foreground text-[11px] flex items-center gap-1.5">
-                      <UserCheck className="h-3 w-3 shrink-0 text-muted-foreground" />
-                      <span>{bookedAppointment.doctor}</span>
+                      <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span>{bookedAppointment.department}</span>
                     </p>
                     <p className="text-muted-foreground text-[11px] flex items-center gap-1.5">
                       <User className="h-3 w-3 shrink-0 text-muted-foreground" />

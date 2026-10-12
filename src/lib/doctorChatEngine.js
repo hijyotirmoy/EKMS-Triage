@@ -1991,25 +1991,24 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     }
   }
 
-  // If caller mentioned period / menstrual cramps, ensure condition is Dysmenorrhea / Menstrual Cramps
-  const isPeriodCramps = /\b(period|periods|menstrua\w*|menses|dysmenorrhea|mahavari|period cramps|periods cramps|periods ka dard|mahavari dard)\b/i.test(affirmativeCallerText);
-  if (isPeriodCramps) {
-    finalCondition = "Dysmenorrhea / Menstrual Cramps";
-  }
-
-  // Prevent false cardiac assignment: if caller NEVER spoke about chest/heart, strip any cardiac condition
-  const callerSpokeChest = /\b(chest|chhati|heart|angina|crushing|dil ka dard|left arm)\b/i.test(affirmativeCallerText);
-  if (!callerSpokeChest && (finalCondition.includes("Coronary") || finalCondition.includes("Chest Discomfort"))) {
-    if (isPeriodCramps) {
-      finalCondition = "Dysmenorrhea / Menstrual Cramps";
-    } else if (/\b(stomach|abdom|pet|gastric|cramp|colic)\b/i.test(affirmativeCallerText)) {
-      finalCondition = "Abdominal / Gastric Pain";
-    } else {
-      finalCondition = prevState.suspectedCondition && !prevState.suspectedCondition.includes("Coronary")
-        ? prevState.suspectedCondition
-        : "Clinical Assessment";
+  // MULTI-CONDITION COMPREHENSIVE COMBINATION:
+  // If the caller previously reported a condition (e.g. Fever & Chills) and now introduces a new condition
+  // (e.g. Cut / Workplace Injury, Chest Pain, Abdominal Pain), ALWAYS consider and combine BOTH conditions!
+  let combinedCondition = finalCondition;
+  const prevCondition = prevState.suspectedCondition || prevState.initialChiefComplaint || "";
+  if (
+    prevCondition &&
+    !/Clinical Assessment|Medical Consultation|Under Assessment|Pending/i.test(prevCondition) &&
+    finalCondition &&
+    !/Clinical Assessment|Medical Consultation/i.test(finalCondition)
+  ) {
+    const normPrev = prevCondition.trim().toLowerCase();
+    const normFinal = finalCondition.trim().toLowerCase();
+    if (!normFinal.includes(normPrev) && !normPrev.includes(normFinal)) {
+      combinedCondition = `${prevCondition} + ${finalCondition}`;
     }
   }
+  finalCondition = combinedCondition;
 
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
@@ -2589,8 +2588,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   if (isAccident) {
     const isLifeThreateningTrauma =
-      /\b(severe crash|severe vehicular|trapped in vehicle|fall from (?:roof|building|height)|head injury.*unconscious|bone deformity|visible bone|open fracture|unable to move|amputation|crushed\s*limb|third degree burn|head trauma|fracture|broken bone|bleeding heavily|deep cut)\b/i.test(allContext) ||
-      /\b(severe vehicular crash|trapped in vehicle|emergency\)|head injury|bone deformity)\b/i.test(cleanInput);
+      /\b(severe crash|severe vehicular|trapped in vehicle|fall from (?:roof|building|height)|head injury|head trauma|bone deformity|visible bone|open fracture|unable to move|amputation|crushed\s*limb|third degree burn|broken bone|bleeding heavily|deep cut|workplace injury|industrial accident|finger cut|hand cut)\b/i.test(allContext) ||
+      /\b(severe vehicular crash|trapped in vehicle|emergency\)|head injury|bone deformity|head trauma|workplace injury|hand finger|ungli|haath)\b/i.test(cleanInput);
 
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
@@ -2601,29 +2600,36 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const traumaSeverityScore = isLifeThreateningTrauma ? 10 : 6;
     let traumaReferral = isLifeThreateningTrauma ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
     let traumaReason = isLifeThreateningTrauma
-      ? "Acute severe catastrophic trauma casualty requiring immediate 108 Emergency Ambulance dispatch."
+      ? "Accident / trauma / workplace injury requiring immediate 108 Emergency Ambulance dispatch for onsite emergency rescue and hospital trauma care."
       : "Manageable minor accident trauma; visit nearest ESIS Dispensary for doctor evaluation.";
+
+    // Retain previous condition if different
+    const prevCond = prevState.suspectedCondition || "";
+    let accidentCond = "Occupational Trauma / Acute Accident";
+    if (prevCond && !/Occupational Trauma|Acute Accident|Medical Consultation|Clinical Assessment/i.test(prevCond)) {
+      accidentCond = `${prevCond} + Occupational Trauma / Acute Accident`;
+    }
 
     return {
       probingQuestion: enforceSingleQuestion(
-        'Ask the IP: "Was it a high-speed vehicle crash or fall from height with severe head trauma, bone deformity/fracture, heavy bleeding, or trapped victim?" (Hinglish: "Kya yeh tez takkar ya unchai se girne ka gambhir haadsa hai jisme sar par chot, haddi tutna/tedhi hona, tez khoon ya behoshi hui hai?")'
+        'Ask the IP: "Was it an accident, head injury, or workplace injury with severe cut, heavy bleeding, or difficulty moving?" (Hinglish: "Kya yeh koi accident, sar par chot, ya workplace par lagne wala ghaav hai jisme tez khoon ya hilne me takleef ho rahi hai?")'
       ),
       suggestedAnswers: [
-        "Severe vehicular crash / fall from height with head injury or bone deformity (Emergency)",
-        "Trapped in vehicle or unable to move due to unbearable trauma (Emergency)",
-        "Minor collision or slip, fully alert with local bruising and swelling",
-        "Minor scrape from low-speed slip, stable and walking normally",
+        "Yes, accident with severe head injury / bone pain (Emergency - 108)",
+        "Yes, workplace injury with heavy cut / bleeding (Emergency - 108)",
+        "Deep hand or finger cut bleeding heavily (Emergency - 108)",
+        "Minor slip / cut, bleeding stopped with firm pressure",
       ],
-      suspectedCondition: "Occupational Trauma / Acute Accident",
+      suspectedCondition: accidentCond,
       isPsychiatric: false,
       severity: traumaSeverity,
       severityScore: traumaSeverityScore,
       referralDestination: traumaReferral,
       referralReason: traumaReason,
-      redFlagsDetected: isLifeThreateningTrauma ? ["Major catastrophic trauma casualty / Fracture deformity"] : ["Minor injury reported"],
+      redFlagsDetected: isLifeThreateningTrauma ? ["Acute Trauma / Accident Casualty / Heavy Cut"] : ["Minor injury reported"],
       duration: "Fresh accident / trauma (<2 hours)",
       isReadyForSummary: isLifeThreateningTrauma ? true : history.length >= 2,
-      clinicalSummary: `Trauma assessment in progress. Clinical severity: ${traumaSeverity}. Referral: ${traumaReferral}.`,
+      clinicalSummary: `Trauma assessment in progress for ${accidentCond}. Clinical severity: ${traumaSeverity}. Referral: ${traumaReferral}.`,
     };
   }
 

@@ -418,7 +418,33 @@ export const TriageResultPanel = ({
     setIsPinModeActive(false);
     setSearchPincode("");
     setLargeViewSearchPin("");
+    lastCallerIntakeLocRef.current = "";
   }, [result?.case_ref, result?.case_id, result?.id]);
+
+  const lastCallerIntakeLocRef = useRef("");
+
+  // Automatically re-query and display facilities whenever caller's recent address (district or pincode) changes
+  useEffect(() => {
+    const rawPin = callerIntake?.pincode ? String(callerIntake.pincode).trim() : "";
+    const rawDist = callerIntake?.district ? String(callerIntake.district).trim() : "";
+    const rawCity = callerIntake?.city ? String(callerIntake.city).trim() : "";
+
+    const locKey = `${rawPin}|${rawDist}|${rawCity}`;
+    if (!lastCallerIntakeLocRef.current) {
+      lastCallerIntakeLocRef.current = locKey;
+      return;
+    }
+
+    if (lastCallerIntakeLocRef.current !== locKey) {
+      lastCallerIntakeLocRef.current = locKey;
+      const targetQuery = (/^\d{6}$/.test(rawPin))
+        ? rawPin
+        : (rawDist || rawCity || rawPin);
+      if (targetQuery) {
+        handleFacilitySearch(targetQuery);
+      }
+    }
+  }, [callerIntake?.pincode, callerIntake?.district, callerIntake?.city]);
 
   const handleFacilitySearch = async (targetQuery) => {
     const raw = targetQuery !== undefined ? targetQuery : (largeViewSearchPin || searchPincode);
@@ -466,11 +492,11 @@ export const TriageResultPanel = ({
 
       let url = "";
       if (geoLat != null && geoLon != null) {
-        url = `/api/facilities/nearest?lat=${geoLat}&lon=${geoLon}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+        url = `/api/facilities/nearest?lat=${geoLat}&lon=${geoLon}&pincode=${encodeURIComponent(isPin ? query : "")}&district=${encodeURIComponent(!isPin ? query : "")}&severe=${isSevere}`;
       } else if (isPin) {
         url = `/api/facilities/nearest?pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
       } else {
-        url = `/api/facilities/nearest?district=${encodeURIComponent(query)}&pincode=${encodeURIComponent(query)}&severe=${isSevere}`;
+        url = `/api/facilities/nearest?district=${encodeURIComponent(query)}&severe=${isSevere}`;
       }
 
       const res = await fetch(url);

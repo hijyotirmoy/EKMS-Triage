@@ -24,8 +24,7 @@ import { LiveScribeWindow } from "./LiveScribeWindow";
 import { extractClinicalEntities, processTranscriptionForAi } from "../lib/clinicalAdaptiveEngine";
 import { broadcastEvent } from "../lib/broadcastSync";
 import { appendCaseToLocalCache, getCachedCases } from "../lib/clientCache";
-import { getCallerIdForPhone } from "../lib/callerId";
-import { AbhaCallerSection } from "./AbhaCallerSection";
+import { CallerHistorySection, getCallerIdForPhone } from "./CallerHistorySection";
 
 const EMPTY = {
   caller_name: "",
@@ -876,9 +875,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
         </button>
       </form>
 
-      {/* Unified ABHA Health Locker & Caller Consultation History */}
+      {/* Caller Consultation History */}
       <div className="w-full">
-        <AbhaCallerSection
+        <CallerHistorySection
           form={form}
           callerHistory={callerHistory}
           currentAgent={currentAgent}

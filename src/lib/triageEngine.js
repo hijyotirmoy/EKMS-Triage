@@ -122,11 +122,33 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
 
   // ONLY dispatch 108 for STRICT LIFE-AND-DEATH CRISES:
 
-  // 1. Uncontrollable spurting / arterial bleeding, deep gaping cuts with severe hemorrhage failing to stop
+  // 1. Uncontrollable spurting / arterial bleeding, heavy bleeding, deep cuts (hand, finger, limb)
   const hasUncontrollableBleeding = !bleedingControlled && !isAccidentDenied && (
-    /\b(spurting\s*bleed\w*|arterial\s*bleed\w*|heavy\s*bleed\w*.*(?:not\s*stop|uncontrollable|failing|pressure|soaking)|uncontrollable\s*bleed\w*|massive\s*bleed\w*|amputation|crushed\s*limb)\b/i.test(affirmativeText) ||
-    (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(spurting|heavy\s*bleed|cannot\s*stop|not\s*stopping|uncontrolled|soaking)\b/i.test(affirmativeText)) ||
-    /\b(heavy active bleeding|cannot stop bleeding|bleeding continuously despite pressure)\b/i.test(affirmativeText)
+    /\b(spurting\s*bleed\w*|arterial\s*bleed\w*|heavy\s*bleed\w*|massive\s*bleed\w*|amputation|crushed\s*limb|profuse\s*bleed\w*)\b/i.test(affirmativeText) ||
+    (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|heavy\s*cut|hand\s*cut|finger\s*cut|limb\s*cut|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(bleed\w*|khoon|heavy|deep|gehra|cut|wound)\b/i.test(affirmativeText)) ||
+    /\b(heavy active bleeding|cannot stop bleeding|bleeding continuously|tez khoon|bahut khoon|bhaari khoon)\b/i.test(affirmativeText)
+  );
+
+  // 1b. Workplace Injury / Industrial / Machine / Hand & Finger Heavy Cut
+  const hasWorkplaceInjury = !isAccidentDenied && (
+    /\b(workplace injury|factory injury|industrial accident|machine cut|heavy cut|deep cut.*(?:hand|finger|arm|leg)|finger cut|hand cut|finger heavy cut|hand finger|ungli kat gayi|haath kat gaya|kat gaya|amputation|crushed finger|crushed hand|heavy wound)\b/i.test(affirmativeText)
+  );
+
+  // 1c. Head Injury / Concussion / Trauma to Head
+  const hasHeadInjury = !isAccidentDenied && (
+    /\b(head injury|head trauma|head wound|hit (?:my|the|his|her)?\s*head|sar me chot|sar par chot|sir me chot|sir par chot|head bleeding|skull injury|concussion|head cut)\b/i.test(affirmativeText)
+  );
+
+  // 1d. Any Road / Vehicular / Fall Accident
+  const hasAccident = !isAccidentDenied && (
+    /\b(accident|road accident|car accident|bike accident|vehicle accident|vehicular|motorcycle accident|hit by|durghatna|fall from height|fall down the stairs)\b/i.test(affirmativeText)
+  );
+
+  // 1e. Age > 50 with severe presentation or comorbidities
+  const callerAge = parseInt(intake?.age || tState?.age || "0", 10) || 0;
+  const isElderlyHighRisk = (callerAge >= 50 || /\b(age\s*(?:is\s*)?(?:5\d|[6-9]\d|100)|over 50|50\s*(?:plus|saal|years?)|60\s*(?:plus|saal|years?))\b/i.test(rawText)) && (
+    severity >= 7 ||
+    /\b(severe|critical|acute|unbearable|high fever|chest|chhati|heart|breathlessness|stroke|bp|sugar|diabet|kidney|paralysis)\b/i.test(affirmativeText)
   );
 
   // 2. Severe Respiratory Failure / Breathlessness: Active gasping for air, cyanosis, unable to speak full sentences
@@ -179,8 +201,20 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
   if (hasUnconsciousness) {
     return { is108: true, reason: "Senselessness / Unconsciousness: unresponsive individual requires immediate 108 Ambulance dispatch." };
   }
+  if (hasHeadInjury) {
+    return { is108: true, reason: "Head injury / trauma requires urgent 108 Emergency Ambulance dispatch for trauma stabilization and immediate hospital neuro-evaluation." };
+  }
+  if (hasAccident) {
+    return { is108: true, reason: "Accident / vehicular casualty requires immediate 108 Emergency Ambulance dispatch for onsite emergency rescue and rapid hospital transfer." };
+  }
+  if (hasWorkplaceInjury) {
+    return { is108: true, reason: "Workplace / industrial injury with heavy cut or bleeding requires immediate 108 Emergency Ambulance dispatch for trauma management." };
+  }
   if (hasUncontrollableBleeding) {
-    return { is108: true, reason: "Severe deep cut / uncontrollable arterial bleeding failing to stop requires immediate 108 Ambulance dispatch." };
+    return { is108: true, reason: "Heavy bleeding / severe deep cut (hand, finger, or limb) requires immediate 108 Ambulance dispatch for wound compression and resuscitation." };
+  }
+  if (isElderlyHighRisk) {
+    return { is108: true, reason: "High-risk presentation in patient aged > 50 with severe symptoms requires immediate 108 Emergency Ambulance dispatch for hospital emergency admission." };
   }
   if (hasHighRiskPregnancy) {
     return { is108: true, reason: "High-risk pregnancy emergency (heavy bleeding, active labor/water broke, or eclampsia) requires immediate 108 Ambulance dispatch." };

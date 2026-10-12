@@ -326,65 +326,16 @@ export function resolveCallerLocation(input, facilities = []) {
 
   // 2. PINCODE RESOLUTION (Official Postal & GST GIS centroid coordinates)
   if (callerPin) {
-    // 1a. Canonical Assam Pincode Database (Exact permanent match)
-    if (assamPincodesData && assamPincodesData[callerPin]) {
-      const pinData = assamPincodesData[callerPin];
-      const canonicalDistrict = pinData.district
-        ? ASSAM_DISTRICTS.find((d) => normalizeDistrict(d) === normalizeDistrict(pinData.district)) ||
-          String(pinData.district).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-        : (rawDistrict || null);
+    // If caller explicitly provided a district, verify that the callerPin does not belong to a completely different district.
+    // If it belongs to a different district (e.g. caller changed district to Tinsukia but stale 781001 remained), prioritize the updated district.
+    const pinDistrict = assamPincodesData?.[callerPin]?.district;
+    const isPinConflictingWithDistrict =
+      Boolean(rawDistrict && pinDistrict && normalizeDistrict(pinDistrict) !== normalizeDistrict(rawDistrict));
 
-      return {
-        latitude: Number(pinData.lat),
-        longitude: Number(pinData.lng),
-        pincode: callerPin,
-        district: canonicalDistrict,
-        method: "pincode",
-        matched: `PIN: ${callerPin}${canonicalDistrict ? ` (${canonicalDistrict})` : ""}`,
-        isDistrictOnly: false,
-      };
-    }
-
-    // 1b. Exact facility pincode match
-    const match = cleanFacs.find(
-      (f) => f.pincode && String(f.pincode).trim() === callerPin && f.latitude != null
-    );
-    if (match) {
-      return {
-        latitude: match.latitude,
-        longitude: match.longitude,
-        pincode: callerPin,
-        district: match.district || rawDistrict || null,
-        method: "pincode",
-        matched: `PIN: ${callerPin} (${match.district || match.name})`,
-        isDistrictOnly: false,
-      };
-    }
-
-    // 1c. Address text match containing pincode
-    const addrMatch = cleanFacs.find(
-      (f) => f.address && f.address.includes(callerPin) && f.latitude != null
-    );
-    if (addrMatch) {
-      return {
-        latitude: addrMatch.latitude,
-        longitude: addrMatch.longitude,
-        pincode: callerPin,
-        district: addrMatch.district || rawDistrict || null,
-        method: "pincode",
-        matched: `PIN: ${callerPin} (${addrMatch.district || addrMatch.name})`,
-        isDistrictOnly: false,
-      };
-    }
-
-    // 1d. If a 6-digit PIN code is supplied, find nearest Assam postal PIN code
-    if (/^\d{6}$/.test(callerPin)) {
-      const pinNum = parseInt(callerPin, 10);
-      const allPins = Object.keys(assamPincodesData || {});
-      if (allPins.length > 0) {
-        allPins.sort((a, b) => Math.abs(parseInt(a, 10) - pinNum) - Math.abs(parseInt(b, 10) - pinNum));
-        const closestPin = allPins[0];
-        const pinData = assamPincodesData[closestPin];
+    if (!isPinConflictingWithDistrict) {
+      // 1a. Canonical Assam Pincode Database (Exact permanent match)
+      if (assamPincodesData && assamPincodesData[callerPin]) {
+        const pinData = assamPincodesData[callerPin];
         const canonicalDistrict = pinData.district
           ? ASSAM_DISTRICTS.find((d) => normalizeDistrict(d) === normalizeDistrict(pinData.district)) ||
             String(pinData.district).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
@@ -399,6 +350,62 @@ export function resolveCallerLocation(input, facilities = []) {
           matched: `PIN: ${callerPin}${canonicalDistrict ? ` (${canonicalDistrict})` : ""}`,
           isDistrictOnly: false,
         };
+      }
+
+      // 1b. Exact facility pincode match
+      const match = cleanFacs.find(
+        (f) => f.pincode && String(f.pincode).trim() === callerPin && f.latitude != null
+      );
+      if (match) {
+        return {
+          latitude: match.latitude,
+          longitude: match.longitude,
+          pincode: callerPin,
+          district: match.district || rawDistrict || null,
+          method: "pincode",
+          matched: `PIN: ${callerPin} (${match.district || match.name})`,
+          isDistrictOnly: false,
+        };
+      }
+
+      // 1c. Address text match containing pincode
+      const addrMatch = cleanFacs.find(
+        (f) => f.address && f.address.includes(callerPin) && f.latitude != null
+      );
+      if (addrMatch) {
+        return {
+          latitude: addrMatch.latitude,
+          longitude: addrMatch.longitude,
+          pincode: callerPin,
+          district: addrMatch.district || rawDistrict || null,
+          method: "pincode",
+          matched: `PIN: ${callerPin} (${addrMatch.district || addrMatch.name})`,
+          isDistrictOnly: false,
+        };
+      }
+      // 1d. If a 6-digit PIN code is supplied, find nearest Assam postal PIN code
+      if (/^\d{6}$/.test(callerPin)) {
+        const pinNum = parseInt(callerPin, 10);
+        const allPins = Object.keys(assamPincodesData || {});
+        if (allPins.length > 0) {
+          allPins.sort((a, b) => Math.abs(parseInt(a, 10) - pinNum) - Math.abs(parseInt(b, 10) - pinNum));
+          const closestPin = allPins[0];
+          const pinData = assamPincodesData[closestPin];
+          const canonicalDistrict = pinData.district
+            ? ASSAM_DISTRICTS.find((d) => normalizeDistrict(d) === normalizeDistrict(pinData.district)) ||
+              String(pinData.district).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+            : (rawDistrict || null);
+
+          return {
+            latitude: Number(pinData.lat),
+            longitude: Number(pinData.lng),
+            pincode: callerPin,
+            district: canonicalDistrict,
+            method: "pincode",
+            matched: `PIN: ${callerPin}${canonicalDistrict ? ` (${canonicalDistrict})` : ""}`,
+            isDistrictOnly: false,
+          };
+        }
       }
     }
   }

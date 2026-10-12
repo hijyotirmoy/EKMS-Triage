@@ -14,7 +14,7 @@ export const PRESETS = [
       duration: "Less than 2 hours",
       severity_reported: 9,
       city: "Guwahati",
-      district: "Kamrup Metropolitan",
+      district: "Kamrup Metro",
       pincode: "781022",
     },
   },

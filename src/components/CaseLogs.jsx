@@ -1535,15 +1535,17 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCas
 
                     <div>
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                        Date, Time Slot &amp; Doctor
+                        Date, Time Slot &amp; Department
                       </span>
                       <span className="font-bold flex items-center gap-1 mt-0.5 text-foreground">
                         <Calendar className="h-3.5 w-3.5 text-orange-600 shrink-0" />
                         {bookedAppt.date} ({bookedAppt.timeSlot})
                       </span>
-                      <span className="text-[11px] text-muted-foreground block">
-                        {bookedAppt.doctor}
-                      </span>
+                      {bookedAppt.department && (
+                        <span className="text-[11px] text-muted-foreground block">
+                          {bookedAppt.department}
+                        </span>
+                      )}
                     </div>
                   </div>
 

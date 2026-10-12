@@ -21,7 +21,7 @@ let memoryCases = [
       duration: "Less than 2 hours",
       severity_reported: 9,
       city: "Guwahati",
-      district: "Kamrup Metropolitan",
+      district: "Kamrup Metro",
       pincode: "781022",
       source_app: "console",
     },
@@ -64,7 +64,7 @@ let memoryCases = [
         scheme: "ESIC",
         address:
           "ESIC Hospital Campus, Pir Ajan Fakir Rd, near Khanara Kendra Vidyalaya, Resham Nagar, Khanapara, Guwahati, Assam 781022",
-        district: "Kamrup Metropolitan",
+        district: "Kamrup Metro",
         pincode: "781022",
         distance_km: 0,
         maps_url:
