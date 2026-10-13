@@ -1702,7 +1702,9 @@ async function evaluateRawTriage(intake) {
 
     const ambulanceEval = isLifeThreateningAmbulanceCase(allText, effectiveSeverity, intake, tState);
     const isEmergency108 = ambulanceEval.is108;
-    const chatChoseHospital = (tState?.referralDestination || "").toLowerCase().includes("hospital");
+    const chatChoseHospital =
+      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
+      /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(allText);
 
     // Resolve TWO best-fitting referrals based on the 8-tier hierarchy:
     let primaryReferral = "ESIS Dispensary";
@@ -2276,8 +2278,11 @@ function normalizeTriageDecision(triage, intake) {
   }
 
   const ambulanceEval = isLifeThreateningAmbulanceCase(notes, triage.urgency_score || intake.severity_reported, intake, tState);
-  const isEmergency108 = ambulanceEval.is108;
-  const chatChoseHospital = referral.includes("esic hospital") || referral.includes("hospital");
+  const chatChoseHospital =
+    referral.includes("esic hospital") ||
+    referral.includes("hospital") ||
+    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(notes) ||
+    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(callerSpokenText);
 
   // If chat or clinical engine explicitly resolved to ESIC Hospital, and NO life-threatening 108 emergency:
   if (chatChoseHospital && !isEmergency108) {

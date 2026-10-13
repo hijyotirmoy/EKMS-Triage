@@ -215,9 +215,19 @@ export function mapDestinationToDirectiveId(dest) {
 }
 
 export function resolveDirectiveIds(t, result) {
+  const chatMsgs = result?.ekms_ai_context?.chatHistory || [];
+  const callerChatText = Array.isArray(chatMsgs)
+    ? chatMsgs
+        .filter((m) => m && (m.sender === "user" || m.role === "user"))
+        .map((m) => m.text || m.content || "")
+        .join(" ")
+        .toLowerCase()
+    : "";
   const intakeText = `${result?.intake?.symptom_notes || ""} ${result?.intake?.complaint || ""} ${result?.ekms_ai_context?.triageState?.condition || ""}`.toLowerCase();
-  const isNacoHIV = /\b(hiv|aids|naco|1097|post.?exposure|pep\b|anti.?retroviral|art\s*center)\b/i.test(intakeText);
-  const isPsych = /\b(suicid|depress|anxiety|mental|counsel|udaas)\b/i.test(intakeText);
+  const allCallerText = `${intakeText} ${callerChatText}`.toLowerCase();
+
+  const isNacoHIV = /\b(hiv|aids|naco|1097|post.?exposure|pep\b|anti.?retroviral|art\s*center)\b/i.test(allCallerText);
+  const isPsych = /\b(suicid|depress|anxiety|mental|counsel|udaas)\b/i.test(allCallerText);
 
   // Check off-hours (between 4:00 PM and 10:00 AM)
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -232,12 +242,29 @@ export function resolveDirectiveIds(t, result) {
     Boolean(t?.call_108) ||
     /\b(108|ambulance)\b/i.test(t?.referral_destination || "") ||
     /\b(108|ambulance)\b/i.test(t?.call_referral_primary || "") ||
-    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh)\b/i.test(intakeText);
+    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh)\b/i.test(allCallerText);
 
-  let primaryDest = t?.call_referral_primary || t?.referral_destination || chatRef;
+  // Caller explicit facility preferences
+  const callerWantsHospital =
+    (t?.call_referral_primary || "").toLowerCase().includes("hospital") ||
+    (t?.referral_destination || "").toLowerCase().includes("hospital") ||
+    (result?.ekms_ai_context?.triageState?.referralDestination || "").toLowerCase().includes("hospital") ||
+    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|emergency casualty|casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(allCallerText);
+
+  const callerWantsDispensary =
+    !callerWantsHospital &&
+    ((t?.call_referral_primary || "").toLowerCase().includes("dispensary") ||
+    (t?.referral_destination || "").toLowerCase().includes("dispensary") ||
+    /\b(dispensary|esis dispensary|esi dispensary|local clinic|chhota hospital|dispensary jaana|dispensary jana|visit dispensary|visit esis dispensary)\b/i.test(allCallerText));
+
+  let primaryDest = t?.call_referral_primary || t?.referral_destination;
 
   if (is108Ambulance) {
     primaryDest = "108 Ambulance";
+  } else if (callerWantsHospital) {
+    primaryDest = "ESIC Hospital";
+  } else if (callerWantsDispensary) {
+    primaryDest = "ESIS Dispensary";
   } else if (isSeverity9OrHigh) {
     // For severity 9 / 8-10 emergency, forward to hospital first (ESIC Hospital / Govt District Hospital)
     primaryDest = (primaryDest && primaryDest.toLowerCase().includes("hospital")) ? primaryDest : "ESIC Hospital";

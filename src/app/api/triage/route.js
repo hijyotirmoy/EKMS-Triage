@@ -146,11 +146,20 @@ export async function POST(request) {
       /tele.?manas|psychological|anxiety|depression|mental/i.test(triage.call_referral_primary || "") ||
       /anxious|anxiety|depression|depressed|stress|suicid|self.?harm|mental|panic/i.test(callerSpokenText);
 
+    const chatChoseHospital =
+      explicitReferral.includes("hospital") ||
+      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
+      (triage.referral_destination || "").toLowerCase().includes("hospital") ||
+      (triage.call_referral_primary || "").toLowerCase().includes("hospital") ||
+      /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(callerSpokenText);
+
     const hasExplicitSpecialReferral =
       isNacoHIV ||
       isPsychCase ||
       explicitReferral.includes("108") ||
-      explicitReferral.includes("104");
+      explicitReferral.includes("104") ||
+      explicitReferral.includes("hospital") ||
+      chatChoseHospital;
 
     if (isPsychCase) {
       triage.call_referral_primary = "104 Health Helpline";
@@ -177,11 +186,6 @@ export async function POST(request) {
       intake,
       tState
     );
-
-    const chatChoseHospital =
-      explicitReferral.includes("hospital") ||
-      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
-      (triage.referral_destination || "").toLowerCase().includes("hospital");
 
     if (chatChoseHospital && !ambulanceEval.is108) {
       triage.call_108 = false;

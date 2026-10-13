@@ -139,6 +139,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   const [sessionId] = useState(() => "session-" + Math.random().toString(36).substring(2, 9));
   const [questionFeedbackMap, setQuestionFeedbackMap] = useState({});
   const chatContainerRef = useRef(null);
+  const chatInputRef = useRef(null);
   const lastProcessedSpeechRef = useRef("");
   const messagesRef = useRef(messages);
   const clinicalStateRef = useRef(clinicalState);
@@ -249,6 +250,25 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     }
   }, [initialNotes]);
 
+  // Global Enter key support: submits selected options even if focus is on option button
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey && selectedOptions.length > 0 && !loading) {
+        if (e.target && e.target.tagName === "INPUT" && e.target !== chatInputRef.current) {
+          return;
+        }
+        e.preventDefault();
+        const combined = inputText.trim()
+          ? `${selectedOptions.join(", ")}, ${inputText.trim()}`
+          : selectedOptions.join(", ");
+        setSelectedOptions([]);
+        handleUserSubmit(combined);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [selectedOptions, inputText, loading]);
+
   // Sync findings to parent intake form
   const notifyParent = (newMessages, newState) => {
     const summary = newState.clinicalSummary
@@ -282,7 +302,16 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   };
 
   const handleUserSubmit = async (textToSend, isFromSpeech = false) => {
-    const rawText = (textToSend || inputText).trim();
+    let rawText = (typeof textToSend === "string" ? textToSend : inputText).trim();
+    if (!rawText && selectedOptions.length > 0) {
+      rawText = selectedOptions.join(", ");
+      setSelectedOptions([]);
+    } else if (textToSend === undefined && selectedOptions.length > 0 && rawText) {
+      rawText = `${selectedOptions.join(", ")}, ${rawText}`;
+      setSelectedOptions([]);
+    } else if (selectedOptions.length > 0) {
+      setSelectedOptions([]);
+    }
     if (!rawText || loading) return;
 
     // Reject silence/subtitle hallucinations ONLY for speech recognition stream
@@ -890,22 +919,45 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       <div className="border-t border-border bg-secondary/30 p-2.5 shrink-0">
         <div className="flex items-center gap-2">
           <input
+            ref={chatInputRef}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleUserSubmit();
+                if (selectedOptions.length > 0) {
+                  const combined = inputText.trim()
+                    ? `${selectedOptions.join(", ")}, ${inputText.trim()}`
+                    : selectedOptions.join(", ");
+                  setSelectedOptions([]);
+                  handleUserSubmit(combined);
+                } else if (inputText.trim()) {
+                  handleUserSubmit();
+                }
               }
             }}
-            placeholder="Type what the caller said / answers (English / Hinglish)..."
+            placeholder={
+              selectedOptions.length > 0
+                ? `${selectedOptions.length} option(s) selected — press Enter to submit...`
+                : "Type what the caller said / answers (English / Hinglish)..."
+            }
             className="flex-1 min-w-0 rounded-md border border-border/80 bg-background px-3 py-2 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition focus:border-emerald-500"
           />
           <button
             type="button"
-            onClick={() => handleUserSubmit()}
-            disabled={loading || !inputText.trim()}
-            className="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-700 disabled:opacity-50"
+            onClick={() => {
+              if (selectedOptions.length > 0) {
+                const combined = inputText.trim()
+                  ? `${selectedOptions.join(", ")}, ${inputText.trim()}`
+                  : selectedOptions.join(", ");
+                setSelectedOptions([]);
+                handleUserSubmit(combined);
+              } else {
+                handleUserSubmit();
+              }
+            }}
+            disabled={loading || (!inputText.trim() && selectedOptions.length === 0)}
+            className="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
             title="Send answer to EKMS AI"
           >
             <Send className="h-4 w-4" />

@@ -54,20 +54,30 @@ CORE CLINICAL RULES:
    - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
 6. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
 7. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
-8. ANTI-REPETITION: Never repeat or re-ask questions that were already answered in the chat.
-9. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
+8. ANTI-REPETITION MANDATE: Never repeat or re-ask questions that were already answered in the chat under any circumstance.
+9. MULTI-OPTION INPUT SYNTHESIS:
+   - When the caller provides or selects multiple options/symptoms (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), YOU MUST THOROUGHLY ANALYZE ALL SELECTED SYMPTOMS TOGETHER.
+   - Formulate your clinical evaluation and next probing question based on the COMBINED picture of all selected options.
+10. MULTI-CONDITION SHIFTS (NEVER FORGET PREVIOUS CONDITIONS):
+   - If the conversation started with one condition (e.g. Fever & Chills) and the caller later introduces or switches to another condition (e.g. hand cut, workplace injury, chest discomfort, abdominal pain), DO NOT forget the first condition!
+   - Synthesize BOTH conditions together into your assessment, questions, and red flags.
+11. 108 EMERGENCY & ACCIDENT / SEVERE TRAUMA ROUTING:
+   - For all accidents, head injuries, heavy bleeding, severe cuts (hand/finger deep cuts, workplace machinery injuries), or caller age > 50 with acute sudden complications, IMMEDIATELY recommend 108 Ambulance / Emergency Casualty ("108 Ambulance").
+12. BENEFICIARY FACILITY PREFERENCE:
+   - If the beneficiary explicitly states or selects where they want to go (e.g. "Visit ESIC Hospital Casualty now", "hospital", "dispensary", "ambulance", "tele-doctor"), ALWAYS respect and route them to that preferred facility ("ESIC Hospital", "ESIS Dispensary", etc.) as PRIMARY!
+13. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
    Tier 1. 108 Ambulance Services (HIGH SEVERITY 9 & EMERGENCY):
-      - Dispatch 108 Ambulance immediately for: heavy bleeding, severe work trauma, choking, severe respiratory failure, unconsciousness, crushing cardiac chest pain, or explicit caller request for ambulance.
+      - Dispatch 108 Ambulance immediately for: accidents, head injuries, heavy bleeding, deep cuts, severe work trauma, choking, severe respiratory failure, unconsciousness, crushing cardiac chest pain, or explicit caller request for ambulance.
    Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling.
    Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
-   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
+   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, caller hospital preference, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
    Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment.
    Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network.
-10. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
+14. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
    - We are triage helpline call operators, NOT diagnosing doctors.
    - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'Fever & Chills', 'Throbbing Headache').
    - NEVER suggest or name specific medicines to take.
-11. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
+15. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
    - NEVER ask the caller to rate on a 1 to 10 scale. Ask functional, clinical questions (e.g. "Are you able to walk or are you too weak to stand?", "Is the fever accompanied by shivering?").
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
@@ -141,16 +151,16 @@ export function detectDirectCallerReferralIntent(text) {
   if (!text) return null;
   const clean = text.toLowerCase().trim();
 
-  // 1. Direct Hospital Intent
+  // 1. Direct Hospital Intent (Any caller variation wishing/preferring to visit hospital / hospital casualty)
   if (
-    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|hospital me dikhana hai|hospital jana chahta|hospital jana chahti|hospital jaana chahunga|hospital jana chahunga|hospital jaana chahungi|hospital jana chahungi|hospital me admit|emergency ward|emergency casualty)\b/i.test(
+    /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|hospital me dikhana hai|hospital jana chahta|hospital jana chahti|hospital jaana chahunga|hospital jana chahunga|hospital jaana chahungi|hospital jana chahungi|hospital me admit|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital|hospital visit|hospital dikhana|aspatal jaana|aspatal jana)\b/i.test(
       clean
     )
   ) {
     return {
       destination: "ESIC Hospital",
       reason:
-        "Caller explicitly requested to visit ESIC Hospital; guide caller to nearest ESIC Hospital for examination today.",
+        "Caller explicitly requested to visit ESIC Hospital / Hospital Casualty; guide caller to nearest ESIC Hospital for in-person doctor evaluation and treatment today.",
       suspectedConditionSuffix: "Hospital Visit Consultation",
       suggestedQuestion:
         'Ask the IP: "Which district or location are you calling from so we can guide you to the nearest ESIC Hospital?" (Hinglish: "Aap kis district ya location se bol rahe hain taaki hum nearest ESIC Hospital ka pata bata sakein?")',
@@ -165,7 +175,7 @@ export function detectDirectCallerReferralIntent(text) {
 
   // 2. Direct Dispensary Intent
   if (
-    /\b(dispensary|esis dispensary|esi dispensary|local clinic|chhota hospital|dispensary jaana|dispensary jana|visit dispensary|dispensary me dikhana)\b/i.test(
+    /\b(dispensary|esis dispensary|esi dispensary|local clinic|chhota hospital|dispensary jaana|dispensary jana|visit dispensary|dispensary me dikhana|visit esis dispensary)\b/i.test(
       clean
     )
   ) {
@@ -318,6 +328,90 @@ export function detectDirectCallerReferralIntent(text) {
   }
 
   return null;
+}
+
+/**
+ * Smartly merges two clinical condition strings without duplicate overlapping symptom repetition.
+ * E.g. "Fever & Chills with Dizziness and Nausea" + "Fever & Chills with Dizziness, Nausea, and Pain"
+ * -> "Fever & Chills with Dizziness, Nausea, and Pain" (unified single line).
+ * While preserving distinct conditions, e.g. "Fever & Chills" + "Hand Cut / Workplace Injury".
+ */
+export function smartlyMergeConditions(prevCondition, newCondition) {
+  if (!prevCondition || !prevCondition.trim()) return newCondition || "";
+  if (!newCondition || !newCondition.trim()) return prevCondition || "";
+
+  const cleanClause = (s) =>
+    s
+      .replace(/^investigating:\s*/i, "")
+      .replace(/^clinical assessment:?\s*/i, "")
+      .trim();
+
+  // Split both strings by " + " to get individual condition clauses
+  const splitClauses = (str) =>
+    str
+      .split(/\s*\+\s*/)
+      .map(cleanClause)
+      .filter((s) => s.length > 0 && !/^(Clinical Assessment|Medical Consultation|Under Assessment|Pending|General Medical Evaluation)$/i.test(s));
+
+  const prevClauses = splitClauses(prevCondition);
+  const newClauses = splitClauses(newCondition);
+
+  if (prevClauses.length === 0) return newCondition;
+  if (newClauses.length === 0) return prevCondition;
+
+  const stopWords = new Set([
+    "with", "and", "the", "for", "from", "assessment", "investigation", "investigating",
+    "symptoms", "reported", "complaint", "evaluation", "acute", "under", "mild", "severe", "moderate"
+  ]);
+
+  const extractTokens = (text) => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !stopWords.has(w));
+  };
+
+  const isSameConditionCluster = (c1, c2) => {
+    const t1 = extractTokens(c1);
+    const t2 = extractTokens(c2);
+    if (t1.length === 0 || t2.length === 0) return false;
+
+    const norm1 = c1.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const norm2 = c2.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+
+    const s1 = new Set(t1);
+    const s2 = new Set(t2);
+    let common = 0;
+    for (const token of s1) {
+      if (s2.has(token)) common++;
+    }
+
+    const minLen = Math.min(s1.size, s2.size);
+    if (minLen > 0 && common / minLen >= 0.45) return true;
+    if (common >= 2) return true;
+
+    return false;
+  };
+
+  const merged = [...newClauses];
+
+  for (const prevClause of prevClauses) {
+    const matchingIdx = merged.findIndex((m) => isSameConditionCluster(m, prevClause));
+    if (matchingIdx >= 0) {
+      // Pick the more comprehensive/longer clause
+      if (prevClause.length > merged[matchingIdx].length) {
+        merged[matchingIdx] = prevClause;
+      }
+    } else {
+      // Distinct clinical condition
+      merged.push(prevClause);
+    }
+  }
+
+  const unique = Array.from(new Set(merged));
+  return unique.join(" + ");
 }
 
 /**
@@ -487,7 +581,11 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
 3. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
 4. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
 5. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
-6. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")`,
+6. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
+7. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
+8. 108 EMERGENCY ROUTING: For accidents, head injury, heavy bleeding, cuts/injuries, or age > 50 with acute complications, set referralDestination to "108 Ambulance".
+9. CALLER FACILITY PREFERENCE: If caller expresses a preference to go to ESIC Hospital or casualty, respect this and set referralDestination to "ESIC Hospital".
+10. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
@@ -1472,7 +1570,10 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   );
   const isEmergency108 = ambulanceCheck.is108;
 
-  const directIntent = detectDirectCallerReferralIntent(cleanInput);
+  const directIntent =
+    detectDirectCallerReferralIntent(cleanInput) ||
+    detectDirectCallerReferralIntent(affirmativeCallerText) ||
+    detectDirectCallerReferralIntent(raw.referralDestination);
 
   const isAdviceSeeking =
     /\b(advice|doctor|consult|health advice|medical advice|phone doctor|guidance|information|kya karu|kya karein|salah|mashwara|ghar par kya karein)\b/i.test(cleanInput);
@@ -1994,21 +2095,9 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   // MULTI-CONDITION COMPREHENSIVE COMBINATION:
   // If the caller previously reported a condition (e.g. Fever & Chills) and now introduces a new condition
   // (e.g. Cut / Workplace Injury, Chest Pain, Abdominal Pain), ALWAYS consider and combine BOTH conditions!
-  let combinedCondition = finalCondition;
+  // CRITICAL: Intelligently merge without duplicate repetition (e.g. "Fever & Chills with Dizziness and Nausea + Fever & Chills with Dizziness, Nausea, and Pain" -> "Fever & Chills with Dizziness, Nausea, and Pain").
   const prevCondition = prevState.suspectedCondition || prevState.initialChiefComplaint || "";
-  if (
-    prevCondition &&
-    !/Clinical Assessment|Medical Consultation|Under Assessment|Pending/i.test(prevCondition) &&
-    finalCondition &&
-    !/Clinical Assessment|Medical Consultation/i.test(finalCondition)
-  ) {
-    const normPrev = prevCondition.trim().toLowerCase();
-    const normFinal = finalCondition.trim().toLowerCase();
-    if (!normFinal.includes(normPrev) && !normPrev.includes(normFinal)) {
-      combinedCondition = `${prevCondition} + ${finalCondition}`;
-    }
-  }
-  finalCondition = combinedCondition;
+  finalCondition = smartlyMergeConditions(prevCondition, finalCondition);
 
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
@@ -2266,7 +2355,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   }
 
   // Direct Referral Preference Check First
-  const directIntent = detectDirectCallerReferralIntent(cleanInput);
+  const directIntent = detectDirectCallerReferralIntent(cleanInput) || detectDirectCallerReferralIntent(allCallerText);
   if (directIntent) {
     return {
       probingQuestion: directIntent.suggestedQuestion,
@@ -3762,9 +3851,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   );
 
   if (isReadyForSummaryFallback && !isLifeThreateningCrisis && !isSevere) {
+    const targetFacilityLabel = referralDestination || "ESIS Dispensary";
     currentStep = {
       title: "Triage Evaluation Complete",
-      question: `Ask the IP: "We have carefully noted all your symptoms and medical details regarding ${conditionLabel}. Please confirm your location so I can direct you to the nearest ESIS Dispensary for doctor consultation and medicines." (Hinglish: "Humne aapki ${conditionLabel} aur medical details note kar li hain. Kripya apna address/landmark batayein taaki najdeeki ESIS Dispensary ka margdarshan kiya ja sake.")`,
+      question: `Ask the IP: "We have carefully noted all your symptoms and medical details regarding ${conditionLabel}. Please confirm your location so I can direct you to the nearest ${targetFacilityLabel} for doctor consultation and treatment." (Hinglish: "Humne aapki ${conditionLabel} aur medical details note kar li hain. Kripya apna address/landmark batayein taaki najdeeki ${targetFacilityLabel} ka margdarshan kiya ja sake.")`,
       options: [
         "In Guwahati (Paltan Bazar)",
         "Zoo Road / Tiniali area",
