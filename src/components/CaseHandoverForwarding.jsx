@@ -45,7 +45,6 @@ import { updateCaseInLocalCache, getCachedCases, getCachedCrmCallHistory } from 
 import { broadcastEvent } from "../lib/broadcastSync";
 import { getCallerIdForPhone } from "../lib/callerId";
 import { deduplicateRedFlags, summarizeRedFlags, extractCallerReportedProblems } from "../lib/triageEngine";
-import defaultFacilities from "../data/facilities.json";
 import assamPincodesData from "../data/assam_pincodes.json";
 import {
   isDispensary,
@@ -1444,8 +1443,11 @@ ${historySection}`;
       ...(callerIntake || {}),
     };
     if (pin) intake.pincode = pin;
-    return resolveCallerLocation(intake, defaultFacilities);
-  }, [effectiveLoc, result?.resolved_location, result?.intake, callerIntake, searchPincode]);
+    const activeFacilities = Array.isArray(dynamicFacilities) && dynamicFacilities.length > 0
+      ? dynamicFacilities
+      : (Array.isArray(result?.nearest_facilities) ? result.nearest_facilities : []);
+    return resolveCallerLocation(intake, activeFacilities);
+  }, [effectiveLoc, result?.resolved_location, result?.intake, callerIntake, searchPincode, dynamicFacilities]);
 
   // 2. Build full facility list with road distances
   const allRankedFacilities = useMemo(() => {
@@ -1464,7 +1466,11 @@ ${historySection}`;
       if (key && !dynamicMap.has(key)) dynamicMap.set(key, f);
     });
 
-    return defaultFacilities.map((f) => {
+    const baseFacilities = Array.isArray(dynamicFacilities) && dynamicFacilities.length > 0
+      ? dynamicFacilities
+      : (Array.isArray(result?.nearest_facilities) ? result.nearest_facilities : []);
+
+    return baseFacilities.map((f) => {
       const key = (f.name || f.id || "").toLowerCase().trim();
       const existing = dynamicMap.get(key);
       if (existing && existing.distance_km != null) {
@@ -2387,7 +2393,7 @@ ${historySection}`;
                         <CalendarCheck className="h-4 w-4 text-orange-600 shrink-0" />
                         <span className="truncate">{lockedBookedFacilityName}</span>
                       </div>
-                      {lockedFacilityObj?.distance_km != null && (
+                      {lockedFacilityObj?.distance_km != null && Number(lockedFacilityObj.distance_km) > 0 && (
                         <span className="text-[11px] font-semibold text-orange-700 dark:text-orange-300 shrink-0">
                           Approx {formatApproxKm(lockedFacilityObj.distance_km)} KM
                         </span>
@@ -2423,12 +2429,13 @@ ${historySection}`;
                         className="w-full rounded-xl border-2 border-blue-400/60 dark:border-blue-700 bg-card p-3 text-xs sm:text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-xs cursor-pointer appearance-none pr-10"
                       >
                         {availableFacilities.map((f, idx) => {
-                          const distStr = f.distance_km != null ? `Approx ${formatApproxKm(f.distance_km)} KM` : "Distance N/A";
-                          const distBadge = idx === 0 ? `★ ${distStr} (Nearest)` : `${distStr}`;
-                          const area = f.district ? `(${f.district})` : "";
+                          const hasDist = f.distance_km != null && Number(f.distance_km) > 0;
+                          const distStr = hasDist ? `Approx ${formatApproxKm(f.distance_km)} KM` : "";
+                          const distBadge = distStr ? (idx === 0 ? `[★ ${distStr} (Nearest)] ` : `[${distStr}] `) : "";
+                          const area = f.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.district).trim()) ? `(${f.district})` : "";
                           return (
                             <option key={f.id || f.name || idx} value={f.id || f.name}>
-                              [{distBadge}] {f.name} {area}
+                              {distBadge}{f.name} {area}
                             </option>
                           );
                         })}
@@ -2441,10 +2448,12 @@ ${historySection}`;
                     {selectedFacility && (
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-md border border-emerald-500/30 text-[11px]">
-                            <Navigation className="h-3 w-3" />
-                            {selectedFacility.distance_km != null ? `Approx ${formatApproxKm(selectedFacility.distance_km)} KM road distance` : "Assam Medical Facility"}
-                          </span>
+                          {selectedFacility.distance_km != null && Number(selectedFacility.distance_km) > 0 && (
+                            <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-md border border-emerald-500/30 text-[11px]">
+                              <Navigation className="h-3 w-3" />
+                              Approx {formatApproxKm(selectedFacility.distance_km)} KM road distance
+                            </span>
+                          )}
                           {selectedFacility.district && (
                             <span className="inline-flex items-center gap-1 font-semibold text-foreground text-[11.5px]">
                               <MapPin className="h-3.5 w-3.5 text-blue-600" />
@@ -3159,7 +3168,7 @@ ${historySection}`;
                             <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
                             <span className="truncate">{lockedForwardFacilityName}</span>
                           </div>
-                          {lockedFacilityObj?.distance_km != null && (
+                          {lockedFacilityObj?.distance_km != null && Number(lockedFacilityObj.distance_km) > 0 && (
                             <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 shrink-0">
                               Approx {formatApproxKm(lockedFacilityObj.distance_km)} KM
                             </span>
@@ -3195,12 +3204,13 @@ ${historySection}`;
                             className="w-full rounded-xl border-2 border-orange-400/60 dark:border-orange-800 bg-card p-2.5 text-xs sm:text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 transition shadow-xs cursor-pointer appearance-none pr-10"
                           >
                             {availableFacilities.map((f, idx) => {
-                              const distStr = f.distance_km != null ? `Approx ${formatApproxKm(f.distance_km)} KM` : "Distance N/A";
-                              const distBadge = idx === 0 ? `★ ${distStr} (Nearest)` : `${distStr}`;
-                              const area = f.district ? `(${f.district})` : "";
+                              const hasDist = f.distance_km != null && Number(f.distance_km) > 0;
+                              const distStr = hasDist ? `Approx ${formatApproxKm(f.distance_km)} KM` : "";
+                              const distBadge = distStr ? (idx === 0 ? `[★ ${distStr} (Nearest)] ` : `[${distStr}] `) : "";
+                              const area = f.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.district).trim()) ? `(${f.district})` : "";
                               return (
                                 <option key={f.id || f.name || idx} value={f.id || f.name}>
-                                  [{distBadge}] {f.name} {area}
+                                  {distBadge}{f.name} {area}
                                 </option>
                               );
                             })}
@@ -3213,10 +3223,12 @@ ${historySection}`;
                         {selectedFacility && (
                           <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-xs">
                             <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/30 text-[10.5px]">
-                                <Navigation className="h-3 w-3" />
-                                {selectedFacility.distance_km != null ? `Approx ${formatApproxKm(selectedFacility.distance_km)} KM road distance` : "Assam Medical Facility"}
-                              </span>
+                              {selectedFacility.distance_km != null && Number(selectedFacility.distance_km) > 0 && (
+                                <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/30 text-[10.5px]">
+                                  <Navigation className="h-3 w-3" />
+                                  Approx {formatApproxKm(selectedFacility.distance_km)} KM road distance
+                                </span>
+                              )}
                               {selectedFacility.district && (
                                 <span className="inline-flex items-center gap-1 font-semibold text-foreground text-[10.5px]">
                                   <MapPin className="h-3 w-3 text-orange-600" />

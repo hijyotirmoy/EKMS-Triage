@@ -195,6 +195,13 @@ export const FacilityDirectory = ({ meta, onImported }) => {
       setShowDeleteModal(false);
       setItemToDelete(null);
 
+      // Immediately update local facilities state & cache before network finishes to prevent stale count
+      setFacilities((prev) => {
+        const remaining = prev.filter((f) => !idsToDelete.includes(f.id));
+        setCachedFacilities(remaining);
+        return remaining;
+      });
+
       broadcastEvent("FACILITIES_UPDATED", {});
       await load();
       onImported?.();
@@ -218,7 +225,7 @@ export const FacilityDirectory = ({ meta, onImported }) => {
           <p className="eyebrow">Assam · ESIC / ESIS network</p>
           <h2 className="text-xl font-bold sm:text-2xl">Facility directory</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {totalItems} of {meta?.facility_count ?? totalItems} facilities found
+            {totalItems} of {!q && district === "all" && type === "all" ? totalItems : (meta?.facility_count ?? totalItems)} facilities found
             {totalPages > 1 && ` · Page ${safePage} of ${totalPages}`}
           </p>
         </div>
@@ -474,13 +481,15 @@ export const FacilityDirectory = ({ meta, onImported }) => {
                   <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
                     {f.facility_type === "Hospital" ? "ESIC Hospital" : f.facility_type === "Tie-Up Hospital" ? "Tie-Up Facility" : f.facility_type}
                   </span>
-                  <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
-                    {f.district}
-                  </span>
-                  {f.pincode && (
+                  {f.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.district).trim()) && (
+                    <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground">
+                      {f.district}
+                    </span>
+                  )}
+                  {f.pincode && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.pincode).trim()) && (
                     <span className="mono text-muted-foreground/80">{f.pincode}</span>
                   )}
-                  {f.phone && (
+                  {f.phone && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.phone).trim()) && (
                     <span className="mono text-muted-foreground/80 text-[10px]">{f.phone}</span>
                   )}
                 </div>

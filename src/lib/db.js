@@ -1,8 +1,7 @@
 // Firebase & Unified Database Layer with Ultra-Low Read Architecture
-import defaultFacilities from "../data/facilities.json";
 
 // In-memory local cache/fallback for instant zero-config launch and 0-read execution
-let memoryFacilities = [...defaultFacilities];
+let memoryFacilities = [];
 let isFacilitiesLoadedFromFirestore = false;
 let deletedFacilityIds = new Set();
 let facilitiesVersion = Date.now();
@@ -192,30 +191,8 @@ export async function getFacilities(filters = {}) {
             if (f.site_code && deletedSet.has(String(f.site_code))) return false;
             return true;
           });
-        } else if (!meta.seeded && defaultFacilities && defaultFacilities.length > 0) {
-          memoryFacilities = defaultFacilities.filter((f) => !deletedSet.has(String(f.id)));
-          setTimeout(async () => {
-            try {
-              await saveFacilitiesMeta(ctx, { seeded: true, deleted_ids: [] });
-              if (ctx.type === "admin") {
-                const batch = ctx.db.batch();
-                for (const fac of defaultFacilities) {
-                  const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
-                  const docRef = ctx.db.collection("facilities").doc(docId);
-                  batch.set(docRef, fac);
-                }
-                await batch.commit();
-              } else {
-                const { doc, setDoc } = await import("firebase/firestore");
-                for (const fac of defaultFacilities) {
-                  const docId = String(fac.id || fac.site_code || Math.random().toString(36).substring(2, 9));
-                  await setDoc(doc(ctx.db, "facilities", docId), fac).catch(() => {});
-                }
-              }
-            } catch (seedErr) {
-              console.warn("Auto-seeding facilities notice:", seedErr.message);
-            }
-          }, 100);
+        } else {
+          memoryFacilities = [];
         }
       } catch (e) {
         console.warn("Firestore facilities cold-boot error:", e.message);

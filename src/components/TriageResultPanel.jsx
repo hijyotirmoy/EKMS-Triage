@@ -38,7 +38,6 @@ import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { getCachedCases } from "../lib/clientCache";
 import { MapWrapper } from "./map/MapWrapper";
 import { ASSAM_DISTRICTS } from "../lib/districts";
-import defaultFacilities from "../data/facilities.json";
 import {
   isHospital,
   isDispensary,
@@ -1256,18 +1255,6 @@ export const TriageResultPanel = ({
         const fn = (f.name || "").toLowerCase().trim();
         return fn === activeTargetFacilityName || fn.includes(activeTargetFacilityName) || activeTargetFacilityName.includes(fn);
       });
-      if (!topFacility && Array.isArray(defaultFacilities)) {
-        const fallback = defaultFacilities.find((f) => {
-          const fn = (f.name || "").toLowerCase().trim();
-          return fn === activeTargetFacilityName || fn.includes(activeTargetFacilityName) || activeTargetFacilityName.includes(fn);
-        });
-        if (fallback) {
-          topFacility = {
-            ...fallback,
-            distance_km: bookedStatus?.facilityDistanceKm ?? forwardedStatus?.facilityDistanceKm ?? fallback.distance_km ?? 0.5,
-          };
-        }
-      }
       if (topFacility) {
         orderedFacs = [topFacility, ...orderedFacs.filter((f) => (f.id ? f.id !== topFacility.id : f.name !== topFacility.name))];
       }
@@ -2046,11 +2033,9 @@ export const TriageResultPanel = ({
                           )}
                         </div>
 
-                        {(f.distance_km != null || f.maps_url) && (
+                        {f.distance_km != null && Number(f.distance_km) > 0 && (
                           <span className="inline-flex items-center text-xs font-bold text-slate-700 dark:text-slate-300 bg-secondary/80 dark:bg-slate-800/80 px-2.5 py-0.5 rounded-md border border-border/70 shrink-0">
-                            {f.distance_km != null
-                              ? `Approx ${formatApproxKm(f.distance_km)} KM`
-                              : "Approx -- KM"}
+                            Approx {formatApproxKm(f.distance_km)} KM
                           </span>
                         )}
                       </div>
@@ -2066,17 +2051,17 @@ export const TriageResultPanel = ({
 
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {f.district && (
+                          {f.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.district).trim()) && (
                             <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-medium">
                               {f.district}
                             </span>
                           )}
-                          {getFacilityPincode(f) && (
+                          {getFacilityPincode(f) && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(getFacilityPincode(f)).trim()) && (
                             <span className="rounded border border-border/70 px-1.5 py-0.5 text-muted-foreground font-mono font-medium">
                               {getFacilityPincode(f)}
                             </span>
                           )}
-                          {f.phone && (
+                          {f.phone && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.phone).trim()) && (
                             <span className="mono text-primary font-bold">{f.phone}</span>
                           )}
                         </div>
@@ -2470,24 +2455,24 @@ export const TriageResultPanel = ({
                           {/* Footer row: District, Pincode, and Phone */}
                           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/80 dark:border-slate-700/60 text-[10.5px]">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              {f.district && (
+                              {f.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.district).trim()) && (
                                 <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-medium">
                                   {f.district}
                                 </span>
                               )}
-                              {getFacilityPincode(f) && (
+                              {getFacilityPincode(f) && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(getFacilityPincode(f)).trim()) && (
                                 <span className="rounded border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-slate-600 dark:text-slate-400 font-mono font-medium">
                                   {getFacilityPincode(f)}
                                 </span>
                               )}
-                              {f.distance_km != null && (
+                              {f.distance_km != null && Number(f.distance_km) > 0 && (
                                 <span className="inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-700 dark:text-slate-300 font-bold">
                                   Approx {formatApproxKm(f.distance_km)} KM
                                 </span>
                               )}
                             </div>
 
-                            {f.phone && (
+                            {f.phone && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(f.phone).trim()) && (
                               <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{f.phone}</span>
                             )}
                           </div>

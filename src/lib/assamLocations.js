@@ -1,5 +1,4 @@
 import assamPincodesData from "../data/assam_pincodes.json";
-import defaultFacilities from "../data/facilities.json";
 import { calculateHaversineDistanceKm, calculateRoadDistanceKm, isDispensary, isHospital, isEsicHospital, isGovtDistrictHospital, isTieUp } from "./geo.js";
 
 /**
@@ -466,7 +465,7 @@ export function findNearestFacilitiesForLocation({
   lng,
   pincode,
   district,
-  facilities = defaultFacilities,
+  facilities = [],
 }) {
   if (lat == null || lng == null) {
     return { nearestDispensary: null, nearestHospital: null, sorted: [] };

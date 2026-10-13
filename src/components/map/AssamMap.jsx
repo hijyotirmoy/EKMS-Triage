@@ -525,7 +525,7 @@ const AssamMap = forwardRef(function AssamMap(
       }
 
       const approxKmText =
-        effectiveKm != null
+        effectiveKm != null && Number(effectiveKm) > 0
           ? `Approx ${effectiveKm < 10 ? Number(effectiveKm).toFixed(1) : Math.round(effectiveKm)} KM`
           : "";
 
@@ -548,10 +548,10 @@ const AssamMap = forwardRef(function AssamMap(
           </div>
 
           <div class="space-y-1 text-slate-600 text-[11px] border-t border-slate-100 pt-1.5">
-            ${hosp.district ? `<p><strong class="text-slate-700">District:</strong> ${hosp.district}</p>` : ""}
-            ${hosp.block ? `<p><strong class="text-slate-700">Block:</strong> ${hosp.block}</p>` : ""}
+            ${hosp.district && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(hosp.district).trim()) ? `<p><strong class="text-slate-700">District:</strong> ${hosp.district}</p>` : ""}
+            ${hosp.block && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(hosp.block).trim()) ? `<p><strong class="text-slate-700">Block:</strong> ${hosp.block}</p>` : ""}
             ${cleanAddr ? `<p class="leading-relaxed"><strong class="text-slate-700">Address:</strong> ${cleanAddr}</p>` : ""}
-            ${hosp.phone ? `<p><strong class="text-slate-700">Phone:</strong> <span class="font-mono font-bold text-blue-600">${hosp.phone}</span></p>` : ""}
+            ${hosp.phone && !/^(NA|N\/A|0|null|undefined|-+)$/i.test(String(hosp.phone).trim()) ? `<p><strong class="text-slate-700">Phone:</strong> <span class="font-mono font-bold text-blue-600">${hosp.phone}</span></p>` : ""}
           </div>
         </div>
       `, { maxWidth: 360 });
