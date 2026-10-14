@@ -81,6 +81,7 @@ import { extractCallerReportedProblems } from "@/lib/triageEngine";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { TriageResultPanel } from "./TriageResultPanel";
 import { CallerHistorySection } from "./CallerHistorySection";
+import { normalizeUrgency } from "@/lib/api";
 
 // ================= RANDOMIZED DEMO DATASETS =================
 
@@ -2345,7 +2346,7 @@ export function CrmIntegratedView({
                   createdAt: r.createdAt || Date.now(),
                   campaign: r.campaign || "Inbound Triage",
                   form: r.form || "Inbound Triage Form",
-                  followup: (urgency === "Emergency" || urgency === "Urgent") ? "Yes" : "No",
+                  followup: (urgency === "Severe" || urgency === "Moderate" || urgency === "Emergency" || urgency === "Urgent") ? "Yes" : "No",
                   submittedDate: r.submittedDate || "10-10-2026",
                   agent: r.agent || "Agent 1",
                   timeAndDate: r.timeAndDate || `${r.submittedDate || "10-10-2026"} 12:00 PM`,
@@ -2739,7 +2740,7 @@ export function CrmIntegratedView({
     const timeStr = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
     const fullDateTime = `${dateStr} ${timeStr}`;
 
-    const urgency = outcome.triage?.urgency_level || "Urgent";
+    const urgency = normalizeUrgency(outcome.triage?.urgency_level) || "Moderate";
     const notesSummary = outcome.triage?.summary_en || outcome.triage?.recommended_action || "Inbound triage consultation completed";
     const recFacility = outcome.triage?.recommended_facility_type || outcome.triage?.referral_destination || "104 Health Helpline (Doctor on Call)";
 
@@ -2968,7 +2969,7 @@ export function CrmIntegratedView({
       createdAt: Date.now(),
       campaign: "Inbound Triage",
       form: "Inbound Triage Form",
-      followup: urgency === "Emergency" || urgency === "Urgent" ? "Yes" : "No",
+      followup: (urgency === "Severe" || urgency === "Moderate" || urgency === "Emergency" || urgency === "Urgent") ? "Yes" : "No",
       submittedDate: dateStr,
       details: {
         campaign: "Inbound Triage",
@@ -2981,7 +2982,7 @@ export function CrmIntegratedView({
         responses: [
           { q: "Case ID", a: caseId },
           { q: "Triage Urgency Level", a: urgency },
-          { q: "Urgency Score", a: `${outcome.triage?.urgency_score || 7} / 10` },
+          { q: "Urgency Category", a: urgency },
           { q: "Summary", a: complaint },
           { q: "Chief Complaint", a: chiefComplaint },
           { q: "Clinical Red Flags", a: redFlagsText },
@@ -3116,8 +3117,9 @@ export function CrmIntegratedView({
           pincode: beneficiaryData.pinCode ? String(beneficiaryData.pinCode).trim() : "",
         },
         triage: {
-          urgency_level: isRed ? "Emergency" : "Urgent",
-          urgency_score: isRed ? 8 : 7,
+          urgency_level: isRed ? "Severe" : "Moderate",
+          assessed_severity: isRed ? "Severe" : "Moderate",
+          urgency_score: isRed ? 10 : 6,
           confidence: "High",
           summary_en: `Patient reported: ${combinedNotes.slice(0, 160)}. Priority clinical consultation indicated.`,
           summary_hi: "चिकित्सीय मूल्यांकन संपन्न; उपयुक्त स्वास्थ्य सुविधा के लिए मार्गदर्शन।",
@@ -3567,18 +3569,9 @@ export function CrmIntegratedView({
     // Map to the callerHistory schema expected by AbhaCallerSection
     return benTriageReports.map((r, i) => {
       const responses = Array.isArray(r.details?.responses) ? r.details.responses : [];
-      const urgencyVal = responses.find((q) => q.q === "Triage Urgency Level")?.a || r.details?.urgency || r.urgency || "Routine";
-      
-      let urgencyScoreVal = 4;
-      const rawScore = responses.find((q) => q.q === "Urgency Score")?.a;
-      if (rawScore) {
-        const parsed = parseInt(String(rawScore), 10);
-        if (!isNaN(parsed)) urgencyScoreVal = parsed;
-      } else if (urgencyVal.toLowerCase() === "emergency") {
-        urgencyScoreVal = 9;
-      } else if (urgencyVal.toLowerCase() === "urgent") {
-        urgencyScoreVal = 7;
-      }
+      const rawUrgencyVal = responses.find((q) => q.q === "Triage Urgency Level")?.a || r.details?.urgency || r.urgency || "Mild";
+      const urgencyVal = normalizeUrgency(rawUrgencyVal);
+      const urgencyScoreVal = urgencyVal === "Severe" ? 10 : (urgencyVal === "Moderate" ? 6 : 3);
 
       const summaryVal = responses.find((q) => q.q === "Summary" || q.q === "Chief Complaint")?.a || r.summary || r.notes || "Inbound triage consultation";
       const navVal = responses.find((q) => q.q === "Recommended Facility by Agent" || q.q === "Primary Referral by AI")?.a || r.navigation || "Triage protocol completed";
@@ -10403,8 +10396,8 @@ export function CrmIntegratedView({
                       {(() => {
                         const raw = selectedSurvey?.responses || [
                           { q: "Case ID", a: "CA0177AB01" },
-                          { q: "Triage Urgency Level", a: "Urgent" },
-                          { q: "Urgency Score", a: "7 / 10" },
+                          { q: "Triage Urgency Level", a: "Moderate" },
+                          { q: "Urgency Category", a: "Moderate" },
                           { q: "Summary", a: "Fever and body pain" },
                         ];
                         // 1. Rename "Complaint" to "Summary"

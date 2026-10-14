@@ -16,7 +16,7 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, normalizeUrgency } from "../lib/api";
 import { TriageResultPanel } from "./TriageResultPanel";
 import { EkmsAiChatArea } from "./EkmsAiChatArea";
 import { UrgencyBadge } from "./UrgencyBadge";
@@ -299,7 +299,7 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             Array.isArray(c.triage?.red_flags) && c.triage.red_flags.length > 0
               ? c.triage.red_flags
               : c.ekms_ai_context?.triageState?.redFlagsDetected || [],
-          urgency_level: c.triage?.urgency_level || "Routine",
+          urgency_level: normalizeUrgency(c.triage?.urgency_level) || "Mild",
           urgency_score: c.triage?.urgency_score || 0,
           navigation: c.triage?.recommended_action || c.triage?.recommended_facility_type || "",
           recommended_action: c.triage?.recommended_action || "",

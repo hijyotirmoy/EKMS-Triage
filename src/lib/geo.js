@@ -502,36 +502,60 @@ export function resolveCallerLocation(input, facilities = []) {
 }
 
 /**
- * Checks if ESIS Dispensary is currently open in Assam (Mon-Fri, 10:00 AM - 4:00 PM IST).
+ * Checks if ESIS Dispensary is currently open in Assam:
+ * - Monday to Friday: 10:00 AM – 4:00 PM IST
+ * - 1st & 3rd Saturday: 10:00 AM – 12:00 PM IST
+ * - Closed: 2nd, 4th, 5th Saturday & all Sundays
  */
 export function isDispensaryOpenNow(date = new Date()) {
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(date.getTime() + (date.getTimezoneOffset() * 60 * 1000) + istOffset);
   const day = istDate.getDay(); // 0 = Sunday, 6 = Saturday
+  const dateOfMonth = istDate.getDate();
   const hour = istDate.getHours();
   const minute = istDate.getMinutes();
   const currentMinutes = hour * 60 + minute;
 
-  const isWeekend = day === 0 || day === 6;
-  const isOpenHours = currentMinutes >= 600 && currentMinutes < 960; // 10:00 AM to 4:00 PM IST
-  return !isWeekend && isOpenHours;
+  const isSunday = day === 0;
+  const is1stOr3rdSaturday = day === 6 && ((dateOfMonth >= 1 && dateOfMonth <= 7) || (dateOfMonth >= 15 && dateOfMonth <= 21));
+  const is2ndOr4thOr5thSaturday = day === 6 && !is1stOr3rdSaturday;
+
+  if (isSunday || is2ndOr4thOr5thSaturday) return false;
+  if (is1stOr3rdSaturday) {
+    return currentMinutes >= 600 && currentMinutes < 720; // 10:00 AM to 12:00 PM IST
+  }
+  return currentMinutes >= 600 && currentMinutes < 960; // Mon-Fri 10:00 AM to 4:00 PM IST
 }
 
 /**
  * Ranks nearest facilities based on clinical rules:
- *
- * Rules:
- * 1. Exact match / Pincode match MUST always be shown at the VERY TOP (Position 1)!
- * 2. Filter out any facility with distance > 50 KM (never force distant Beltola / Tinsukia ESIC hospitals if > 50km).
- * 3. Only show ESIC Hospitals if they are within <= 25 KM (or <= 50 KM max).
- * 4. For EMERGENCY cases:
- *    - If ESIC Hospital <= 25 KM, show ESIC Hospital first.
- *    - If no ESIC Hospital <= 25 KM, show closest Govt District Hospital first.
- * 5. For NON-EMERGENCY / NORMAL cases:
- *    - Always give priority to ESIS Dispensary if dispensary is open / available!
- *    - If no dispensary, refer to ESIC Hospital (if <= 25km), else District Hospital / Tie-Up Hospital.
+ * 
+ * Clinical Criteria:
+ * - Mild: Low-intensity, localized, or early-stage symptoms. Little to no disruption of daily activities, normal functions, or vitals.
+ *   Forwarding: During open hours -> 1st: ESIS Dispensary, 2nd: 104, 3rd: ESIC Hospital, 4th: Govt Hospital, 5th: Tie-up, 6th: 108.
+ *   During closed hours -> 1st: 104, 2nd: Dispensary, 3rd: ESIC Hospital, 4th: Govt Hospital, 5th: Tie-up, 6th: 108.
+ * 
+ * - Moderate: Noticeable symptoms requiring active intervention or medication. Measurable interference with normal daily functioning, work, or physical activity.
+ *   Forwarding:
+ *   * If ESIC Hospital <= 15 KM: 1st: ESIC Hospital, 2nd: Govt Hospital, 3rd: Tie-up Hospital, 4th: Dispensary, 5th: 104, 6th: 108.
+ *   * If ESIC Hospital > 15 KM: 1st: Govt Hospital, 2nd: Tie-up Hospital, 3rd: ESIC Hospital, 4th: Dispensary, 5th: 104, 6th: 108.
+ * 
+ * - Severe: High-intensity, widespread, or life-threatening symptoms. Gross/total interference with basic physical function, organ systems, or consciousness.
+ *   Forwarding:
+ *   * Morning / daytime manageable in hospital directly (no active collapse):
+ *     If ESIC Hospital <= 15 KM: 1st: ESIC Hospital (24x7 Casualty), 2nd: Govt Hospital, 3rd: Tie-up, 4th: 108, 5th: 104, 6th: Dispensary.
+ *     If ESIC Hospital > 15 KM: 1st: Govt Hospital (24x7 Casualty), 2nd: Tie-up, 3rd: ESIC Hospital, 4th: 108, 5th: 104, 6th: Dispensary.
+ *   * Critical life-or-death crisis (cardiac arrest, unconscious, gasping, spurting bleed, etc.):
+ *     1st: 108 Ambulance, 2nd: ESIC Hospital (or Govt Hospital if closer), 3rd: Govt Hospital, 4th: Tie-up, 5th: 104, 6th: Dispensary.
  */
-export function rankNearestFacilities(callerLoc, facilities = [], limit = 50, isSevere = false, isWeekend = null) {
+export function rankNearestFacilities(
+  callerLoc,
+  facilities = [],
+  limit = 50,
+  urgencyOrIsSevere = "Mild",
+  isWeekend = null,
+  options = {}
+) {
   if (!facilities || !facilities.length) return [];
   if (
     !callerLoc ||
@@ -541,11 +565,19 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 50, is
     return [];
   }
 
+  const normUrgency = typeof urgencyOrIsSevere === "string"
+    ? (urgencyOrIsSevere.toLowerCase().includes("sev") ? "Severe" : (urgencyOrIsSevere.toLowerCase().includes("mod") ? "Moderate" : "Mild"))
+    : (urgencyOrIsSevere ? "Severe" : "Mild");
+
   // Determine if weekend schedule is active (Saturday / Sunday IST)
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
   const istDay = istDate.getDay();
+  const istHour = istDate.getHours();
+  const isMorningOrDaytime = istHour >= 6 && istHour < 18;
+
   const weekendActive = isWeekend !== null ? Boolean(isWeekend) : (istDay === 0 || istDay === 6);
+  const isDispOpen = isDispensaryOpenNow(istDate);
 
   const cleanFacs = cleanFacilityCoordinates(facilities);
   const callerPin = callerLoc?.pincode ? String(callerLoc.pincode).trim() : null;
@@ -623,15 +655,10 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 50, is
     };
   });
 
-  // Always include all facilities sorted by proximity, with <= 50km prioritized first for Load More
   const within50Km = scored.filter((f) => f.distance_km != null && f.distance_km <= 50);
   const beyond50Km = scored.filter((f) => f.distance_km == null || f.distance_km > 50);
   const eligiblePool = [...within50Km, ...beyond50Km];
 
-  // Proximity sorting comparator:
-  // 1. Exact pincode match (distance 0 km) at top
-  // 2. Strict ascending order of distance_km
-  // 3. District match if district-only
   const byProximity = (a, b) => {
     if (a.is_exact_pincode !== b.is_exact_pincode) {
       return (b.is_exact_pincode ? 1 : 0) - (a.is_exact_pincode ? 1 : 0);
@@ -664,81 +691,89 @@ export function rankNearestFacilities(callerLoc, facilities = [], limit = 50, is
     }
   };
 
-  const isOpenFacility = (f) =>
-    f.is_hospital || f.is_esic_hospital || f.is_govt_district_hospital || f.is_tie_up || !f.is_dispensary;
-
-  // -------------------------------------------------------------
-  // WEEKEND SCHEDULE:
-  // When dispensaries are closed on weekends, show at least 4 open facilities (Hospitals / Tie-Ups)
-  // sorted strictly by distance at the top of the directory.
-  // -------------------------------------------------------------
-  if (weekendActive) {
-    const openFacilities = sortedByProximity.filter(isOpenFacility);
-    const closedDispensaries = sortedByProximity.filter((f) => f.is_dispensary);
-
-    // Pick at least 4 open facilities (or all available open facilities)
-    const minOpenCount = Math.max(4, openFacilities.length >= 4 ? 4 : openFacilities.length);
-    for (const f of openFacilities.slice(0, minOpenCount)) {
-      addFacility(f);
-    }
-
-    // Add remaining open facilities in proximity order
-    for (const f of openFacilities.slice(minOpenCount)) {
-      if (selected.length >= limit) break;
-      addFacility(f);
-    }
-
-    // Add dispensaries after open facilities if slots remain
-    for (const f of closedDispensaries) {
-      if (selected.length >= limit) break;
-      addFacility(f);
-    }
-
-    return selected.slice(0, Math.max(limit, selected.length));
-  }
-
   const exactPinFac = sortedByProximity.find((f) => f.is_exact_pincode);
   const nearestDispensary = sortedByProximity.find((f) => f.is_dispensary);
-  const nearestEsicUnder25 = sortedByProximity.find((f) => f.is_esic_hospital && f.distance_km <= 25);
+  const nearestEsic = sortedByProximity.find((f) => f.is_esic_hospital);
+  const isEsicWithin15Km = Boolean(nearestEsic && nearestEsic.distance_km != null && nearestEsic.distance_km <= 15);
   const nearestGovtHosp = sortedByProximity.find((f) => f.is_govt_district_hospital);
   const nearestTieUp = sortedByProximity.find((f) => f.is_tie_up);
 
-  if (isSevere) {
+  if (normUrgency === "Mild") {
     // -------------------------------------------------------------
-    // EMERGENCY CASES:
-    // Refer to ESIC Hospital if <= 25 KM, else closest Govt District Hospital (any hospital closest to caller)
+    // MILD CASES:
+    // During dispensary open hours: 1st Dispensary, 3rd ESIC Hospital, 4th Govt Hospital, 5th Tie Up
+    // During closed hours: 1st Open hospital, then dispensary next working day
     // -------------------------------------------------------------
-    if (nearestEsicUnder25) {
-      addFacility(nearestEsicUnder25);
-    } else if (nearestGovtHosp) {
-      addFacility(nearestGovtHosp);
-    } else if (sortedByProximity.find((f) => f.is_hospital)) {
-      addFacility(sortedByProximity.find((f) => f.is_hospital));
+    if (isDispOpen) {
+      if (exactPinFac && exactPinFac.is_dispensary) {
+        addFacility(exactPinFac);
+      } else if (nearestDispensary) {
+        addFacility(nearestDispensary);
+      }
+      if (nearestEsic) addFacility(nearestEsic);
+      if (nearestGovtHosp) addFacility(nearestGovtHosp);
+      if (nearestTieUp) addFacility(nearestTieUp);
     } else {
-      addFacility(sortedByProximity[0]);
+      // Off hours / closed: ESIC Hospital -> Govt Hospital -> Tie Up -> Dispensary
+      if (nearestEsic) addFacility(nearestEsic);
+      if (nearestGovtHosp) addFacility(nearestGovtHosp);
+      if (nearestTieUp) addFacility(nearestTieUp);
+      if (nearestDispensary) addFacility(nearestDispensary);
+    }
+  } else if (normUrgency === "Moderate") {
+    // -------------------------------------------------------------
+    // MODERATE CASES:
+    // If ESIC Hospital <= 15 KM: 1st ESIC Hospital, 2nd Govt Hospital, 3rd Tie Up
+    // If ESIC Hospital > 15 KM: 1st Govt Hospital, 2nd Tie Up, 3rd ESIC Hospital
+    // -------------------------------------------------------------
+    if (isEsicWithin15Km) {
+      if (nearestEsic) addFacility(nearestEsic);
+      if (nearestGovtHosp) addFacility(nearestGovtHosp);
+      if (nearestTieUp) addFacility(nearestTieUp);
+      if (nearestDispensary) addFacility(nearestDispensary);
+    } else {
+      if (nearestGovtHosp) addFacility(nearestGovtHosp);
+      if (nearestTieUp) addFacility(nearestTieUp);
+      if (nearestEsic) addFacility(nearestEsic);
+      if (nearestDispensary) addFacility(nearestDispensary);
     }
   } else {
     // -------------------------------------------------------------
-    // NON-EMERGENCY / NORMAL CASES:
-    // 1. If exact pincode match exists (e.g. ESIS Dispensary Hojai for 782435), show at Position 1!
-    // 2. Always give priority to ESIS Dispensary if dispensary is available / open!
-    // 3. If no dispensary, refer to ESIC Hospital if <= 25 KM, else District Hospital or Tie-Up Hospital.
+    // SEVERE CASES:
+    // During morning if manageable in hospital:
+    //   If ESIC <= 15 KM: 1st ESIC Hospital (24x7 Casualty), 2nd Govt Hospital, 3rd Tie Up
+    //   If ESIC > 15 KM: 1st Govt Hospital (24x7 Casualty), 2nd Tie Up, 3rd ESIC Hospital
+    // If needs 108 / critical emergency:
+    //   1st Nearest Hospital Casualty (for ambulance transport)
     // -------------------------------------------------------------
-    if (exactPinFac) {
-      addFacility(exactPinFac);
-    } else if (nearestDispensary) {
-      addFacility(nearestDispensary);
-    } else if (nearestEsicUnder25) {
-      addFacility(nearestEsicUnder25);
-    } else if (nearestGovtHosp || nearestTieUp) {
-      const primaryAlt = (nearestGovtHosp && nearestTieUp)
-        ? (nearestGovtHosp.distance_km <= nearestTieUp.distance_km ? nearestGovtHosp : nearestTieUp)
-        : (nearestGovtHosp || nearestTieUp);
-      addFacility(primaryAlt);
+    const isMorningManageable = isMorningOrDaytime && Boolean(options.isManageableInHospital);
+    if (isMorningManageable) {
+      if (isEsicWithin15Km) {
+        if (nearestEsic) addFacility(nearestEsic);
+        if (nearestGovtHosp) addFacility(nearestGovtHosp);
+        if (nearestTieUp) addFacility(nearestTieUp);
+      } else {
+        if (nearestGovtHosp) addFacility(nearestGovtHosp);
+        if (nearestTieUp) addFacility(nearestTieUp);
+        if (nearestEsic) addFacility(nearestEsic);
+      }
+    } else {
+      // Acute 108 emergency destination
+      if (isEsicWithin15Km && nearestEsic) {
+        addFacility(nearestEsic);
+        if (nearestGovtHosp) addFacility(nearestGovtHosp);
+        if (nearestTieUp) addFacility(nearestTieUp);
+      } else if (nearestGovtHosp) {
+        addFacility(nearestGovtHosp);
+        if (nearestTieUp) addFacility(nearestTieUp);
+        if (nearestEsic) addFacility(nearestEsic);
+      } else if (nearestEsic) {
+        addFacility(nearestEsic);
+      }
     }
   }
 
-  // Populate all remaining slots strictly from sortedByProximity in ascending distance order
+  // Populate remaining slots from sortedByProximity
   for (const fac of sortedByProximity) {
     if (selected.length >= limit) break;
     addFacility(fac);

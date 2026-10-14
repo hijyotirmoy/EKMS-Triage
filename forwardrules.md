@@ -6,28 +6,35 @@
 
 ---
 
-## 1. High-Level Forwarding Matrix
+## 1. High-Level Forwarding Matrix (Strict 3-Tier System)
 
-```mermaid
-flowchart TD
-    Complaint([Caller Complaint & Symptoms]) --> CheckPref{Did Caller Explicitly State<br/>Hospital / Casualty Preference?}
-    
-    CheckPref -->|YES: Beneficiary insists on Hospital| HospDirect[Route to ESIC Hospital 24x7 Casualty<br/>Override Dispensary Fallback]
-    
-    CheckPref -->|NO: Evaluate Standard Triage| EvalCrit{Check 108 Emergency Criteria}
-    
-    EvalCrit -->|Accident, Head Injury, Heavy Bleeding,<br/>Cut/Laceration, Workplace Injury,<br/>Age > 50 + Severe Distress| Emer108[🚨 Immediate 108 Emergency Ambulance Dispatch<br/>Direct IPD / Trauma Casualty Transfer]
-    
-    EvalCrit -->|Score 8–10: Severe Cardiac, Stroke, Shock| Emer108
-    
-    EvalCrit -->|Score 5–7: Acute Pain, High Fever > 3d| UrgentRoute{Is ESIS Dispensary Open & Nearby?}
-    UrgentRoute -->|Open Mon-Fri 10AM-4PM| DispOPD[ESIS Dispensary OPD<br/>Department: General Medicine Only]
-    UrgentRoute -->|Closed or Weekend| HospDirect
-    
-    EvalCrit -->|Score 3–4: Mild Infection, Prescription Refill| DispOPD
-    
-    EvalCrit -->|Score 1–2: Minor Query, Wellness| Tele104[🌿 104 Health Helpline Tele-Doctor]
-```
+All clinical triage cases are classified strictly into one of 3 tiers based on standard medical criteria (WHO / NHS / Emergency Severity Index). Numerical ratings (e.g. 3/10, 6/10) and legacy categories ("Routine", "Urgent", "Self-Care", "Emergency") have been retired.
+
+### 1.1 Clinical Severity Definitions
+- **Mild**:
+  • Low-intensity, localized, or early-stage symptoms.
+  • Little to no disruption of daily activities, normal functions, or vital signs.
+  • Often managed via outpatient departments (OPDs), primary health centers (PHCs / ESIS Dispensaries), or basic supportive/conservative care.
+- **Moderate**:
+  • Noticeable symptoms that require more active intervention or medication.
+  • Measurable interference with normal daily functioning, work, or physical activity.
+  • Frequently managed by general physicians, district centers, or stepped-up pharmacological treatments (such as combination therapy).
+- **Severe**:
+  • High-intensity, widespread, or life-threatening symptoms.
+  • Gross or total interference with basic physical function, organ systems, or consciousness.
+  • Requires urgent, specialized, or inpatient/intensive care (ICU/emergency stabilization) at secondary or tertiary healthcare facilities.
+
+### 1.2 6-Tier Forwarding Hierarchy Matrix
+
+| Clinical Urgency Tier | Condition / Threshold | 1st Choice (Primary) | 2nd Choice (Secondary) | 3rd Choice | 4th Choice | 5th Choice | 6th Choice |
+|---|---|---|---|---|---|---|---|
+| **Mild** | **Dispensary Open Hours** (Mon–Fri 10am–4pm, 1st & 3rd Sat 10am–12pm) | **ESIS Dispensary** | **104 Health Helpline** | **ESIC Hospital** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **108 Ambulance** |
+| **Mild** | **Dispensary Closed Hours** (After 4pm, Sun, 2nd/4th/5th Sat) | **104 Health Helpline** | **ESIS Dispensary** | **ESIC Hospital** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **108 Ambulance** |
+| **Moderate** | **ESIC Hospital Available within 15 KM** | **ESIC Hospital** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **ESIS Dispensary** | **104 Health Helpline** | **108 Ambulance** |
+| **Moderate** | **ESIC Hospital > 15 KM** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **ESIC Hospital** | **ESIS Dispensary** | **104 Health Helpline** | **108 Ambulance** |
+| **Severe** | **Morning / Daytime (6am–6pm) Manageable in Hospital** (ESIC <= 15km) | **ESIC Hospital (24x7 Casualty)** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **108 Ambulance** | **104 Health Helpline** | **ESIS Dispensary** |
+| **Severe** | **Morning / Daytime (6am–6pm) Manageable in Hospital** (ESIC > 15km) | **Govt District Hospital (24x7 Casualty)** | **Empanelled Tie-Up Hospital** | **ESIC Hospital** | **108 Ambulance** | **104 Health Helpline** | **ESIS Dispensary** |
+| **Severe** | **Needs 108 Emergency Dispatch** (Critical life threat, collapse, unconsciousness, arterial bleed, respiratory failure, or caller requests 108) | **108 Ambulance** | **Nearest Hospital Casualty (ESIC / Govt)** | **Govt District Hospital** | **Empanelled Tie-Up Hospital** | **104 Health Helpline** | **ESIS Dispensary** |
 
 ---
 
@@ -69,8 +76,10 @@ Whenever the caller's dialogue, selected option, or manual input indicates an ex
 ## 4. ESIS Dispensary Handover & Department Rules
 
 ### 4.1 Operating Scope & Timing
-- **Operational Days**: Monday to Friday (10:00 AM – 4:00 PM).
-- **Weekend Status**: Closed on Saturdays afternoon and Sundays. If a patient is evaluated on a weekend, the system warns the operator and redirects to a 24x7 hospital.
+- **Regular Weekday Hours**: Monday to Friday (10:00 AM – 4:00 PM).
+- **Saturday Hours**: **1st & 3rd Saturday of every month: OPEN from 10:00 AM to 12:00 PM**.
+- **Closed Days**: 2nd, 4th, and 5th Saturdays, all Sundays, and official public holidays.
+- **Off-Hours / Weekend Routing**: If evaluated outside open hours, callers are routed to **104 Health Helpline** (24x7 doctor on call) or **ESIC Hospital** casualty if escalated.
 
 ### 4.2 Single Department Booking Restriction
 - **Mandate**: When booking an OPD appointment at an **ESIS Dispensary**, the system displays **only one department**:

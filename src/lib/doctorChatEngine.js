@@ -63,17 +63,37 @@ CORE CLINICAL RULES:
    - If the conversation started with one condition (e.g. Fever & Chills) and the caller later introduces or switches to another condition (e.g. hand cut, workplace injury, chest discomfort, abdominal pain), DO NOT forget the first condition!
    - Synthesize BOTH conditions together into your assessment, questions, and red flags.
 11. 108 EMERGENCY & ACCIDENT / SEVERE TRAUMA ROUTING:
-   - For all accidents, head injuries, heavy bleeding, severe cuts (hand/finger deep cuts, workplace machinery injuries), or caller age > 50 with acute sudden complications, IMMEDIATELY recommend 108 Ambulance / Emergency Casualty ("108 Ambulance").
+   - For all accidents, head injuries, heavy bleeding, severe cuts (hand/finger deep cuts, workplace machinery injuries), or life-threatening symptoms, IMMEDIATELY recommend 108 Ambulance / Emergency Casualty ("108 Ambulance") with severity "Severe".
 12. BENEFICIARY FACILITY PREFERENCE:
    - If the beneficiary explicitly states or selects where they want to go (e.g. "Visit ESIC Hospital Casualty now", "hospital", "dispensary", "ambulance", "tele-doctor"), ALWAYS respect and route them to that preferred facility ("ESIC Hospital", "ESIS Dispensary", etc.) as PRIMARY!
-13. 6-TIER LOGICAL ROUTING HIERARCHY (Between 6:00 AM and 6:00 PM):
-   Tier 1. 108 Ambulance Services (HIGH SEVERITY 9 & EMERGENCY):
-      - Dispatch 108 Ambulance immediately for: accidents, head injuries, heavy bleeding, deep cuts, severe work trauma, choking, severe respiratory failure, unconsciousness, crushing cardiac chest pain, or explicit caller request for ambulance.
-   Tier 2. 104 Health Helpline (Priority: Tele-Consultation, Mental Health & General Guidance): Medical advice, telephone doctor consultation, emotional support, counselling.
-   Tier 3. ESIS Dispensary (Priority: Primary / Routine Care): Basic outpatient (OPD) services within standard working hours (10:00 AM – 4:00 PM).
-   Tier 4. ESIC Hospital (Priority: Secondary / Specialist Care): Advanced, specialized, high acuity fever/illness, caller hospital preference, or inpatient care within ESIC network (OPD 10 AM - 4 PM, IPD & Casualty 24x7).
-   Tier 5. ESI Tie-up Hospital (Priority: Empanelled Private Care): Beneficiary needs private hospital treatment under ESI empanelment.
-   Tier 6. Dist Hosp (Priority: Public Healthcare outside ESIC): Beneficiary needs public healthcare services outside ESIC network.
+13. MANDATORY 3-TIER CLINICAL CATEGORIZATION & FORWARDING:
+   - Strictly classify all clinical cases into 3 categories only: "Severe", "Moderate", or "Mild".
+   - NEVER output legacy categories ("Routine", "Urgent", "Self-care", "Emergency") or numerical scale ratings (e.g., 3/10, 6/10, 9/10).
+   - Standard clinical criteria:
+     * Mild:
+       • Characterized by low-intensity, localized, or early-stage symptoms.
+       • Little to no disruption of daily activities, normal functions, or vital signs.
+       • Often managed via outpatient departments (OPDs), primary health centers (PHCs / ESIS Dispensaries), or basic supportive/conservative care.
+       • Forwarding:
+         - During dispensary open hours (Mon-Fri 10am-4pm, 1st & 3rd Sat 10am-12pm): 1st: ESIS Dispensary, 2nd: 104 Health Helpline, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
+         - During dispensary closed hours: 1st: 104 Health Helpline, 2nd: ESIS Dispensary, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
+     * Moderate:
+       • Characterized by noticeable symptoms that require more active intervention or medication.
+       • Measurable interference with normal daily functioning, work, or physical activity.
+       • Frequently managed by general physicians, district centers, or stepped-up pharmacological treatments (such as combination therapy).
+       • Forwarding:
+         - If ESIC Hospital is available within 15km distance: 1st: ESIC Hospital, 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
+         - If ESIC Hospital is NOT available within 15km: 1st: Govt District Hospital, 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
+     * Severe:
+       • Characterized by high-intensity, widespread, or life-threatening symptoms.
+       • Gross or total interference with basic physical function, organ systems, or consciousness.
+       • Requires urgent, specialized, or inpatient/intensive care (ICU/emergency stabilization) at secondary or tertiary healthcare facilities.
+       • Forwarding:
+         - During morning/daytime (6:00 AM – 6:00 PM) if manageable in hospital directly (no active collapse, patient alert & accompanied):
+           * If ESIC Hospital <= 15km: 1st: ESIC Hospital (24x7 Casualty), 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: 108 Ambulance, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
+           * If ESIC Hospital > 15km: 1st: Govt District Hospital (24x7 Casualty), 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: 108 Ambulance, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
+         - If needs 108 (critical collapse, acute respiratory failure, cardiac arrest, arterial bleed, seizure, poisoning, or caller requests 108):
+           1st: 108 Ambulance (Immediate Emergency Dispatch), 2nd: Nearest Hospital (ESIC if closer else Govt), 3rd: Govt District Hospital, 4th: Empanelled Tie-Up Hospital, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
 14. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
    - We are triage helpline call operators, NOT diagnosing doctors.
    - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'Fever & Chills', 'Throbbing Headache').
@@ -87,8 +107,8 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
   "suspectedCondition": "Reported symptom area only (e.g. 'Fever & Chills'); NEVER diagnose a disease",
   "isPsychiatric": true | false,
-  "severity": "High" | "Moderate" | "Mild",
-  "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Nearest Tie-Up Facility" | "Govt District Hospital" | null,
+  "severity": "Severe" | "Moderate" | "Mild",
+  "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms"],
   "duration": "detected duration or accident time",
@@ -422,6 +442,7 @@ export async function processDoctorConsultationTurn({
   message,
   history = [],
   currentClinicalState = {},
+  facilities = [],
 }) {
   const cleanInput = (message || "").trim();
 
@@ -470,29 +491,43 @@ export async function processDoctorConsultationTurn({
   );
 
   if (detectedLoc.found) {
+    const facilitiesPool = Array.isArray(facilities) && facilities.length > 0
+      ? facilities
+      : (Array.isArray(currentClinicalState.facilities) ? currentClinicalState.facilities : []);
     const facs = findNearestFacilitiesForLocation({
       lat: detectedLoc.lat,
       lng: detectedLoc.lng,
       pincode: detectedLoc.pincode,
       district: detectedLoc.district,
+      facilities: facilitiesPool,
     });
     const rec = buildFacilityRecommendationMessage({
       locationName: detectedLoc.name,
+      pincode: detectedLoc.pincode,
       nearestDispensary: facs.nearestDispensary,
       nearestHospital: facs.nearestHospital,
       conditionLabel: initialChiefComplaint || currentClinicalState.suspectedCondition || "your condition",
       severity: currentClinicalState.severity || "Moderate",
     });
 
+    const chosenFacility = rec.facility || facs.nearestDispensary || facs.nearestHospital;
+
     return {
       probingQuestion: rec.text,
-      suggestedAnswers: rec.options,
+      suggestedAnswers: rec.options || [
+        "Thank you, noted",
+        "Connect me with 104 tele-doctor",
+        "Need ambulance / emergency help",
+        "View triage summary",
+      ],
       suspectedCondition: currentClinicalState.suspectedCondition || "Medical Consultation",
       isPsychiatric: Boolean(currentClinicalState.isPsychiatric),
       severity: currentClinicalState.severity || "Moderate",
       severityScore: currentClinicalState.severityScore || 5,
-      referralDestination: isDispensary(rec.facility) ? "ESIS Dispensary" : "ESIC Hospital",
-      referralReason: `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${rec.facility?.name}.`,
+      referralDestination: isDispensary(chosenFacility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralReason: chosenFacility?.name
+        ? `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`
+        : `Registered location (${detectedLoc.name}) for triage referral.`,
       is_dual_protocol: false,
       call_referral_secondary: null,
       redFlagsDetected: currentClinicalState.redFlagsDetected || [],
@@ -506,8 +541,8 @@ export async function processDoctorConsultationTurn({
       isReferralReady: true,
       initialChiefComplaint,
       detectedLocation: detectedLoc,
-      nearestFacility: rec.facility,
-      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}. Routed to nearest facility: ${rec.facility?.name} (${rec.facility?.roadKm ? `${rec.facility.roadKm} km` : "nearby"}). Address: ${rec.facility?.address || "Assam"}.`,
+      nearestFacility: chosenFacility,
+      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}${detectedLoc.pincode ? ` (${detectedLoc.pincode})` : ""}. Routed to nearest facility: ${chosenFacility?.name || "ESIS Dispensary / Hospital"} (${chosenFacility?.roadKm ? `${chosenFacility.roadKm.toFixed(1)} km` : "nearby"}). Address: ${chosenFacility?.address || "Assam"}.`,
     };
   }
 
@@ -614,7 +649,7 @@ Clinical Context: Chief Complaint: "${initialChiefComplaint}", Current Condition
 Already Asked Questions: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 words):
-{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "High/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "comorbidity": "Known chronic conditions (Diabetes, Hypertension, Asthma) or None reported by caller", "medications": "Medicines taken or empty string '' if none / no answer", "isReadyForSummary": false, "clinicalSummary": "..." }`,
+{ "probingQuestion": "Ask the IP: ... (Hinglish: ...)", "suggestedAnswers": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"], "suspectedCondition": "...", "isPsychiatric": false, "severity": "Severe/Moderate/Mild", "referralDestination": "..." or null, "referralReason": "..." or null, "redFlagsDetected": [], "duration": "...", "comorbidity": "Known chronic conditions (Diabetes, Hypertension, Asthma) or None reported by caller", "medications": "Medicines taken or empty string '' if none / no answer", "isReadyForSummary": false, "clinicalSummary": "..." }`,
     },
   ];
 
@@ -727,7 +762,13 @@ Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 w
   }
 
   // 3. Local Progressive Clinical Engine (<5ms, 100% accurate, zero network delay)
-  return buildLocalDoctorConsultationFallback(cleanInput, history, { ...currentClinicalState, initialChiefComplaint });
+  // Reached when all upstream LLM APIs hit rate limit, timeout, or quota exhaustion
+  const localFallbackResult = buildLocalDoctorConsultationFallback(cleanInput, history, { ...currentClinicalState, initialChiefComplaint });
+  return {
+    ...localFallbackResult,
+    isSystemInbuiltFallback: true,
+    apiLimitReached: true,
+  };
 }
 
 /**
@@ -1580,7 +1621,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   const ambulanceCheck = isLifeThreateningAmbulanceCase(
     allContext,
-    raw.severityScore || (raw.severity === "High" ? 9 : 5),
+    raw.severityScore || (/sev|high|emerg/i.test(raw.severity) ? 9 : 5),
     { symptom_notes: cleanInput },
     prevState
   );
@@ -1604,15 +1645,18 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     prevRef.includes("pharmacy") ||
     prevRef.includes("dispensary");
 
-  let severity =
-    raw.severity === "High" || raw.severity === "Moderate" || raw.severity === "Mild"
-      ? raw.severity
-      : (prevState.severity || (isPsych ? "High" : is104PhoneDoctor ? "Moderate" : "Moderate"));
+  const normSevStr = (s) => {
+    const str = String(s || "").trim().toLowerCase();
+    if (str.includes("sev") || str.includes("emerg") || str.includes("high") || s === 9 || s === 10 || s === 8) return "Severe";
+    if (str.includes("mod") || str.includes("urg") || s === 6 || s === 7 || s === 5) return "Moderate";
+    return "Mild";
+  };
 
-  let severityScore = Number(raw.severityScore) || (severity === "High" ? 9 : severity === "Moderate" ? 6 : 3);
+  let severity = normSevStr(raw.severity || prevState.severity || (isPsych ? "Severe" : "Moderate"));
+  let severityScore = severity === "Severe" ? 10 : (severity === "Moderate" ? 6 : 3);
 
-  // STRICT RULE: If the case is NOT a genuine life-and-death emergency, DO NOT score it 9!
-  if (!isEmergency108 && (severity === "High" || severityScore >= 9)) {
+  // STRICT RULE: If the case is NOT a genuine life-and-death emergency / acute trauma, DO NOT classify as Severe!
+  if (!isEmergency108 && severity === "Severe" && !isPsych) {
     severity = "Moderate";
     severityScore = 6;
   }
@@ -1624,111 +1668,69 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   const dispensaryStatus = getDispensaryOperatingStatus();
 
-  // Check IST time:
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-  const hour = istDate.getHours();
-  const currentMinutes = hour * 60 + istDate.getMinutes();
-  const isNightAfter10PM = hour >= 22 || hour < 6; // 10:00 PM to 6:00 AM IST
-  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM (960) to 10:00 AM (600)
-
-  // Conditions for Category 7: ESI Tie-Up Hospital
-  const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(allContext);
-  const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(allContext);
-  const isTieUpEligible = isIpdEmergency || hasEsicReferral || /\b(tie.?up|empanelled)\b/i.test(allContext);
-
-  // Conditions for Category 8: District Hospital (Public Healthcare outside ESIC)
+  // Conditions for Category: District Hospital (Public Healthcare outside ESIC)
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(allContext);
-
-  // Check if beneficiary has physical health / medical symptoms alongside any psychiatric complaints
-  const hasPhysicalHealthSymptoms =
-    severity === "High" ||
-    /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(allContext);
 
   if (directIntent) {
     referralDestination = directIntent.destination;
     referralReason = directIntent.reason;
-    secondaryReferral = "ESIC Hospital";
+    secondaryReferral = referralDestination === "ESIC Hospital" ? "Govt District Hospital" : (referralDestination === "ESIS Dispensary" ? "104 Health Helpline" : "ESIC Hospital");
   }
-  // Tier 1: 108 Ambulance Services (Strict Life-Threatening Crisis ONLY)
-  else if (isEmergency108) {
-    referralDestination = "108 Ambulance";
-    referralReason = ambulanceCheck.reason || "Life-threatening acute emergency or trauma injury; dispatch 108 Ambulance immediately.";
-    secondaryReferral = "ESIC Hospital";
+  // 1. Severe Category -> 108 Ambulance or Daytime Hospital Casualty
+  else if (isEmergency108 || severity === "Severe") {
+    const nowUtc = new Date();
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(nowUtc.getTime() + (nowUtc.getTimezoneOffset() * 60 * 1000) + istOffsetMs);
+    const istHour = istDate.getHours();
+    const isMorningOrDaytime = istHour >= 6 && istHour < 18;
+
+    const hasAcuteLifeThreat = Boolean(
+      ambulanceCheck?.is108 ||
+      /\b(cardiac arrest|heart attack|unconscious|behosh|not breathing|sans nahi|choking|drank poison|poisoning|drowning|heavy bleed|massive bleed|arterial|seizure|daura|collapse)\b/i.test(allContext)
+    );
+    const isManageableAtHospital = isMorningOrDaytime && !hasAcuteLifeThreat;
+
+    if (isManageableAtHospital) {
+      referralDestination = "ESIC Hospital";
+      referralReason = "Severe clinical presentation manageable at hospital during morning/daytime; direct patient immediately to nearest ESIC Hospital Casualty (or Govt District Hospital).";
+      secondaryReferral = "Govt District Hospital";
+      isDualProtocol = false;
+    } else {
+      referralDestination = "108 Ambulance";
+      referralReason = ambulanceCheck.reason || "Severe life-threatening emergency or acute trauma casualty; dispatch 108 Ambulance immediately.";
+      secondaryReferral = isPsych ? "104 Health Helpline" : "ESIC Hospital";
+      isDualProtocol = Boolean(isPsych);
+    }
   }
-  // Tier 2: Mental Health / Emotional Distress / Suicide Crisis -> 104 Health Helpline
-  else if (isPsych) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Beneficiary requires psychological counseling, doctor support or emotional guidance; connect with 104 Health Helpline for 24x7 doctor & counselling assistance.";
-    secondaryReferral = "ESIC Hospital";
+  // 2. Moderate Category -> ESIC Hospital & Govt District Hospital
+  else if (severity === "Moderate") {
+    if (isDistHospRequest) {
+      referralDestination = "Govt District Hospital";
+      referralReason = "Moderate clinical presentation; beneficiary needs public hospital care outside ESIC network. Guide to nearest Govt District Hospital.";
+      secondaryReferral = "ESIC Hospital";
+    } else {
+      referralDestination = "ESIC Hospital";
+      referralReason = "Moderate clinical condition requiring hospital evaluation and care. Direct patient to nearest ESIC Hospital (if within 15km) or Govt District Hospital.";
+      secondaryReferral = "Govt District Hospital";
+    }
     isDualProtocol = false;
   }
-  // Tier 3: HIV/AIDS / STI -> 104 Health Helpline
-  else if (isNacoHIV) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Confidential sexual health / HIV-AIDS medical guidance; connect with 104 Health Helpline for tele-doctor consultation.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  }
-  // Tier 6: Dist Hosp (Priority: Public Healthcare outside ESIC)
-  else if (isDistHospRequest) {
-    referralDestination = "Govt District Hospital";
-    referralReason = "Beneficiary needs public healthcare services outside the ESIC network (public admissions, specialist care, or child immunization); guide to nearest Govt District Hospital.";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = false;
-  }
-  // Tier 5: ESI Tie-up Hospital (Explicit IPD admission or ESIC referral)
-  else if (isTieUpEligible) {
-    referralDestination = "Nearest Tie-Up Facility";
-    referralReason = isIpdEmergency
-      ? "Inpatient (IPD) emergency; refer to nearest Empanelled Tie-Up Facility for cashless emergency admission under ESI guidelines."
-      : hasEsicReferral
-      ? "Patient possesses direct referral from ESIC Hospital; refer to nearest Empanelled Tie-Up Facility for specialist treatment."
-      : "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI empanelment guidelines.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  }
-  // After 10:00 PM: If manageable and not life-and-death -> 104 Health Helpline
-  else if (isNightAfter10PM) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Night hours (after 10:00 PM): Condition is manageable. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  }
-  // If off-hours (after 4 PM to 10 AM) and NO emergency:
-  else if (isOffHours || !dispensaryStatus.isOpen) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  }
-  // Tier 2: 104 Health Helpline (Priority: Tele-Consultation / General Info during daytime)
-  else if (
-    is104PhoneDoctor ||
-    (isAdviceSeeking && severity !== "High")
-  ) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Beneficiary needs health guidance without visiting a physical facility; transfer call to 104 Health Helpline for 24x7 doctor consultation over the phone.";
-    secondaryReferral = "ESIS Dispensary";
-    isDualProtocol = false;
-  }
-  // Tier 3: ESIS Dispensary (Priority: Primary / Routine Care during 10 AM - 4 PM)
-  else if (dispensaryStatus.isOpen && severity !== "High") {
-    referralDestination = "ESIS Dispensary";
-    referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS Dispensary for doctor consultation and medicines.";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = false;
-  }
-  // Tier 4: ESIC Hospital (Priority: Secondary / Specialist Care)
+  // 3. Mild Category -> 104 Health Helpline & ESIS Dispensary
   else {
-    referralDestination = "ESIC Hospital";
-    referralReason = "Beneficiary needs advanced specialized care or secondary evaluation within ESIC network (OPD 10:00 AM – 4:00 PM, IPD & Emergency 24x7).";
-    secondaryReferral = "ESIS Dispensary";
+    if (dispensaryStatus.isOpen && !is104PhoneDoctor && !isAdviceSeeking) {
+      referralDestination = "ESIS Dispensary";
+      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+      secondaryReferral = "104 Health Helpline";
+    } else {
+      referralDestination = "104 Health Helpline";
+      referralReason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+      secondaryReferral = "ESIS Dispensary";
+    }
     isDualProtocol = false;
   }
 
   if (secondaryReferral === referralDestination) {
-    secondaryReferral = referralDestination === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
+    secondaryReferral = referralDestination === "ESIC Hospital" ? "Govt District Hospital" : (referralDestination === "ESIS Dispensary" ? "104 Health Helpline" : "ESIS Dispensary");
   }
 
   const userTurnsCount = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;
@@ -2240,6 +2242,8 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     medication: detectedMedications,
     medications: detectedMedications,
     isReadyForSummary,
+    isSystemInbuiltFallback: false,
+    apiLimitReached: false,
     initialChiefComplaint: prevState.initialChiefComplaint || raw.initialChiefComplaint || finalCondition || "Health complaint",
     detectedLocation: raw.detectedLocation || prevState.detectedLocation || null,
     nearestFacility: raw.nearestFacility || prevState.nearestFacility || null,
@@ -2301,24 +2305,35 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       lng: detectedLoc.lng,
       pincode: detectedLoc.pincode,
       district: detectedLoc.district,
+      facilities: Array.isArray(prevState.facilities) ? prevState.facilities : [],
     });
     const rec = buildFacilityRecommendationMessage({
       locationName: detectedLoc.name,
+      pincode: detectedLoc.pincode,
       nearestDispensary: facs.nearestDispensary,
       nearestHospital: facs.nearestHospital,
       conditionLabel: initialChiefComplaint || prevState.suspectedCondition || "your condition",
       severity: prevState.severity || "Moderate",
     });
 
+    const chosenFacility = rec.facility || facs.nearestDispensary || facs.nearestHospital;
+
     return {
       probingQuestion: rec.text,
-      suggestedAnswers: rec.options,
+      suggestedAnswers: rec.options || [
+        "Thank you, noted",
+        "Connect me with 104 tele-doctor",
+        "Need ambulance / emergency help",
+        "View triage summary",
+      ],
       suspectedCondition: prevState.suspectedCondition || "Medical Consultation",
       isPsychiatric: Boolean(prevState.isPsychiatric),
       severity: prevState.severity || "Moderate",
       severityScore: prevState.severityScore || 5,
-      referralDestination: isDispensary(rec.facility) ? "ESIS Dispensary" : "ESIC Hospital",
-      referralReason: `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${rec.facility?.name}.`,
+      referralDestination: isDispensary(chosenFacility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralReason: chosenFacility?.name
+        ? `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`
+        : `Registered location (${detectedLoc.name}) for triage referral.`,
       is_dual_protocol: false,
       call_referral_secondary: null,
       redFlagsDetected: prevState.redFlagsDetected || [],
@@ -2332,8 +2347,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       isReferralReady: true,
       initialChiefComplaint,
       detectedLocation: detectedLoc,
-      nearestFacility: rec.facility,
-      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}. Routed to nearest facility: ${rec.facility?.name} (${rec.facility?.roadKm ? `${rec.facility.roadKm} km` : "nearby"}). Address: ${rec.facility?.address || "Assam"}.`,
+      nearestFacility: chosenFacility,
+      clinicalSummary: `Caller evaluated for ${initialChiefComplaint || "symptoms"}. Location registered: ${detectedLoc.name}${detectedLoc.pincode ? ` (${detectedLoc.pincode})` : ""}. Routed to nearest facility: ${chosenFacility?.name || "ESIS Dispensary / Hospital"} (${chosenFacility?.roadKm ? `${chosenFacility.roadKm} km` : "nearby"}). Address: ${chosenFacility?.address || "Assam"}.`,
     };
   }
 
@@ -2379,13 +2394,17 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       suspectedCondition: prevState.suspectedCondition || directIntent.suspectedConditionSuffix,
       isPsychiatric: directIntent.destination === "Psychological Counselling Department",
       severity:
-        directIntent.destination === "108 Ambulance" || directIntent.destination === "ESIC Hospital"
-          ? "High"
-          : prevState.severity || "Moderate",
+        directIntent.destination === "108 Ambulance"
+          ? "Severe"
+          : directIntent.destination === "ESIC Hospital"
+          ? "Moderate"
+          : prevState.severity || "Mild",
       severityScore:
-        directIntent.destination === "108 Ambulance" || directIntent.destination === "ESIC Hospital"
-          ? 9
-          : 6,
+        directIntent.destination === "108 Ambulance"
+          ? 10
+          : directIntent.destination === "ESIC Hospital"
+          ? 6
+          : 3,
       referralDestination: directIntent.destination,
       referralReason: directIntent.reason,
       redFlagsDetected: directIntent.destination === "108 Ambulance" ? ["Urgent ambulance transfer requested"] : [],
@@ -2447,7 +2466,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Acute Self-Harm / Traumatic Hemorrhage with Psychiatric Crisis",
       isPsychiatric: true,
-      severity: "High",
+      severity: "Severe",
       severityScore: 9,
       referralDestination: "108 Ambulance",
       referralReason: "Immediate traumatic hemorrhage requiring 108 Emergency Ambulance dispatch, alongside crisis mental health stabilization (Tele-MANAS 14416).",
@@ -2537,7 +2556,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       suggestedAnswers: currentStep.options,
       suspectedCondition: "Psychological Distress / Depression Crisis",
       isPsychiatric: true,
-      severity: "High",
+      severity: "Severe",
       severityScore: 9,
       referralDestination: "104 Health Helpline",
       referralReason: "Caller exhibits emotional distress / psychological crisis; priority transfer to 104 Health Helpline for 24x7 doctor & counseling support.",
@@ -2560,7 +2579,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const hour = istDate.getHours();
     const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const pregSeverity = isSeverePregnancy ? "High" : "Moderate";
+    const pregSeverity = isSeverePregnancy ? "Severe" : "Moderate";
     const pregSeverityScore = isSeverePregnancy ? 10 : 6;
     const pregReferral = isSeverePregnancy ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
 
@@ -2603,7 +2622,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const hour = istDate.getHours();
     const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const uncSeverity = isSevereUnconscious ? "High" : "Moderate";
+    const uncSeverity = isSevereUnconscious ? "Severe" : "Moderate";
     const uncSeverityScore = isSevereUnconscious ? 10 : 6;
     const uncReferral = isSevereUnconscious ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
 
@@ -2650,7 +2669,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const hour = istDate.getHours();
     const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const cutSeverity = isLifeThreateningBleed ? "High" : "Moderate";
+    const cutSeverity = isLifeThreateningBleed ? "Severe" : "Moderate";
     const cutSeverityScore = isLifeThreateningBleed ? 10 : 6;
     let cutReferral = isLifeThreateningBleed ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
 
@@ -2701,7 +2720,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const hour = istDate.getHours();
     const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const traumaSeverity = isLifeThreateningTrauma ? "High" : "Moderate";
+    const traumaSeverity = isLifeThreateningTrauma ? "Severe" : "Moderate";
     const traumaSeverityScore = isLifeThreateningTrauma ? 10 : 6;
     let traumaReferral = isLifeThreateningTrauma ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
     let traumaReason = isLifeThreateningTrauma
@@ -2805,7 +2824,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       /\b(crushing|radiating|left arm|baayein haath|sweat|pasina|gasping|unconscious)\b/i.test(allContext) &&
       !/\b(burning|acidity|gas|sharp|stinging|mild|tolerable)\b/i.test(cleanInput);
 
-    const cardiacSeverity = isLifeThreateningCardiac ? "High" : "Moderate";
+    const cardiacSeverity = isLifeThreateningCardiac ? "Severe" : "Moderate";
     const cardiacSeverityScore = isLifeThreateningCardiac ? 9 : 6;
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
@@ -2851,7 +2870,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const hour = istDate.getHours();
     const isNightAfter10PM = hour >= 22 || hour < 6;
 
-    const breathSeverity = isSevereBreathing ? "High" : "Moderate";
+    const breathSeverity = isSevereBreathing ? "Severe" : "Moderate";
     const breathSeverityScore = isSevereBreathing ? 10 : 6;
     let breathReferral = isSevereBreathing ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIS Dispensary");
     let breathReason = isSevereBreathing
@@ -2886,7 +2905,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   if (isSnakeBiteEmergency) {
     const hasReportedLocationOrSwelling = /\b(leg|foot|hand|arm|finger|ankle|pair|haath|swelling|sujan|pain|dard)\b/i.test(effectiveInput);
 
-    const snakeSeverity = "High";
+    const snakeSeverity = "Severe";
     const snakeSeverityScore = 10;
     const snakeReferral = "108 Ambulance";
     const snakeReason = "Snake bite is a critical life-threatening emergency requiring immediate 108 Emergency Ambulance dispatch for anti-snake venom (ASV) and casualty resuscitation.";
@@ -3060,7 +3079,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Bite is on hand / fingers",
           "Bite is on arm / wrist",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else if (!hasAsked(["swelling", "sujan", "numbness", "sunnta"])) {
       currentStep = {
@@ -3072,7 +3091,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Difficulty breathing or blurred vision",
           "No severe swelling, only mild local pain",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else {
       currentStep = {
@@ -3084,7 +3103,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Redness and bruising, marks unclear",
           "No visible marks, only pain",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     }
   } else if (!hasChestPainDenial && /\b(chest pain|chhati me dard|seene me dard|heart attack|angina|crushing chest|crushing pain in chest|pressure in chest|baayein haath me dard)\b/i.test(effectiveInput)) {
@@ -3099,7 +3118,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Burning sensation in chest / acidity feeling",
           "Dull heaviness with cold sweating and nausea",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else if (!hasAsked(["breath", "saans", "sweating", "pasina"])) {
       currentStep = {
@@ -3111,7 +3130,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Dizziness when standing up",
           "No breathlessness, only localized pain",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else {
       currentStep = {
@@ -3123,7 +3142,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "No prior medical history known",
           "Taking daily BP medications",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     }
   } else if (/\b(breath|saans|wheezing|asthma|dum ghutna|shortness)\b/i.test(effectiveInput)) {
@@ -3138,7 +3157,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "No, I can speak normally but feel breathless",
           "Manageable breathlessness with cough and congestion",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else if (!hasAsked(["cough", "khansi", "fever", "bukhar", "phlegm"])) {
       currentStep = {
@@ -3150,7 +3169,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Productive cough with yellow/green phlegm",
           "No fever, only chest tightness and wheezing",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else {
       currentStep = {
@@ -3162,7 +3181,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Do not have asthma or inhaler",
           "First time having this severe breathlessness",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     }
   } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(effectiveInput)) {
@@ -3177,7 +3196,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "4 to 7 days (Ongoing)",
           "More than a week (Persistent)",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else if (!hasAsked(["gasping", "breath", "saans", "haanf", "full sentences", "chills"])) {
       currentStep = {
@@ -3189,7 +3208,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Severe breathing difficulty, gasping for air (Emergency)",
           "High fever with severe body ache and headache",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else {
       currentStep = {
@@ -3217,7 +3236,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Swelling of lips, tongue, or difficulty breathing (Urgent)",
           "Mild itchy skin rash without swelling",
         ],
-        severity: /\b(lips|tongue|throat|breath|anaphylaxis|soojan|swelling)\b/i.test(effectiveInput) ? "High" : "Moderate",
+        severity: /\b(lips|tongue|throat|breath|anaphylaxis|soojan|swelling)\b/i.test(effectiveInput) ? "Severe" : "Moderate",
       };
     } else if (!hasAsked(["dawai", "cetirizine", "avil", "medicine", "antihistamine"])) {
       currentStep = {
@@ -3397,7 +3416,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Deformity or bone bend suspected",
           "Minor bruise with mild tenderness",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else {
       currentStep = {
@@ -3424,7 +3443,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Suspected fracture / limb deformity and swelling",
           "Minor scrape or superficial cut with mild pain",
         ],
-        severity: "High",
+        severity: "Severe",
       };
     } else if (!hasAsked(["cloth", "pressure", "dabav", "tetanus", "tika"])) {
       currentStep = {
@@ -3470,7 +3489,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
               "Severe stiffness with dizziness or headache",
               "Manageable discomfort with light neck movements",
             ],
-            severity: /cannot turn|severe|sharp|high|unbearable/i.test(cleanInput) ? "High" : "Moderate",
+            severity: /cannot turn|severe|sharp|high|unbearable/i.test(cleanInput) ? "Severe" : "Moderate",
           }
         : {
             title: "Spine & Mobility Assessment",
@@ -3482,7 +3501,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
               "Pain radiating down one leg / buttock",
               "Manageable soreness after rest",
             ],
-            severity: /cannot stand|severe|sharp|radiating/i.test(cleanInput) ? "High" : "Moderate",
+            severity: /cannot stand|severe|sharp|radiating/i.test(cleanInput) ? "Severe" : "Moderate",
           };
     } else if (!hasAsked(["radiat", "numbness", "tingling", "sunn", "jhanjhanahat", "fever", "bukhar", "spread", "phail"])) {
       currentStep = isNeck
@@ -3564,7 +3583,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
               "Moderate pain, can move fingers slightly",
               "Mild discomfort, movement is manageable",
             ],
-            severity: /cannot move|sharp pain|severe swelling/i.test(cleanInput) ? "High" : "Moderate",
+            severity: /cannot move|sharp pain|severe swelling/i.test(cleanInput) ? "Severe" : "Moderate",
           }
         : {
             title: "Mobility & Weight Bearing Assessment",
@@ -3575,7 +3594,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
               "Can walk with a limp / mild support",
               "Mild soreness, able to walk slowly",
             ],
-            severity: /cannot bear weight|sharp pain|severe swelling/i.test(cleanInput) ? "High" : "Moderate",
+            severity: /cannot bear weight|sharp pain|severe swelling/i.test(cleanInput) ? "Severe" : "Moderate",
           };
     } else if (!hasAsked(["injury", "twist", "chot", "moch", "accident", "fall"])) {
       currentStep = {
@@ -3724,8 +3743,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   );
 
   const isSevere =
+    currentStep.severity === "Severe" ||
     currentStep.severity === "High" ||
     /emergency|fracture|dvt|blood|vomit blood|unconscious|rigors|severe|chest pain|chhati|poison|snake|bite/i.test(cleanInput) ||
+    prevState.severity === "Severe" ||
     prevState.severity === "High";
 
   // If conversation has reached turn 5-7 without breaking flow and comorbidity hasn't been asked yet
@@ -3749,9 +3770,15 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(effectiveInput, isSevere ? 9 : 5, { symptom_notes: cleanInput }, prevState);
   const isLifeThreateningCrisis = ambulanceFallbackCheck.is108;
 
-  // STRICT RULE: If the case is NOT a genuine life-and-death emergency, DO NOT score it 9!
-  const severity = isLifeThreateningCrisis ? "High" : (isSevere && !isLifeThreateningCrisis ? "Moderate" : /mild|no pain/i.test(cleanInput) ? "Mild" : "Moderate");
-  const severityScore = isLifeThreateningCrisis ? 9 : (severity === "High" ? 7 : severity === "Moderate" ? 6 : 3);
+  // STRICT RULE: Strictly 3 clinical categories: Severe, Moderate, Mild
+  const severity = isLifeThreateningCrisis
+    ? "Severe"
+    : (isSevere && !isLifeThreateningCrisis
+      ? "Moderate"
+      : /mild|no pain/i.test(cleanInput)
+      ? "Mild"
+      : (prevState.severity || "Moderate"));
+  const severityScore = severity === "Severe" ? 10 : (severity === "Moderate" ? 6 : 3);
 
   let referralDestination;
   let referralReason;
@@ -3759,90 +3786,40 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   let isDualProtocol = false;
 
   const fallbackDispensaryStatus = getDispensaryOperatingStatus();
-  const isNacoHIV = /\b(hiv|aids|naco|1097|sexually transmitted|std|sti\b|gupt rog|sexual disease)\b/i.test(effectiveInput);
-
-  // Check IST time:
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-  const hour = istDate.getHours();
-  const currentMinutes = hour * 60 + istDate.getMinutes();
-  const isNightAfter10PM = hour >= 22 || hour < 6; // 10:00 PM to 6:00 AM IST
-  const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM IST
-
-  const isIpdEmergency = /\b(ipd|inpatient|admit|admission|admitted|icu|intensive care|emergency admit)\b/i.test(effectiveInput);
-  const hasEsicReferral = /\b(esic referral|referred by esic|referral letter|doctor referral|referred to tie.?up)\b/i.test(effectiveInput);
-  const isTieUpEligible = isIpdEmergency || hasEsicReferral || /\b(tie.?up|empanelled)\b/i.test(effectiveInput);
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(effectiveInput);
-  const hasPhysicalHealth =
-    isSevere ||
-    /\b(fever|bukhar|chest|chhati|heart|pain|dard|bleed|wound|cut|accident|injury|chot|vomit|ulti|loose motion|dast|fracture|burn|poison|snake|bite|breath|saans|cough|dizzy|chakkar|kamzori|stone|bp|headache|rash|infection)\b/i.test(effectiveInput);
 
-  if (isLifeThreateningCrisis) {
+  if (isLifeThreateningCrisis || severity === "Severe") {
     referralDestination = "108 Ambulance";
-    referralReason = ambulanceFallbackCheck.reason || "Acute life-and-death emergency requiring immediate 108 Ambulance dispatch.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (isPsychFallback) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Beneficiary requires psychological counseling or emotional support; transfer to 104 Health Helpline for 24x7 doctor & counselling support.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (isNacoHIV) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Confidential sexual health / HIV-AIDS counseling; transfer to 104 Health Helpline.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (isDistHospRequest) {
-    referralDestination = "Govt District Hospital";
-    referralReason = "Public healthcare outside ESIC network; guide to nearest Govt District Hospital.";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = false;
-  } else if (isTieUpEligible) {
-    referralDestination = "Nearest Tie-Up Facility";
-    referralReason = "Refer to nearest Empanelled Tie-Up Facility for cashless treatment under ESI guidelines.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (conditionLabel === "Dysmenorrhea / Menstrual Cramps") {
-    if (isNightAfter10PM || isOffHours || !fallbackDispensaryStatus.isOpen) {
-      referralDestination = "104 Health Helpline";
-      referralReason = "Night hours (after 10:00 PM): Manageable menstrual cramps (dysmenorrhea). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+    referralReason = ambulanceFallbackCheck.reason || "Severe acute emergency or trauma requiring immediate 108 Ambulance dispatch.";
+    secondaryReferral = isPsychFallback ? "104 Health Helpline" : "ESIC Hospital";
+    isDualProtocol = Boolean(isPsychFallback);
+  } else if (severity === "Moderate") {
+    if (isDistHospRequest) {
+      referralDestination = "Govt District Hospital";
+      referralReason = "Public healthcare outside ESIC network; guide to nearest Govt District Hospital.";
       secondaryReferral = "ESIC Hospital";
     } else {
-      referralDestination = "ESIS Dispensary";
-      referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS dispensary during regular OPD hours for doctor evaluation and antispasmodic medicines.";
-      secondaryReferral = "104 Health Helpline";
+      referralDestination = "ESIC Hospital";
+      referralReason = "Moderate clinical presentation; guide to nearest ESIC Hospital for doctor evaluation.";
+      secondaryReferral = "Govt District Hospital";
     }
     isDualProtocol = false;
-  } else if (isNightAfter10PM) {
-    // Night hours (after 10:00 PM) manageable case -> 104 Health Helpline
-    referralDestination = "104 Health Helpline";
-    referralReason = "Night hours (after 10:00 PM): Condition is manageable. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (isOffHours || !fallbackDispensaryStatus.isOpen) {
-    referralDestination = "104 Health Helpline";
-    referralReason = "Dispensary and hospital OPD hours are closed (10:00 AM – 4:00 PM). Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-    secondaryReferral = "ESIC Hospital";
-    isDualProtocol = false;
-  } else if (severity === "Mild" || /advice|phone doctor|guidance|information/i.test(effectiveInput)) {
-    referralDestination = "104 Health Helpline";
-    referralReason = `Connect with 104 Health Helpline for 24x7 tele-doctor consultation over the phone.`;
-    secondaryReferral = "ESIS Dispensary";
-    isDualProtocol = false;
-  } else if (fallbackDispensaryStatus.isOpen && severity !== "High") {
-    referralDestination = "ESIS Dispensary";
-    referralReason = "Daytime (10:00 AM – 4:00 PM): Routine primary care; visit nearest ESIS dispensary for doctor evaluation and medicines.";
-    secondaryReferral = "104 Health Helpline";
-    isDualProtocol = false;
   } else {
-    referralDestination = "ESIC Hospital";
-    referralReason = "Advanced specialized or secondary hospital care within ESIC network.";
-    secondaryReferral = "ESIS Dispensary";
+    // Mild
+    if (fallbackDispensaryStatus.isOpen && !/advice|phone doctor|guidance|information/i.test(effectiveInput)) {
+      referralDestination = "ESIS Dispensary";
+      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+      secondaryReferral = "104 Health Helpline";
+    } else {
+      referralDestination = "104 Health Helpline";
+      referralReason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+      secondaryReferral = "ESIS Dispensary";
+    }
     isDualProtocol = false;
   }
 
   if (secondaryReferral === referralDestination) {
-    secondaryReferral = referralDestination === "ESIC Hospital" ? "104 Health Helpline" : "ESIC Hospital";
+    secondaryReferral = referralDestination === "ESIC Hospital" ? "Govt District Hospital" : (referralDestination === "ESIS Dispensary" ? "104 Health Helpline" : "ESIS Dispensary");
   }
 
   const fallbackUserTurns = history.filter((m) => m.role === "user" || m.sender === "user").length + 1;

@@ -31,7 +31,7 @@ import {
   CalendarCheck,
 } from "lucide-react";
 import { toast } from "sonner";
-import { urgencyStyle } from "../lib/api";
+import { urgencyStyle, normalizeUrgency } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus, deduplicateRedFlags, extractCallerReportedProblems } from "../lib/triageEngine";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
@@ -203,17 +203,20 @@ export const ACTION_DIRECTIVES = {
 
 export function mapDestinationToDirectiveId(dest) {
   if (!dest || typeof dest !== "string") return "ESIS_DISPENSARY";
+  const s = dest.trim();
+  if (ACTION_DIRECTIVES[s]) return s;
   const d = dest.toLowerCase();
-  if (d.includes("108") || d.includes("ambulance")) return "CALL_108";
-  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("medical team") || d.includes("health helpline") || d.includes("advice") || d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("manas") || d.includes("psych") || d.includes("counsel")) return "TELE_104";
-  if (d.includes("tie") || d.includes("empanelled") || d.includes("swasti") || d.includes("ayursundra") || d.includes("dispur hospital") || d.includes("narayana") || d.includes("hayat") || d.includes("excelcare") || d.includes("down town")) return "TIE_UP_FACILITY";
-  if (d.includes("district") || d.includes("dist hosp") || d.includes("public health") || d.includes("civil hospital") || d.includes("immunization")) return "DIST_HOSPITAL";
-  if (d.includes("hospital") || d.includes("casualty")) return "ESIC_HOSPITAL";
-  if (d.includes("dispensary") || d.includes("clinic")) return "ESIS_DISPENSARY";
+  if (d.includes("108") || d.includes("ambulance") || d.includes("emergency dispatch")) return "CALL_108";
+  if (d.includes("104") || d.includes("tele-doctor") || d.includes("phone doctor") || d.includes("health helpline") || d.includes("advice") || d.includes("naco") || d.includes("1097") || d.includes("hiv") || d.includes("aids") || d.includes("manas") || d.includes("psych") || d.includes("counsel")) return "TELE_104";
+  if (d.includes("tie") || d.includes("empanelled") || d.includes("swasti") || d.includes("ayursundra") || d.includes("dispur hospital") || d.includes("narayana") || d.includes("hayat") || d.includes("excelcare") || d.includes("down town") || d.includes("city clinic")) return "TIE_UP_FACILITY";
+  if (d === "dist_hospital" || d.includes("dist_hosp") || d.includes("district") || d.includes("civil hospital") || d.includes("govt hospital") || d.includes("govt district") || d.includes("public health") || d.includes("b.p.civil") || d.includes("mch wing") || d.includes("j.s.b") || d.includes("chirang") || d.includes("nagaon") || d.includes("gmch") || d.includes("medical college") || d.includes("immunization")) return "DIST_HOSPITAL";
+  if (d === "esic_hospital" || d.includes("esic") || d.includes("beltola") || d.includes("tinsukia")) return "ESIC_HOSPITAL";
+  if (d.includes("dispensary") || d.includes("clinic") || d.includes("noonmati")) return "ESIS_DISPENSARY";
+  if (d.includes("hospital") || d.includes("casualty")) return "DIST_HOSPITAL";
   return "ESIS_DISPENSARY";
 }
 
-export function resolveDirectiveIds(t, result) {
+export function resolveDirectiveIds(t, result, activeFacilities = null) {
   const chatMsgs = result?.ekms_ai_context?.chatHistory || [];
   const callerChatText = Array.isArray(chatMsgs)
     ? chatMsgs
@@ -233,15 +236,28 @@ export function resolveDirectiveIds(t, result) {
   const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
   const currentMinutes = istDate.getHours() * 60 + istDate.getMinutes();
   const isOffHours = currentMinutes >= 960 || currentMinutes < 600; // 4:00 PM to 10:00 AM
+  const istHour = istDate.getHours();
+  const isMorningOrDaytime = istHour >= 6 && istHour < 18; // 6:00 AM to 6:00 PM
 
-  const severityScore = Number(t?.urgency_score || result?.intake?.severity_reported || result?.ekms_ai_context?.triageState?.severityScore || 0);
-  const isSeverity9OrHigh = severityScore >= 8 || t?.urgency_level === "Emergency";
+  const normSeverity = normalizeUrgency(
+    t?.urgency_level ||
+    result?.ekms_ai_context?.triageState?.severity ||
+    result?.intake?.severity_reported
+  );
 
-  const is108Ambulance =
+  // Use activeFacilities (from location search/pincode entry) if available, else fallback to result facilities
+  const facs = Array.isArray(activeFacilities) && activeFacilities.length > 0
+    ? activeFacilities
+    : (result?.nearest_facilities || result?.facilities || []);
+
+  const nearestEsic = facs.find((f) => isEsicHospital(f));
+  const isEsicWithin15Km = Boolean(nearestEsic && nearestEsic.distance_km != null && nearestEsic.distance_km <= 15);
+
+  const hasAcuteLifeThreat = Boolean(
     Boolean(t?.call_108) ||
-    /\b(108|ambulance)\b/i.test(t?.referral_destination || "") ||
-    /\b(108|ambulance)\b/i.test(t?.call_referral_primary || "") ||
-    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh)\b/i.test(allCallerText);
+    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh|not breathing|sans nahi|collapse|seizure|poison)\b/i.test(allCallerText)
+  );
+  const isManageableAtHospital = isMorningOrDaytime && !hasAcuteLifeThreat;
 
   // Caller explicit facility preferences
   const callerWantsHospital =
@@ -250,53 +266,57 @@ export function resolveDirectiveIds(t, result) {
     (result?.ekms_ai_context?.triageState?.referralDestination || "").toLowerCase().includes("hospital") ||
     /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|emergency casualty|casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(allCallerText);
 
-  const callerWantsDispensary =
-    !callerWantsHospital &&
-    ((t?.call_referral_primary || "").toLowerCase().includes("dispensary") ||
-    (t?.referral_destination || "").toLowerCase().includes("dispensary") ||
-    /\b(dispensary|esis dispensary|esi dispensary|local clinic|chhota hospital|dispensary jaana|dispensary jana|visit dispensary|visit esis dispensary)\b/i.test(allCallerText));
+  let orderedDirectiveIds = [];
 
-  let primaryDest = t?.call_referral_primary || t?.referral_destination;
-
-  if (is108Ambulance) {
-    primaryDest = "108 Ambulance";
-  } else if (callerWantsHospital) {
-    primaryDest = "ESIC Hospital";
-  } else if (callerWantsDispensary) {
-    primaryDest = "ESIS Dispensary";
-  } else if (isSeverity9OrHigh) {
-    // For severity 9 / 8-10 emergency, forward to hospital first (ESIC Hospital / Govt District Hospital)
-    primaryDest = (primaryDest && primaryDest.toLowerCase().includes("hospital")) ? primaryDest : "ESIC Hospital";
-  } else if (isNacoHIV || isPsych) {
-    primaryDest = "104 Health Helpline";
-  } else if (isOffHours) {
-    primaryDest = "104 Health Helpline";
-  } else if (!primaryDest) {
-    primaryDest = "ESIS Dispensary";
+  // Strictly prioritize according to user mandate and real-time 15km threshold
+  if (normSeverity === "Severe") {
+    if (isManageableAtHospital) {
+      if (isEsicWithin15Km) {
+        orderedDirectiveIds = ["ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
+      } else {
+        orderedDirectiveIds = ["DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
+      }
+    } else {
+      if (isEsicWithin15Km) {
+        orderedDirectiveIds = ["CALL_108", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "TELE_104", "ESIS_DISPENSARY"];
+      } else {
+        orderedDirectiveIds = ["CALL_108", "DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "TELE_104", "ESIS_DISPENSARY"];
+      }
+    }
+  } else if (normSeverity === "Moderate" || callerWantsHospital) {
+    if (isEsicWithin15Km) {
+      orderedDirectiveIds = ["ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIS_DISPENSARY", "TELE_104", "CALL_108"];
+    } else {
+      orderedDirectiveIds = ["DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "ESIS_DISPENSARY", "TELE_104", "CALL_108"];
+    }
+  } else {
+    // Mild
+    const dispensaryStatus = getDispensaryOperatingStatus();
+    if (dispensaryStatus.isOpen && !isOffHours) {
+      orderedDirectiveIds = ["ESIS_DISPENSARY", "TELE_104", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108"];
+    } else {
+      orderedDirectiveIds = ["TELE_104", "ESIS_DISPENSARY", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108"];
+    }
   }
 
-  let secondaryDest =
-    t?.call_referral_secondary ||
-    t?.secondary_referral_destination ||
-    (isSeverity9OrHigh ? "104 Health Helpline" : (isOffHours ? "ESIC Hospital" : "104 Health Helpline"));
-
-  if (isSeverity9OrHigh && (!secondaryDest || secondaryDest.includes("Hospital"))) {
-    secondaryDest = "104 Health Helpline";
+  // Ensure 6 unique IDs in order
+  const uniqueOrdered = Array.from(new Set(orderedDirectiveIds));
+  const allIds = ["ESIS_DISPENSARY", "TELE_104", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108"];
+  for (const id of allIds) {
+    if (!uniqueOrdered.includes(id)) uniqueOrdered.push(id);
   }
 
-  const primaryId = mapDestinationToDirectiveId(primaryDest);
-  let secondaryId = mapDestinationToDirectiveId(secondaryDest);
-
-  if (secondaryId === primaryId) {
-    secondaryId = primaryId === "ESIC_HOSPITAL" ? "TELE_104" : "ESIC_HOSPITAL";
-  }
+  const primaryId = uniqueOrdered[0] || "ESIS_DISPENSARY";
+  const secondaryId = uniqueOrdered[1] || "TELE_104";
 
   return {
     primaryId,
     secondaryId,
+    orderedDirectiveIds: uniqueOrdered,
     isDual: false,
-    primaryBadge: ACTION_DIRECTIVES[primaryId]?.badge || primaryDest,
-    secondaryBadge: ACTION_DIRECTIVES[secondaryId]?.badge || secondaryDest,
+    primaryBadge: ACTION_DIRECTIVES[primaryId]?.badge || primaryId,
+    secondaryBadge: ACTION_DIRECTIVES[secondaryId]?.badge || secondaryId,
+    isEsicWithin15Km,
   };
 }
 
@@ -489,7 +509,7 @@ export const TriageResultPanel = ({
 
     setIsSearchingFacilities(true);
     try {
-      const isSevere = t.urgency_level === "Emergency" || t.call_108;
+      const isSevere = normalizeUrgency(t.urgency_level) === "Severe" || t.call_108;
       const isPin = /^\d{6}$/.test(query);
 
       // Geocode using exact same method as EKMS Map: OpenStreetMap Nominatim (${query}, Assam, India)
@@ -610,7 +630,7 @@ export const TriageResultPanel = ({
     setIsPinModeActive(false);
     setIsSearchingFacilities(true);
     try {
-      const isSevere = t.urgency_level === "Emergency" || t.call_108;
+      const isSevere = normalizeUrgency(t.urgency_level) === "Severe" || t.call_108;
       const url = `/api/facilities/nearest?lat=${pinLoc.lat}&lon=${pinLoc.lng}&is_drop_pin=true&severe=${isSevere}`;
       const res = await fetch(url);
       if (res.ok) {
@@ -718,8 +738,8 @@ export const TriageResultPanel = ({
     searchedFacilities !== null ? searchedFacilities : (Array.isArray(facs) ? facs : []);
 
   const directiveIds = useMemo(() => {
-    return resolveDirectiveIds(t, result);
-  }, [t, result]);
+    return resolveDirectiveIds(t, result, effectiveRawFacs);
+  }, [t, result, effectiveRawFacs]);
 
   const [forwardedStatus, setForwardedStatus] = useState(() => {
     const caseRef = result?.case_ref || result?.case_id || result?.id;
@@ -869,24 +889,30 @@ export const TriageResultPanel = ({
   const secondaryDirective =
     ACTION_DIRECTIVES[directiveIds.secondaryId] || ACTION_DIRECTIVES.TELE_104;
 
-  // 6 Forwarding Options List: Primary first, Secondary second, then remaining 4
+  // 6 Forwarding Options List: strictly ordered according to 6-tier hierarchy
   const directiveList = useMemo(() => {
-    const pId = directiveIds.primaryId;
-    const sId = directiveIds.secondaryId;
+    const ordered = directiveIds.orderedDirectiveIds || [directiveIds.primaryId, directiveIds.secondaryId];
     const all = Object.values(ACTION_DIRECTIVES);
-    const primaryDir = all.find((d) => d.id === pId) || ACTION_DIRECTIVES.TELE_104;
-    const secondaryDir = all.find((d) => d.id === sId) || ACTION_DIRECTIVES.ESIC_HOSPITAL;
-    const remaining = all.filter((d) => d.id !== pId && d.id !== sId);
-    return [primaryDir, secondaryDir, ...remaining];
+    const result = [];
+    for (const id of ordered) {
+      const match = all.find((d) => d.id === id);
+      if (match && !result.some((r) => r.id === match.id)) {
+        result.push(match);
+      }
+    }
+    for (const d of all) {
+      if (!result.some((r) => r.id === d.id)) result.push(d);
+    }
+    return result;
   }, [directiveIds]);
 
   const [visibleFacilityCount, setVisibleFacilityCount] = useState(6);
   const [drawerVisibleCount, setDrawerVisibleCount] = useState(6);
 
-  // Reset manual directive when a new case is selected
+  // Reset manual directive when a new case is selected or location/pincode is searched
   useEffect(() => {
     setManualDirectiveId(null);
-  }, [result?.case_ref, result?.case_id, result?.id]);
+  }, [searchedFacilities, result?.case_ref, result?.case_id, result?.id]);
 
   // Reset pagination to 6 when search / filter / pin / directive changes
   useEffect(() => {
@@ -1357,9 +1383,11 @@ export const TriageResultPanel = ({
     );
   }, [callerProblems, t, result]);
 
-  const assessedSeverity =
+  const assessedSeverity = normalizeUrgency(
     t.assessed_severity ||
-    (t.urgency_score >= 8 ? "High" : t.urgency_score >= 5 ? "Moderate" : "Mild");
+    t.urgency_level ||
+    (t.urgency_score >= 8 ? "Severe" : t.urgency_score >= 5 ? "Moderate" : "Mild")
+  );
   let rawDuration =
     t.duration ||
     result?.intake?.duration ||
@@ -1369,9 +1397,7 @@ export const TriageResultPanel = ({
     rawDuration = "Reported today";
   }
   const durationText = rawDuration;
-  const severityAndDuration = assessedSeverity.includes("(")
-    ? `${assessedSeverity} · ${durationText}`
-    : `${assessedSeverity} (${t.urgency_score || 5}/10) · ${durationText}`;
+  const severityAndDuration = `${assessedSeverity} · ${durationText}`;
 
   // USER MANDATE: Near Urgent and Primary Referral 01 MUST show the exact same referral!
   const primaryReferralDest = activeDirective.badge;
@@ -1382,7 +1408,11 @@ export const TriageResultPanel = ({
     return reason;
   };
 
-  const primaryReferralReason = cleanReason(
+  const nearestDistHosp = effectiveRawFacs.find((f) => isGovtDistrictHospital(f));
+  const nearestEsic = effectiveRawFacs.find((f) => isEsicHospital(f));
+  const nearestTieUp = effectiveRawFacs.find((f) => isTieUp(f));
+
+  let primaryReferralReason = cleanReason(
     t.call_referral_primary_reason ||
     t.referral_reason ||
     activeDirective.summary ||
@@ -1390,18 +1420,42 @@ export const TriageResultPanel = ({
     ""
   );
 
+  if (activeDirective.id === "DIST_HOSPITAL") {
+    primaryReferralReason = nearestDistHosp
+      ? `Direct patient to ${nearestDistHosp.name} (${nearestDistHosp.distance_km != null ? `${nearestDistHosp.distance_km} km away` : "nearest"}) as primary secondary hospital care (ESIC hospital > 15km).`
+      : "Direct patient to nearest Govt District Hospital as primary secondary hospital care (ESIC hospital > 15km).";
+  } else if (activeDirective.id === "ESIC_HOSPITAL") {
+    primaryReferralReason = nearestEsic
+      ? `Direct patient to ${nearestEsic.name} (${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 15km"}) for clinical evaluation and hospital care.`
+      : "Direct patient to nearest ESIC Hospital for clinical evaluation and hospital care.";
+  }
+
   const effectiveSecondaryDirective =
     (secondaryDirective.id === activeDirective.id
-      ? (activeDirective.id === "ESIC_HOSPITAL" ? ACTION_DIRECTIVES.TELE_104 : ACTION_DIRECTIVES.ESIC_HOSPITAL)
-      : secondaryDirective) || (activeDirective.id === "TELE_104" ? ACTION_DIRECTIVES.ESIC_HOSPITAL : ACTION_DIRECTIVES.TELE_104);
+      ? (activeDirective.id === "ESIC_HOSPITAL" ? ACTION_DIRECTIVES.DIST_HOSPITAL : (activeDirective.id === "DIST_HOSPITAL" ? ACTION_DIRECTIVES.TIE_UP_FACILITY : ACTION_DIRECTIVES.TELE_104))
+      : secondaryDirective) || (activeDirective.id === "TELE_104" ? ACTION_DIRECTIVES.DIST_HOSPITAL : ACTION_DIRECTIVES.TELE_104);
 
   const secondaryReferralDest = effectiveSecondaryDirective.badge;
-  const secondaryReferralReason = cleanReason(
+  let secondaryReferralReason = cleanReason(
     t.call_referral_secondary_reason ||
     t.secondary_referral_reason ||
     effectiveSecondaryDirective?.summary ||
     ""
   );
+
+  if (effectiveSecondaryDirective.id === "TIE_UP_FACILITY") {
+    secondaryReferralReason = nearestTieUp
+      ? `Refer to empanelled ${nearestTieUp.name} (${nearestTieUp.distance_km != null ? `${nearestTieUp.distance_km} km away` : "nearest"}) for cashless hospital care.`
+      : "Refer to empanelled Tie-Up Hospital for cashless hospital care.";
+  } else if (effectiveSecondaryDirective.id === "DIST_HOSPITAL") {
+    secondaryReferralReason = nearestDistHosp
+      ? `Govt District Hospital (${nearestDistHosp.name}) for secondary hospital care backup.`
+      : "Govt District Hospital for secondary hospital care backup.";
+  } else if (effectiveSecondaryDirective.id === "ESIC_HOSPITAL") {
+    secondaryReferralReason = nearestEsic
+      ? `ESIC Hospital (${nearestEsic.name}) for specialized secondary hospital care.`
+      : "ESIC Hospital for specialized secondary hospital care.";
+  }
 
   const forwardedTeamStr = String(
     forwardedStatus?.targetTeamId ||
@@ -1635,7 +1689,7 @@ export const TriageResultPanel = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {directiveList.map((dir) => {
+                {directiveList.map((dir, dirIndex) => {
                   const isSelected = dir.id === activeDirective.id;
                   const isPrimary = dir.id === directiveIds.primaryId;
                   const isSecondary = dir.id === directiveIds.secondaryId;
@@ -1704,7 +1758,7 @@ export const TriageResultPanel = ({
                               <CheckCircle2 className="h-2.5 w-2.5" /> Forwarded
                             </span>
                           )}
-                          {isPrimary && (
+                          {dirIndex === 0 && (
                             <span
                               className={`rounded text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider shadow-2xs ${
                                 isSelected ? "bg-white/20 text-white border border-white/30" : "bg-emerald-700 text-white"
@@ -1713,7 +1767,7 @@ export const TriageResultPanel = ({
                               ⭐ Primary
                             </span>
                           )}
-                          {isSecondary && !isPrimary && (
+                          {dirIndex === 1 && (
                             <span
                               className={`rounded text-[9px] font-black px-1.5 py-0.5 uppercase tracking-wider shadow-2xs ${
                                 isSelected ? "bg-white/20 text-white border border-white/30" : "bg-blue-700 text-white"
@@ -1728,13 +1782,30 @@ export const TriageResultPanel = ({
                       {/* Main Title Row with Icon */}
                       <div className="flex items-center gap-2">
                         <span className="text-base shrink-0 leading-none">{dir.icon}</span>
-                        <p
-                          className={`text-sm font-extrabold tracking-tight leading-snug truncate ${
-                            isSelected ? "text-white" : "text-foreground"
-                          }`}
-                        >
-                          {dir.badge}
-                        </p>
+                        <div className="min-w-0">
+                          <p
+                            className={`text-sm font-extrabold tracking-tight leading-snug truncate ${
+                              isSelected ? "text-white" : "text-foreground"
+                            }`}
+                          >
+                            {dir.badge}
+                          </p>
+                          {dir.id === "DIST_HOSPITAL" && nearestDistHosp && (
+                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {nearestDistHosp.name} {nearestDistHosp.distance_km != null ? `(${nearestDistHosp.distance_km} km)` : ""}
+                            </p>
+                          )}
+                          {dir.id === "ESIC_HOSPITAL" && nearestEsic && (
+                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {nearestEsic.name} {nearestEsic.distance_km != null ? `(${nearestEsic.distance_km} km)` : ""}
+                            </p>
+                          )}
+                          {dir.id === "TIE_UP_FACILITY" && nearestTieUp && (
+                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                              {nearestTieUp.name} {nearestTieUp.distance_km != null ? `(${nearestTieUp.distance_km} km)` : ""}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       {/* Clinical routing note */}

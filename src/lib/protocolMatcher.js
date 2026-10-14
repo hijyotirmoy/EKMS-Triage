@@ -97,9 +97,13 @@ export function buildAdaptiveProtocolPromptSnippet(latestInput, fullHistoryText 
     const redFlagsList = (protocol.red_flags || []).slice(0, 5).join(", ");
     const patterns = (protocol.condition_mapping || []).map((m) => `   * When "${m.pattern}" -> Suspect: "${m.suspected}"`).join("\n");
 
+    const rawLvl = String(protocol.urgency_level || "").toLowerCase();
+    const normBaseline = rawLvl.includes("emerg") || rawLvl.includes("sev") ? "Severe" : (rawLvl.includes("urg") || rawLvl.includes("mod") ? "Moderate" : "Mild");
+    const routingTarget = normBaseline === "Severe" ? "108 Ambulance" : (normBaseline === "Moderate" ? "ESIC Hospital & Govt District Hospital" : "ESIS Dispensary & 104 Health Helpline");
+
     return `### CLINICAL INTELLIGENCE ANCHOR: ${protocol.condition_name} [${protocol.group_name}]
 - Matched Caller Signals: ${matchedKeywords.join(", ") || "Clinical symptoms"}
-- Urgency Baseline: ${protocol.urgency_level} -> Recommended Routing: ${protocol.forward_to}
+- Urgency Baseline: ${normBaseline} -> Recommended Routing: ${routingTarget}
 - Red-Flag Danger Signs to Watch: ${redFlagsList}
 - Relevant Probing Questions from Clinical Protocol:
 ${probingSample}

@@ -28,7 +28,7 @@ import {
   Ambulance,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, normalizeUrgency } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { normalizePhone } from "../lib/caseId";
 import {
@@ -304,10 +304,10 @@ export function getCleanComplaintSummary(c) {
     const sexStr = intake.sex ? `${intake.sex.toLowerCase()} caller` : "caller";
     const cond = triage.suspected_condition || triage.condition || intake.symptom || triage.primary_complaint || "Acute Health Condition";
     const cleanCond = cond.replace(/^\[[^\]]+\]\s*/, "").trim();
-    const sev = intake.severity_reported || triage.severity_score || (triage.urgency_level === "emergency" ? 9 : triage.urgency_level === "urgent" ? 6 : 3);
     const dur = intake.duration || triage.duration || "Less than 2 hours";
     const ref = triage.call_referral_primary || triage.primary_referral_destination || "104 Health Helpline";
-    summary = `${ageStr} ${sexStr} reports ${cleanCond} with severity ${sev}/10 (${dur}); guided to ${ref} for 24x7 tele-doctor consultation and medical advice.`;
+    const normLevel = normalizeUrgency(triage.urgency_level || intake.severity_reported);
+    summary = `${ageStr} ${sexStr} reports ${cleanCond} (${normLevel} · ${dur}); guided to ${ref} for medical consultation.`;
   }
 
   return summary;
@@ -564,11 +564,10 @@ export const CaseLogs = ({ refreshKey, onCaseDeleted }) => {
             onChange={(e) => setUrgency(e.target.value)}
             className={inputCls}
           >
-            <option value="all">All urgencies</option>
-            <option value="Emergency">Emergency</option>
-            <option value="Urgent">Urgent</option>
-            <option value="Routine">Routine</option>
-            <option value="Self-care">Self-care</option>
+            <option value="all">All Urgency</option>
+            <option value="Severe">Severe</option>
+            <option value="Moderate">Moderate</option>
+            <option value="Mild">Mild</option>
           </select>
         </div>
       </div>
@@ -1330,7 +1329,7 @@ function CaseConversationModal({ caseItem: initialCaseItem, allCases = [], onCas
                   </p>
                   <div className="flex flex-wrap gap-2 pt-1 text-[10px] opacity-90 font-medium">
                     {intake.duration && <span>Duration: {intake.duration}</span>}
-                    {intake.severity_reported && <span>Reported Severity: {intake.severity_reported}/10</span>}
+                    {intake.severity_reported && <span>Reported Severity: {normalizeUrgency(intake.severity_reported)}</span>}
                   </div>
                 </div>
               </div>

@@ -133,8 +133,7 @@ export const CallerHistorySection = ({
                       </span>
                     </div>
                     <UrgencyBadge
-                      level={item.urgency_level || item.urgency || "ROUTINE"}
-                      score={item.urgency_score ?? 4}
+                      level={item.urgency_level || item.urgency || "Mild"}
                       size="sm"
                     />
                   </div>

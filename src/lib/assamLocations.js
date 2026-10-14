@@ -389,10 +389,13 @@ export function detectAssamLocationFromText(rawText = "") {
 
   const text = rawText.toLowerCase().trim();
 
-  // 1. Direct 6-digit Assam Postal PIN Code (78xxxx)
-  const pinMatch = text.match(/\b(78\d{4})\b/);
+  // 1. Direct 6-digit Assam Postal PIN Code (78xxxx) or general 6-digit PIN code
+  const cleanStr = text.replace(/[^0-9a-z\s]/g, " ");
+  const pinMatch = cleanStr.match(/\b(78\d{4})\b/) || 
+                   cleanStr.match(/\b(78\d)\s+(\d{3})\b/) ||
+                   cleanStr.match(/\b(\d{6})\b/);
   if (pinMatch) {
-    const pin = pinMatch[1];
+    const pin = pinMatch[1] && pinMatch[2] ? `${pinMatch[1]}${pinMatch[2]}` : pinMatch[1] || pinMatch[0];
     if (assamPincodesData && assamPincodesData[pin]) {
       const pinInfo = assamPincodesData[pin];
       return {
@@ -410,7 +413,7 @@ export function detectAssamLocationFromText(rawText = "") {
         found: true,
         type: "pincode",
         pincode: pin,
-        name: `Assam PIN ${pin}`,
+        name: pin.startsWith("78") ? `Assam PIN ${pin}` : `PIN ${pin}`,
         district: "Assam",
         lat: 26.18,
         lng: 91.75,
@@ -456,6 +459,129 @@ export function detectAssamLocationFromText(rawText = "") {
   return { found: false };
 }
 
+export const DEFAULT_ASSAM_FACILITIES = [
+  {
+    id: "fac-default-disp-dispur",
+    name: "ESIS Dispensary, Dispur",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "Dispur, Near Last Gate, Guwahati, Assam 781006",
+    district: "Kamrup Metro",
+    pincode: "781006",
+    latitude: 26.138346,
+    longitude: 91.795364,
+    active: true,
+  },
+  {
+    id: "fac-default-hosp-beltola",
+    name: "ESIC Hospital Beltola",
+    facility_type: "Hospital",
+    scheme: "ESIC",
+    address: "ESIC Hospital Campus, Pir Ajan Fakir Rd, Khanapara / Beltola, Guwahati, Assam 781022",
+    district: "Kamrup Metro",
+    pincode: "781022",
+    latitude: 26.121752,
+    longitude: 91.808551,
+    active: true,
+  },
+  {
+    id: "fac-default-hosp-gmch",
+    name: "Gauhati Medical College & Hospital (GMCH)",
+    facility_type: "District Hospital",
+    scheme: "ESIC",
+    address: "Bhangagarh, Guwahati, Assam 781032",
+    district: "Kamrup Metro",
+    pincode: "781032",
+    latitude: 26.159599,
+    longitude: 91.767718,
+    active: true,
+  },
+  {
+    id: "fac-default-disp-uzanbazar",
+    name: "ESIS Dispensary, Uzanbazar",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "Uzanbazar, Guwahati, Assam 781003",
+    district: "Kamrup Metro",
+    pincode: "781003",
+    latitude: 26.183574,
+    longitude: 91.766831,
+    active: true,
+  },
+  {
+    id: "fac-default-disp-refinery",
+    name: "ESIS Dispensary, Guwahati Refinery",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "Noonmati, Guwahati, Assam 781020",
+    district: "Kamrup Metro",
+    pincode: "781020",
+    latitude: 26.178038,
+    longitude: 91.809707,
+    active: true,
+  },
+  {
+    id: "fac-default-disp-kalapahar",
+    name: "ESIS Dispensary, Kalapahar",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "P.O - Gopinath Nagar, (Opp. TB Hospital) Guwahati-781016",
+    district: "Kamrup Metro",
+    pincode: "781016",
+    latitude: 26.162778,
+    longitude: 91.746283,
+    active: true,
+  },
+  {
+    id: "fac-default-disp-narengi",
+    name: "ESIS Dispensary, Narengi",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "Patharquary, Narengi, Guwahati-781071",
+    district: "Kamrup Metro",
+    pincode: "781071",
+    latitude: 26.171657,
+    longitude: 91.829124,
+    active: true,
+  },
+  {
+    id: "fac-default-disp-jalukbari",
+    name: "ESIS Dispensary, Jalukbari",
+    facility_type: "Dispensary",
+    scheme: "ESIS",
+    address: "Jalukbari, Guwahati-781014",
+    district: "Kamrup Metro",
+    pincode: "781014",
+    latitude: 26.140986,
+    longitude: 91.641921,
+    active: true,
+  },
+  {
+    id: "fac-default-hosp-amch",
+    name: "Assam Medical College & Hospital (AMCH)",
+    facility_type: "District Hospital",
+    scheme: "ESIC",
+    address: "Borbheta, Dibrugarh, Assam 786002",
+    district: "Dibrugarh",
+    pincode: "786002",
+    latitude: 27.4728,
+    longitude: 94.9221,
+    active: true,
+  },
+  {
+    id: "fac-default-hosp-smch",
+    name: "Silchar Medical College & Hospital (SMCH)",
+    facility_type: "District Hospital",
+    scheme: "ESIC",
+    address: "Ghungoor, Silchar, Cachar, Assam 788014",
+    district: "Cachar",
+    pincode: "788014",
+    latitude: 24.7738,
+    longitude: 92.7937,
+    active: true,
+  },
+];
+
 /**
  * Calculates distance from coordinates to all medical facilities in the directory,
  * ranking by nearest ESIS Dispensary and nearest Hospital (ESIC / Govt District Hospital).
@@ -471,7 +597,9 @@ export function findNearestFacilitiesForLocation({
     return { nearestDispensary: null, nearestHospital: null, sorted: [] };
   }
 
-  const cleanFacs = facilities
+  const facilitiesPool = Array.isArray(facilities) && facilities.length > 0 ? facilities : DEFAULT_ASSAM_FACILITIES;
+
+  const cleanFacs = facilitiesPool
     .filter((f) => f && f.latitude != null && f.longitude != null)
     .map((f) => {
       const straightKm = calculateHaversineDistanceKm(lat, lng, Number(f.latitude), Number(f.longitude));
@@ -485,10 +613,10 @@ export function findNearestFacilitiesForLocation({
     .sort((a, b) => (a.roadKm || 9999) - (b.roadKm || 9999));
 
   // Find Nearest Dispensary (Primary Care OPD)
-  const nearestDispensary = cleanFacs.find((f) => isDispensary(f)) || null;
+  const nearestDispensary = cleanFacs.find((f) => isDispensary(f)) || cleanFacs[0] || null;
 
   // Find Nearest Hospital (ESIC Hospital or Govt District Hospital / Medical College)
-  const nearestHospital = cleanFacs.find((f) => isHospital(f)) || null;
+  const nearestHospital = cleanFacs.find((f) => isHospital(f)) || cleanFacs[0] || null;
 
   // Find Nearest Tie-Up Facility
   const nearestTieUp = cleanFacs.find((f) => isTieUp(f)) || null;
@@ -504,9 +632,11 @@ export function findNearestFacilitiesForLocation({
 /**
  * Constructs an empathetic, crystal-clear doctor guidance message
  * presenting the exact nearest facility, distance, address, and OPD timings.
+ * NEVER re-asks for PIN code once a location or PIN code has been identified!
  */
 export function buildFacilityRecommendationMessage({
   locationName,
+  pincode,
   nearestDispensary,
   nearestHospital,
   conditionLabel = "your symptoms",
@@ -514,20 +644,36 @@ export function buildFacilityRecommendationMessage({
 }) {
   const isHighSeverity = severity === "High";
   const primaryFacility = isHighSeverity && nearestHospital ? nearestHospital : nearestDispensary || nearestHospital;
+  const locDisplay = locationName || (pincode ? `PIN ${pincode}` : "your registered area");
+  const pinDisplay = pincode && !locDisplay.includes(pincode) ? ` (PIN: ${pincode})` : "";
 
-  if (!primaryFacility) {
+  if (primaryFacility) {
+    const isDisp = isDispensary(primaryFacility);
+    const facilityTypeLabel = isDisp ? "ESIS Dispensary" : "ESIC / Govt Hospital";
+    const distText = primaryFacility.roadKm ? ` (approx ${primaryFacility.roadKm.toFixed(1)} km away)` : "";
+
+    const englishText = `Thank you, we have registered your location near ${locDisplay}${pinDisplay}. Based on ${conditionLabel}, your recommended nearest ${facilityTypeLabel} is ${primaryFacility.name}${distText}, located at ${primaryFacility.address || "Assam"}. All details regarding your symptoms have been recorded for your triage assessment. You can review the recommended healthcare facilities in the Facilities section.`;
+    const hinglishText = `Dhanyawaad, humne aapka sthan (${locDisplay}${pinDisplay}) note kar liya hai. Aapke lakshano ke aadhar par sabse nazdeeki suvidha ${primaryFacility.name}${distText} hai. Aapki takleef aur swasthya ki saari jaankari triage jaanch ke liye darj kar li gayi hai. Kripya sujhayi gayi suvidhaon ke liye Facilities section dekhein.`;
+
     return {
-      text: `We have registered your location near ${locationName}. Would you please provide your exact 6-digit PIN code so we can confirm the nearest facility?`,
-      facility: null,
+      text: `Ask the IP: "${englishText}" (Hinglish: "${hinglishText}")`,
+      facility: primaryFacility,
+      options: [
+        "Thank you, noted",
+        "Connect me with 104 tele-doctor",
+        "Need ambulance / emergency help",
+        "View triage summary",
+      ],
     };
   }
 
-  const englishText = `Thank you, we have noted your location (${locationName}). All details regarding your symptoms and health complaint have been recorded for your triage assessment. You can review the recommended healthcare facilities in the Facilities section.`;
-  const hinglishText = `Dhanyawaad, humne aapka sthan (${locationName}) note kar liya hai. Aapki takleef aur swasthya ki saari jaankari triage jaanch ke liye darj kar li gayi hai. Kripya sujhayi gayi suvidhaon ke liye Facilities section dekhein.`;
+  // Graceful fallback when no specific facility matches, but location or PIN code is known
+  const englishText = `Thank you, we have registered your location near ${locDisplay}${pinDisplay}. All details regarding your symptoms and health complaint have been recorded for your triage assessment. You can review the recommended healthcare facilities in the Facilities section.`;
+  const hinglishText = `Dhanyawaad, humne aapka sthan (${locDisplay}${pinDisplay}) note kar liya hai. Aapki takleef aur swasthya ki saari jaankari triage jaanch ke liye darj kar li gayi hai. Kripya sujhayi gayi suvidhaon ke liye Facilities section dekhein.`;
 
   return {
     text: `Ask the IP: "${englishText}" (Hinglish: "${hinglishText}")`,
-    facility: primaryFacility,
+    facility: null,
     options: [
       "Thank you, noted",
       "Connect me with 104 tele-doctor",

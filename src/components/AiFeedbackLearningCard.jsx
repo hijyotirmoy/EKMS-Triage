@@ -15,12 +15,12 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { normalizeUrgency } from "@/lib/api";
 
 const URGENCY_OPTIONS = [
-  { value: "Emergency", label: "Emergency", color: "border-rose-400 bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200" },
-  { value: "Urgent", label: "Urgent", color: "border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200" },
-  { value: "Routine", label: "Routine", color: "border-blue-400 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200" },
-  { value: "Self-care", label: "Self-care", color: "border-emerald-400 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" },
+  { value: "Severe", label: "Severe", color: "border-rose-400 bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200" },
+  { value: "Moderate", label: "Moderate", color: "border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200" },
+  { value: "Mild", label: "Mild", color: "border-emerald-400 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" },
 ];
 
 const REFERRAL_OPTIONS = [
@@ -56,7 +56,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
   };
 
   // Form states for correction
-  const [selectedUrgency, setSelectedUrgency] = useState(result?.urgency_level || "Urgent");
+  const [selectedUrgency, setSelectedUrgency] = useState(normalizeUrgency(result?.urgency_level) || "Moderate");
   const [selectedReferral, setSelectedReferral] = useState(result?.referral_destination || "ESIS Dispensary");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [submittedMessage, setSubmittedMessage] = useState("");
@@ -65,7 +65,7 @@ export function AiFeedbackLearningCard({ result, callerIntake, onFeedbackSubmitt
   useEffect(() => {
     setStatus("idle");
     setSubmittedMessage("");
-    setSelectedUrgency(result?.urgency_level || "Urgent");
+    setSelectedUrgency(normalizeUrgency(result?.urgency_level) || "Moderate");
     setSelectedReferral(result?.referral_destination || "ESIS Dispensary");
     setClinicalNotes("");
   }, [result?.urgency_level, result?.referral_destination, result?.primary_complaint]);

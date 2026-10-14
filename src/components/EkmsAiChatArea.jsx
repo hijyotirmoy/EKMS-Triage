@@ -16,6 +16,8 @@ import {
   PhoneForwarded,
   ThumbsUp,
   ThumbsDown,
+  Clock,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractClinicalEntities } from "@/lib/clinicalAdaptiveEngine";
@@ -26,6 +28,7 @@ import {
   setCachedAiChatSession,
   clearCachedAiChatSession,
 } from "@/lib/clientCache";
+import { normalizeUrgency } from "@/lib/api";
 
 const INITIAL_SYMPTOM_SHORTCUTS = [
   { icon: "❤️", label: "Chest Pain / Pressure", text: "Chest pain and pressure" },
@@ -97,6 +100,21 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
   const [loading, setLoading] = useState(false);
   const [showSummaryCard, setShowSummaryCard] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState([]);
+  const [showApiLimitPopup, setShowApiLimitPopup] = useState(false);
+  const [recoverySeconds, setRecoverySeconds] = useState(0);
+
+  // Auto-countdown timer for API limit recovery
+  useEffect(() => {
+    let timer;
+    if (showApiLimitPopup && recoverySeconds > 0) {
+      timer = setInterval(() => {
+        setRecoverySeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [showApiLimitPopup, recoverySeconds]);
 
   const getActiveAgentLabel = () => {
     let agentId = currentAgent?.agentId;
@@ -379,6 +397,18 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
 
       const data = await response.json();
 
+      if (data.isSystemInbuiltFallback || data.apiLimitReached) {
+        setShowApiLimitPopup(true);
+        setRecoverySeconds(20);
+        toast.warning(
+          "LLM API Limit Reached — Switched to system in-built clinical probing questions. Please wait a few seconds for the limit to recover.",
+          { id: "ekms-api-limit-recovery", duration: 6000 }
+        );
+      } else {
+        // AI model responded directly without fallback
+        setShowApiLimitPopup(false);
+      }
+
       const userText = rawText.toLowerCase();
       const directIntent = detectDirectCallerReferralIntent(rawText);
       const userTurnsCount = updatedMsgsWithUser.filter((m) => m.sender === "user").length;
@@ -480,6 +510,12 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
       }
     } catch (err) {
       console.error("EKMS AI Chat Error:", err);
+      setShowApiLimitPopup(true);
+      setRecoverySeconds(20);
+      toast.warning(
+        "LLM API Limit Reached — Switched to system in-built clinical probing questions. Please wait a few seconds for the limit to recover.",
+        { id: "ekms-api-limit-recovery", duration: 6000 }
+      );
       // Fallback response if network disconnects
       const fallbackTime = Date.now();
       const fallbackReply = {
@@ -575,20 +611,17 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     clinicalState.suspectedCondition;
 
   const triageUrgency = triage?.urgency_level;
-  const triageScore = triage?.urgency_score;
+  const rawSev = triageUrgency || clinicalState.severity;
 
   let effectiveSeverityLabel = null;
-  let effectiveSeverityLevel = "Routine";
+  let effectiveSeverityLevel = "Mild";
 
   const userTurnsCount = messages.filter((m) => m && (m.sender === "user" || m.role === "user")).length;
   const isProbedEnough = userTurnsCount >= 3 || Boolean(triageResult);
 
-  if (triageUrgency) {
-    effectiveSeverityLabel = triageScore != null ? `${triageUrgency} ${triageScore}/10` : triageUrgency;
-    effectiveSeverityLevel = triageUrgency;
-  } else if (clinicalState.severity && messages.length > 0 && isProbedEnough) {
-    effectiveSeverityLabel = clinicalState.severity;
-    effectiveSeverityLevel = clinicalState.severity;
+  if (rawSev && (isProbedEnough || triageResult)) {
+    effectiveSeverityLevel = normalizeUrgency(rawSev);
+    effectiveSeverityLabel = effectiveSeverityLevel;
   }
 
   let effectiveReferral = null;
@@ -630,9 +663,9 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
             {effectiveSeverityLabel && (
               <span
                 className={`rounded-md px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border shadow-2xs ${
-                  effectiveSeverityLevel === "Emergency" || effectiveSeverityLevel === "High"
+                  effectiveSeverityLevel === "Severe"
                     ? "bg-rose-100 text-rose-950 border-rose-300 dark:bg-rose-950/40 dark:text-rose-200"
-                    : effectiveSeverityLevel === "Urgent" || effectiveSeverityLevel === "Moderate"
+                    : effectiveSeverityLevel === "Moderate"
                     ? "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/40 dark:text-amber-200"
                     : "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200"
                 }`}
@@ -659,6 +692,58 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
           </div>
         </div>
       </div>
+
+      {/* Rate Limit Recovery Notice Banner / Popup */}
+      {showApiLimitPopup && (
+        <div className="mx-3 my-2 rounded-2xl border-2 border-amber-500/50 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 backdrop-blur-md p-3 sm:p-3.5 shadow-md shadow-amber-500/10 animate-in fade-in slide-in-from-top-2 duration-300 transition-all shrink-0">
+          <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-start gap-2.5">
+              <div className="rounded-xl bg-amber-500/20 p-1.5 sm:p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5 border border-amber-500/40 animate-pulse">
+                <Clock className="h-4 w-4" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-amber-950 dark:text-amber-100">
+                    LLM API Limit Reached
+                  </span>
+                  <span className="rounded-full bg-amber-500/25 px-2 py-0.5 text-[9.5px] font-bold text-amber-800 dark:text-amber-300 border border-amber-500/40">
+                    System In-Built Probing Active
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-amber-950 dark:text-amber-200/90 leading-relaxed font-medium">
+                  AI model limit reached. Switched to system in-built clinical probing questions. Please wait a few seconds for the limit to recover.
+                </p>
+                {recoverySeconds > 0 ? (
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <div className="h-1.5 w-24 sm:w-36 rounded-full bg-amber-500/25 overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 rounded-full transition-all duration-1000 ease-linear"
+                        style={{ width: `${Math.max(5, ((20 - recoverySeconds) / 20) * 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-amber-800 dark:text-amber-300">
+                      Auto-recovering in {recoverySeconds}s...
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 pt-0.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>Limit window recovered — next query will connect to AI model</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowApiLimitPopup(false)}
+              className="rounded-lg p-1 text-amber-900/60 hover:text-amber-950 dark:text-amber-300/60 dark:hover:text-amber-100 hover:bg-amber-500/25 transition cursor-pointer shrink-0"
+              title="Dismiss notification"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 2. Chat Conversation Box */}
       <div

@@ -25,21 +25,22 @@ let memoryCases = [
       source_app: "console",
     },
     triage: {
-      urgency_level: "Emergency",
+      urgency_level: "Severe",
+      assessed_severity: "Severe",
       urgency_score: 10,
       confidence: "high",
       summary_en:
-        "48-year-old male reporting severe chest pain (9/10) with left arm tingling and cold sweating, onset less than 2 hours ago.",
+        "48-year-old male reporting acute chest pain (Severe · Less than 2 hours); requiring immediate 108 Emergency Ambulance dispatch for acute emergency/trauma care.",
       summary_hi:
-        "48 वर्षीय पुरुष को पिछले 2 घंटों से तेज़ सीने में दर्द (9/10), बाएं हाथ में झनझनाहट और ठंडा पसीना आ रहा है।",
+        "48 वर्षीय पुरुष को पिछले 2 घंटों से तेज़ सीने में दर्द (Severe); 108 Ambulance द्वारा आवश्यक मार्गदर्शन दिया गया।",
       reasoning:
-        "The combination of severe chest pain (self-rated 9/10), left arm tingling, and cold sweating are classic red-flag warning signs of an acute coronary event. Immediate emergency medical response via 108 is required.",
+        "The combination of severe chest pain, left arm tingling, and cold sweating are classic red-flag warning signs of an acute coronary event. Immediate emergency medical response via 108 is required.",
       red_flags: [
-        "Severe chest pain (9/10)",
+        "Severe chest pain",
         "Left arm tingling/radiation",
         "Cold sweating (diaphoresis)",
       ],
-      recommended_facility_type: "Nearest Government Hospital / 108 Ambulance",
+      recommended_facility_type: "108 Emergency Ambulance / ESIC Hospital Casualty",
       recommended_action:
         "Instruct caller to lie down, remain calm, and immediately dial 108 for an emergency ambulance.",
       call_108: true,
@@ -405,6 +406,37 @@ export async function deleteFacilities(ids = []) {
  * Subsequent requests (including page refreshes, searches, filters, pagination)
  * are served directly from server memory with 0 Firestore reads!
  */
+function normalizeUrgency(level) {
+  if (!level) return "Mild";
+  const s = String(level).trim().toLowerCase();
+  if (
+    s.includes("sev") ||
+    s.includes("emerg") ||
+    s.includes("high") ||
+    s === "10" ||
+    s === "9" ||
+    s === "8" ||
+    s.startsWith("10/") ||
+    s.startsWith("9/") ||
+    s.startsWith("8/")
+  ) {
+    return "Severe";
+  }
+  if (
+    s.includes("mod") ||
+    s.includes("urg") ||
+    s === "7" ||
+    s === "6" ||
+    s === "5" ||
+    s.startsWith("7/") ||
+    s.startsWith("6/") ||
+    s.startsWith("5/")
+  ) {
+    return "Moderate";
+  }
+  return "Mild";
+}
+
 export async function getCases(filters = {}) {
   const { urgency, q, since } = filters;
 
@@ -445,7 +477,11 @@ export async function getCases(filters = {}) {
   }
 
   return list.filter((c) => {
-    if (urgency && urgency !== "all" && c.triage?.urgency_level !== urgency) return false;
+    if (urgency && urgency !== "all") {
+      const targetNorm = normalizeUrgency(urgency);
+      const caseNorm = normalizeUrgency(c.triage?.urgency_level || c.urgency_level);
+      if (caseNorm !== targetNorm) return false;
+    }
     if (q) {
       const query = q.toLowerCase();
       const matchName = c.intake?.caller_name?.toLowerCase().includes(query);
@@ -601,10 +637,11 @@ export async function updateCase(caseRefOrId, updates) {
 }
 
 function recomputeCachedStats(casesList) {
-  const by_urgency = { Emergency: 0, Urgent: 0, Routine: 0, "Self-care": 0 };
+  const by_urgency = { Severe: 0, Moderate: 0, Mild: 0 };
   for (const c of casesList) {
-    const level = c.triage?.urgency_level;
-    if (level && by_urgency[level] !== undefined) {
+    const rawLevel = c.triage?.urgency_level || c.urgency_level;
+    const level = normalizeUrgency(rawLevel);
+    if (by_urgency[level] !== undefined) {
       by_urgency[level]++;
     }
   }

@@ -17,7 +17,7 @@ import {
   Home,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, normalizeUrgency } from "@/lib/api";
 import { AgentLogin } from "@/components/AgentLogin";
 import { CallManager } from "@/components/CallManager";
 import { getFirestoreDb } from "@/lib/firebase";
@@ -201,7 +201,7 @@ export function AppShell({ activePage = "home", children }) {
       if (event === "NEW_CASE") {
         setStats((prev) => {
           const currentTotal = prev?.total || 0;
-          const urgency = data?.triage?.urgency_level || "Routine";
+          const urgency = normalizeUrgency(data?.triage?.urgency_level) || "Mild";
           const newStats = {
             ...prev,
             total: currentTotal + 1,

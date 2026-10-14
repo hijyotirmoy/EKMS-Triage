@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { processDoctorConsultationTurn, buildLocalDoctorConsultationFallback } from "@/lib/doctorChatEngine";
+import { getFacilities } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,15 +22,24 @@ export async function POST(request) {
     const currentClinicalState = body.currentClinicalState || body.clinicalState || {};
     const currentTriage = body.currentTriage || {};
 
+    let facilities = [];
+    try {
+      facilities = await getFacilities();
+    } catch (e) {
+      console.warn("Could not load facilities in chat route:", e.message);
+    }
+
     state = {
       ...currentTriage,
       ...currentClinicalState,
+      facilities,
     };
 
     const doctorResult = await processDoctorConsultationTurn({
       message: inputPrompt,
       history,
       currentClinicalState: state,
+      facilities,
     });
 
     return NextResponse.json({
@@ -38,6 +48,8 @@ export async function POST(request) {
       answer: doctorResult.probingQuestion,
       options: doctorResult.suggestedAnswers,
       suggestedAnswers: doctorResult.suggestedAnswers,
+      isSystemInbuiltFallback: Boolean(doctorResult.isSystemInbuiltFallback),
+      apiLimitReached: Boolean(doctorResult.isSystemInbuiltFallback),
       suspectedCondition: doctorResult.suspectedCondition,
       differentialDiagnosis: doctorResult.differentialDiagnosis,
       severity: doctorResult.severity,
@@ -87,6 +99,8 @@ export async function POST(request) {
         answer: fallback.probingQuestion,
         options: fallback.suggestedAnswers,
         suggestedAnswers: fallback.suggestedAnswers,
+        isSystemInbuiltFallback: true,
+        apiLimitReached: true,
         suspectedCondition: fallback.suspectedCondition,
         severity: fallback.severity,
         severityScore: fallback.severity === "High" ? 9 : 5,

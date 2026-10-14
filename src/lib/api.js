@@ -9,31 +9,87 @@ export const api = axios.create({
   headers: { "X-API-Key": API_KEY },
 });
 
+export function normalizeUrgency(level) {
+  if (!level) return "Mild";
+  const s = String(level).trim().toLowerCase();
+  // Severe (Life-threatening / 108 Emergency)
+  if (
+    s.includes("sev") ||
+    s.includes("emerg") ||
+    s.includes("high") ||
+    s === "10" ||
+    s === "9" ||
+    s === "8" ||
+    s.startsWith("10/") ||
+    s.startsWith("9/") ||
+    s.startsWith("8/")
+  ) {
+    return "Severe";
+  }
+  // Moderate (Hospital evaluation / Urgent)
+  if (
+    s.includes("mod") ||
+    s.includes("urg") ||
+    s === "7" ||
+    s === "6" ||
+    s === "5" ||
+    s.startsWith("7/") ||
+    s.startsWith("6/") ||
+    s.startsWith("5/")
+  ) {
+    return "Moderate";
+  }
+  // Mild (Dispensary / 104 Helpline)
+  return "Mild";
+}
+
 export const URGENCY = {
-  Emergency: {
-    badge: "bg-red-50 text-red-700 border-red-300",
+  Severe: {
+    badge: "bg-red-50 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800",
     dot: "bg-red-500",
     bar: "bg-red-600",
-    label: "Immediate action — call 108",
+    label: "Severe — 108 Ambulance",
   },
-  Urgent: {
-    badge: "bg-amber-50 text-amber-800 border-amber-300",
+  Moderate: {
+    badge: "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800",
     dot: "bg-amber-500",
     bar: "bg-amber-500",
-    label: "Care within a few hours",
+    label: "Moderate — ESIC / Govt Hospital",
   },
-  Routine: {
-    badge: "bg-emerald-50 text-emerald-800 border-emerald-300",
+  Mild: {
+    badge: "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800",
     dot: "bg-emerald-500",
     bar: "bg-emerald-600",
-    label: "Dispensary / OPD in 1-3 days",
+    label: "Mild — 104 Helpline & ESIS Dispensary",
+  },
+  // Legacy aliases
+  Emergency: {
+    badge: "bg-red-50 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800",
+    dot: "bg-red-500",
+    bar: "bg-red-600",
+    label: "Severe — 108 Ambulance",
+  },
+  Urgent: {
+    badge: "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800",
+    dot: "bg-amber-500",
+    bar: "bg-amber-500",
+    label: "Moderate — ESIC / Govt Hospital",
+  },
+  Routine: {
+    badge: "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800",
+    dot: "bg-emerald-500",
+    bar: "bg-emerald-600",
+    label: "Mild — 104 Helpline & ESIS Dispensary",
   },
   "Self-care": {
-    badge: "bg-sky-50 text-sky-800 border-sky-300",
-    dot: "bg-sky-500",
-    bar: "bg-sky-500",
-    label: "Home care and monitoring",
+    badge: "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-800",
+    dot: "bg-emerald-500",
+    bar: "bg-emerald-600",
+    label: "Mild — 104 Helpline & ESIS Dispensary",
   },
 };
 
-export const urgencyStyle = (level) => URGENCY[level] || URGENCY.Routine;
+export const urgencyStyle = (level) => {
+  const norm = normalizeUrgency(level);
+  return URGENCY[norm] || URGENCY[level] || URGENCY.Mild;
+};

@@ -40,7 +40,7 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, normalizeUrgency } from "../lib/api";
 import { updateCaseInLocalCache, getCachedCases, getCachedCrmCallHistory } from "../lib/clientCache";
 import { broadcastEvent } from "../lib/broadcastSync";
 import { getCallerIdForPhone } from "../lib/callerId";
@@ -816,7 +816,7 @@ export function CaseHandoverForwarding({
               : (c.ekms_ai_context?.triageState?.redFlagsDetected || []),
             source: "helpline",
             sourceLabel: "104 Helpline Triage",
-            urgency_level: c.triage?.urgency_level || "Routine",
+            urgency_level: normalizeUrgency(c.triage?.urgency_level) || "Mild",
             urgency_score: c.triage?.urgency_score || 0,
             recommended_action: c.triage?.recommended_action || "",
           }));
@@ -836,7 +836,7 @@ export function CaseHandoverForwarding({
               red_flags: h.red_flags || [],
               source: "helpline",
               sourceLabel: "104 Helpline Triage",
-              urgency_level: h.urgency_level || "Routine",
+              urgency_level: normalizeUrgency(h.urgency_level) || "Mild",
               urgency_score: h.urgency_score || 0,
               recommended_action: h.recommended_action || h.navigation || "",
             });
@@ -2821,19 +2821,22 @@ ${historySection}`;
                                       </span>
                                     )}
 
-                                    {!isCrmMode && item.urgency_level && (
-                                      <span
-                                        className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                                          item.urgency_level === "EMERGENCY"
-                                            ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200"
-                                            : item.urgency_level === "URGENT"
-                                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
-                                            : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                                        }`}
-                                      >
-                                        {item.urgency_level}
-                                      </span>
-                                    )}
+                                    {!isCrmMode && item.urgency_level && (() => {
+                                      const norm = normalizeUrgency(item.urgency_level);
+                                      return (
+                                        <span
+                                          className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                                            norm === "Severe"
+                                              ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200"
+                                              : norm === "Moderate"
+                                              ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                                          }`}
+                                        >
+                                          {norm}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
 
                                   <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-medium text-muted-foreground">
