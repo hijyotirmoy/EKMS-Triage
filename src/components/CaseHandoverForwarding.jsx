@@ -1672,6 +1672,46 @@ ${historySection}`;
     selectedTeam,
   ]);
 
+  const activeBookingFacility = useMemo(() => {
+    if (lockedForwardFacilityName) {
+      return lockedFacilityObj || { name: lockedForwardFacilityName };
+    }
+    if (lockedBookedFacilityName) {
+      return lockedFacilityObj || { name: lockedBookedFacilityName };
+    }
+    if (isBookable && selectedFacility) {
+      return selectedFacility;
+    }
+    if (isBookable && availableFacilities.length > 0) {
+      return availableFacilities[0];
+    }
+    return null;
+  }, [
+    lockedForwardFacilityName,
+    lockedBookedFacilityName,
+    lockedFacilityObj,
+    isBookable,
+    selectedFacility,
+    availableFacilities,
+  ]);
+
+  const isDispensaryBooking = useMemo(() => {
+    if (selectedTeam?.id === "ESIS_DISPENSARY") return true;
+    if (!activeBookingFacility) {
+      return String(facilityDisplayName || "").toLowerCase().includes("dispensary");
+    }
+    const facType = String(activeBookingFacility.facility_type || "").toLowerCase();
+    const facName = String(activeBookingFacility.name || facilityDisplayName || "").toLowerCase();
+    return isDispensary(activeBookingFacility) || facType.includes("dispensary") || facName.includes("dispensary");
+  }, [selectedTeam, activeBookingFacility, facilityDisplayName]);
+
+  // When dispensary is selected, strictly enforce "General Medicine / Primary Care OPD" only
+  useEffect(() => {
+    if (isDispensaryBooking && apptDepartment !== "General Medicine / Primary Care OPD") {
+      setApptDepartment("General Medicine / Primary Care OPD");
+    }
+  }, [isDispensaryBooking, apptDepartment]);
+
   // Restore booked appointment if previously saved for this case
   useEffect(() => {
     if (typeof window !== "undefined" && caseRef && !(isFreshTriage || result?.is_fresh_triage)) {
@@ -1833,7 +1873,7 @@ ${historySection}`;
         facilityShortName: selectedTeam.shortName,
         facilityDistanceKm: selectedFacility?.distance_km ?? null,
         facilityDistrict: selectedFacility?.district ?? "",
-        department: apptDepartment,
+        department: isDispensaryBooking ? "General Medicine / Primary Care OPD" : apptDepartment,
         doctor: apptDoctor,
         date: apptDate,
         timeSlot: apptTimeSlot,
@@ -3252,17 +3292,21 @@ ${historySection}`;
                         OPD Department / Clinic
                       </label>
                       <select
-                        value={apptDepartment}
+                        value={isDispensaryBooking ? "General Medicine / Primary Care OPD" : apptDepartment}
                         onChange={(e) => setApptDepartment(e.target.value)}
                         className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-orange-500 transition cursor-pointer"
                       >
                         <option value="General Medicine / Primary Care OPD">General Medicine / Primary Care OPD</option>
-                        <option value="Diabetic & NCD Clinic">Diabetic & NCD Clinic</option>
-                        <option value="Pediatrics & Child Health">Pediatrics & Child Health</option>
-                        <option value="Emergency Casualty & Observation">Emergency Casualty & Observation</option>
-                        <option value="Dental OPD">Dental OPD</option>
-                        <option value="Orthopedics & Physical Medicine">Orthopedics & Physical Medicine</option>
-                        <option value="Obstetrics & Gynecology (OBG)">Obstetrics & Gynecology (OBG)</option>
+                        {!isDispensaryBooking && (
+                          <>
+                            <option value="Diabetic & NCD Clinic">Diabetic & NCD Clinic</option>
+                            <option value="Pediatrics & Child Health">Pediatrics & Child Health</option>
+                            <option value="Emergency Casualty & Observation">Emergency Casualty & Observation</option>
+                            <option value="Dental OPD">Dental OPD</option>
+                            <option value="Orthopedics & Physical Medicine">Orthopedics & Physical Medicine</option>
+                            <option value="Obstetrics & Gynecology (OBG)">Obstetrics & Gynecology (OBG)</option>
+                          </>
+                        )}
                       </select>
                     </div>
 

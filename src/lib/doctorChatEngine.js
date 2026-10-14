@@ -20,6 +20,7 @@ import {
   buildFacilityRecommendationMessage,
 } from "./assamLocations.js";
 import { isDispensary } from "./geo.js";
+import { buildAdaptiveProtocolPromptSnippet, matchProtocols } from "./protocolMatcher.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
@@ -549,6 +550,17 @@ export async function processDoctorConsultationTurn({
     "probing"
   );
 
+  const fullHistoryText = history
+    .filter((m) => m && (m.role === "user" || m.sender === "user"))
+    .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
+    .join(" ");
+
+  const adaptiveProtocolSnippet = buildAdaptiveProtocolPromptSnippet(
+    cleanInput,
+    fullHistoryText,
+    { ...currentClinicalState, initialChiefComplaint }
+  );
+
   // =========================================================================
   // ULTRA-FAST AI ENGINE CASCADE:
   // Priority 1: Groq Multi-Key Pool (qwen/qwen3.8-27b / llama-3.3-70b-versatile, ~150-350ms)
@@ -570,7 +582,11 @@ You must NEVER forget this starting point! Even when you probe for duration, ass
 CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
 1. EMPATHY & WARM REASSURANCE:
    - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
-2. THOROUGH ADAPTIVE CLINICAL PROGRESSION (DO NOT RUSH TO CONCLUDE):
+2. ADAPTIVE LISTENING & CALLER PIVOTS (HIGHEST PRIORITY):
+   - When answering a question, the caller may say something unexpected, introduce a NEW symptom, or describe a sudden worsening (e.g. asked about limb pain, but caller says 'no, but I threw up blood' or 'I fainted').
+   - NEVER ignore what the caller just reported! ADAPT IMMEDIATELY.
+   - Acknowledge the newly reported symptom, pivot your clinical focus to assess potential danger, and tailor your next question to this new information.
+3. THOROUGH ADAPTIVE CLINICAL PROGRESSION (DO NOT RUSH TO CONCLUDE):
    - Turn 1: Main complaint specifics, nature of symptoms, and severity (probe fever degree/chills, pain character, wound depth).
    - Turn 2: Duration & onset progression (how long has this been present, did it start suddenly today or a few days ago).
    - Turn 3: Associated symptoms & warning signs (breathing difficulty, nausea/vomiting, sweating, dizziness, rash).
@@ -578,14 +594,14 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
    - Turn 5: Medications taken so far (Paracetamol, painkiller, BP medicines) and any relief.
    - Turn 6+: Conclude clinical assessment with clear final referral and set "isReadyForSummary": true.
    - DO NOT set "isReadyForSummary": true on Turns 1, 2, 3, or 4 unless it is a life-threatening crisis (cardiac arrest, unconscious, massive hemorrhage)!
-3. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
-4. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
-5. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
-6. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
-7. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
-8. 108 EMERGENCY ROUTING: For accidents, head injury, heavy bleeding, cuts/injuries, or age > 50 with acute complications, set referralDestination to "108 Ambulance".
-9. CALLER FACILITY PREFERENCE: If caller expresses a preference to go to ESIC Hospital or casualty, respect this and set referralDestination to "ESIC Hospital".
-10. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")`,
+4. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
+5. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
+6. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
+7. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
+8. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
+9. 108 EMERGENCY ROUTING: For accidents, head injury, heavy bleeding, cuts/injuries, or age > 50 with acute complications, set referralDestination to "108 Ambulance".
+10. CALLER FACILITY PREFERENCE: If caller expresses a preference to go to ESIC Hospital or casualty, respect this and set referralDestination to "ESIC Hospital".
+11. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
