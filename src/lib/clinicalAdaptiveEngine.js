@@ -334,24 +334,26 @@ export function extractSeverityAndDuration(allText = "") {
     detectedDuration = "1+ years (Chronic)";
   }
   // 2. Months Extraction (e.g. 6 months, 3 months, 1 month, 2 mahine, pichle mahine se)
-  else if (/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:\+|-|\s)*)?(?:months?|mos?|mahine|mahina|maheene)\b/i.test(lower)) {
-    const monthMatch = lower.match(/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:\+|-|\s)*)?(?:months?|mos?|mahine|mahina|maheene)\b/i);
+  else if (/\b(more than a month|several months|many months|mahino se|months se)\b/i.test(lower)) {
+    detectedDuration = "More than a month";
+  } else if (/\b(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:\+|-|\s)*)(?:months?|mahine|mahina|maheene)\b/i.test(lower)) {
+    const monthMatch = lower.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch|chhah)\s*(?:months?|mahine|mahina|maheene)\b/i);
     const rawVal = monthMatch ? monthMatch[1] || "" : "";
     const numMap = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10", ek: "1", do: "2", teen: "3", char: "4", paanch: "5", chhah: "6" };
     const num = numMap[rawVal.toLowerCase()] || rawVal || "1";
-    detectedDuration = `${num} ${Number(num) === 1 ? "month" : "months"}`;
+    detectedDuration = Number(num) === 1 ? "1 month" : `${num} months`;
   } else if (/\b(since last month|pichle mahine se|few months)\b/i.test(lower)) {
     detectedDuration = "1-2 months";
   }
-  // 3. Weeks Extraction (e.g. 3 weeks, 2 weeks, 1 week, do hafte, several weeks)
-  else if (/\b(?:(\d+|one|two|three|four|ek|do|teen|char)\s*(?:\+|-|\s)*)?(?:weeks?|wks?|hafte|hafta)\b/i.test(lower)) {
+  // 3. Weeks Extraction (e.g. more than a week, 3 weeks, 2 weeks, 1 week, do hafte, several weeks)
+  else if (/\b(more than a week|several weeks|two weeks|do hafte|10 days|hafte se zyada|ek hafte se zyada)\b/i.test(lower)) {
+    detectedDuration = "More than a week";
+  } else if (/\b(?:(\d+|one|two|three|four|ek|do|teen|char)\s*(?:\+|-|\s)*)?(?:weeks?|wks?|hafte|hafta)\b/i.test(lower)) {
     const weekMatch = lower.match(/\b(?:(\d+|one|two|three|four|ek|do|teen|char)\s*(?:\+|-|\s)*)?(?:weeks?|wks?|hafte|hafta)\b/i);
     const rawVal = weekMatch ? weekMatch[1] || "" : "";
     const numMap = { one: "1", two: "2", three: "3", four: "4", ek: "1", do: "2", teen: "3", char: "4" };
     const num = numMap[rawVal.toLowerCase()] || rawVal || "1";
     detectedDuration = `${num} ${Number(num) === 1 ? "week" : "weeks"}`;
-  } else if (/\b(more than a week|ek hafte se|several weeks|10 days)\b/i.test(lower)) {
-    detectedDuration = "1-2 weeks";
   }
   // 4. Days Range (e.g. 4-7 days, 2-3 days)
   else if (/\b(\d+)\s*(?:to|-)\s*(\d+)\s*(?:days?|din)\b/i.test(lower)) {
@@ -2930,12 +2932,14 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     cleanDuration = "Since yesterday (1 day)";
   } else if (/\b(2[\s-]*3\s*(?:days|din)|two\s*(?:to|or|-)?\s*three\s*days|2\s*(?:days|din)|3\s*(?:days|din)|two\s*days|three\s*days|do\s*se\s*teen\s*din|do\s*teen\s*din|do\s*din|teen\s*din|parso|parso\s*se)\b/i.test(text)) {
     cleanDuration = "2-3 days";
+  } else if (/\b(more than a week|two weeks|10 days|bahut din|several weeks|do hafte|hafte se zyada|ek hafte se zyada)\b/i.test(text)) {
+    cleanDuration = "More than a week";
   } else if (/\b(4[\s-]*7\s*(?:days|din)|four\s*(?:to|or|-)?\s*seven\s*days|4\s*(?:days|din)|5\s*(?:days|din)|6\s*(?:days|din)|7\s*(?:days|din)|week|hafta|ek hafta|chaar\s*se\s*saat\s*din|char\s*se\s*saat\s*din|char\s*din|chaar\s*din|paanch\s*din|panch\s*din|chheh\s*din|che\s*din|saat\s*din)\b/i.test(text)) {
     cleanDuration = "4-7 days";
-  } else if (/\b(more than a week|two weeks|10 days|bahut din|several weeks)\b/i.test(text)) {
-    cleanDuration = "More than a week";
-  } else if (/\b(month|mahina|chronic|purani bimari)\b/i.test(text)) {
+  } else if (/\b(more than a month|several months|many months|months se|mahino se|2\+?\s*months?|do mahine se zyada)\b/i.test(text)) {
     cleanDuration = "More than a month";
+  } else if (/\b(1\s*month|one\s*month|ek\s*mahina|pichle\s*mahine\s*se|last\s*month)\b/i.test(text)) {
+    cleanDuration = "1 month";
   } else if (/\b(just|minutes|few minutes|achanak|sudden|< 2|< 1)\b/i.test(text)) {
     cleanDuration = "Less than 2 hours";
   } else if (detectedDuration && detectedDuration !== "Today") {
@@ -2959,10 +2963,10 @@ export function extractClinicalEntities(rawText = "", currentStage = "symptom", 
     const numMatch = text.match(/\b([1-9]|10)\s*(?:\/\s*10)?\b/);
     if (numMatch) {
       const val = parseInt(numMatch[1], 10);
-      if (val >= 7) {
+      if (val >= 8) {
         cleanSeverity = "High";
         severityScore = val;
-      } else if (val >= 4) {
+      } else if (val >= 5) {
         cleanSeverity = "Moderate";
         severityScore = val;
       } else {
@@ -3310,10 +3314,10 @@ export function detectSeverityAnswer(rawText = "", options = []) {
       const numMatch = lower.match(/\b([1-9]|10)\s*(?:\/\s*10)?\b/);
       if (numMatch) {
         const val = parseInt(numMatch[1], 10);
-        if (val >= 7) {
+        if (val >= 8) {
           label = "High";
           score = val;
-        } else if (val >= 4) {
+        } else if (val >= 5) {
           label = "Moderate";
           score = val;
         } else {
@@ -3377,19 +3381,22 @@ export function detectDurationAnswer(rawText = "", options = []) {
     return "2-3 days";
   }
 
-  // 6. 4-7 days
+  // 6. More than a week
+  if (/\b(more than a week|two weeks|10 days|bahut din|several weeks|do hafte|hafte se zyada|ek hafte se zyada)\b/i.test(lower)) {
+    return "More than a week";
+  }
+
+  // 7. 4-7 days
   if (/\b(4[\s-]*7\s*(?:days|din)|four\s*(?:to|or|-)?\s*seven\s*days|4\s*(?:days|din)|5\s*(?:days|din)|6\s*(?:days|din)|7\s*(?:days|din)|week|hafta|ek hafta|chaar\s*se\s*saat\s*din|char\s*se\s*saat\s*din|char\s*din|chaar\s*din|paanch\s*din|panch\s*din|chheh\s*din|che\s*din|saat\s*din)\b/i.test(lower)) {
     return "4-7 days";
   }
 
-  // 7. More than a week
-  if (/\b(more than a week|two weeks|10 days|bahut din|several weeks|do hafte)\b/i.test(lower)) {
-    return "More than a week";
-  }
-
   // 8. Month / Chronic
-  if (/\b(month|mahina|chronic|purani bimari|months|mahine)\b/i.test(lower)) {
+  if (/\b(more than a month|several months|many months|months se|mahino se|2\+?\s*months?|do mahine se zyada)\b/i.test(lower)) {
     return "More than a month";
+  }
+  if (/\b(1\s*month|one\s*month|ek\s*mahina|pichle\s*mahine\s*se|last\s*month)\b/i.test(lower)) {
+    return "1 month";
   }
 
   // 9. Generic number of hours/days/weeks/months
@@ -3409,7 +3416,9 @@ export function detectDurationAnswer(rawText = "", options = []) {
     if (unit.startsWith("w")) {
       return num === 1 ? "4-7 days" : "More than a week";
     }
-    return "More than a month";
+    if (unit.startsWith("m")) {
+      return num === 1 ? "1 month" : (num > 1 ? "More than a month" : "1 month");
+    }
   }
 
   return null;

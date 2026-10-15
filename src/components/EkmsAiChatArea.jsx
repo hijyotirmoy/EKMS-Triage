@@ -610,30 +610,30 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
     triageResult?.primary_complaint ||
     clinicalState.suspectedCondition;
 
-  const triageUrgency = triage?.urgency_level;
+  const triageUrgency = triage?.urgency_level || triage?.assessed_severity;
   const rawSev = triageUrgency || clinicalState.severity;
 
   let effectiveSeverityLabel = null;
   let effectiveSeverityLevel = "Mild";
 
-  const userTurnsCount = messages.filter((m) => m && (m.sender === "user" || m.role === "user")).length;
-  const isProbedEnough = userTurnsCount >= 3 || Boolean(triageResult);
-
-  if (rawSev && (isProbedEnough || triageResult)) {
+  if (rawSev) {
     effectiveSeverityLevel = normalizeUrgency(rawSev);
     effectiveSeverityLabel = effectiveSeverityLevel;
   }
 
   let effectiveReferral = null;
-  // Referral badge appears ONLY after 3-4 probing questions or upon formal triage completion
-  if (isProbedEnough && messages.length > 0) {
-    if (activeDirective?.badge) {
-      effectiveReferral = activeDirective.badge;
-    } else if (triage?.call_referral_primary || triage?.referral_destination) {
-      effectiveReferral = triage.call_referral_primary || triage.referral_destination;
-    } else if (clinicalState.referralDestination) {
-      effectiveReferral = formatReferralDestination(clinicalState.referralDestination);
-    }
+  if (triageResult) {
+    // When formal triage result exists, dynamically show its primary referral destination
+    effectiveReferral =
+      triage?.call_referral_primary ||
+      triage?.referral_destination ||
+      (activeDirective?.badge ? activeDirective.badge : null) ||
+      (clinicalState.referralDestination ? formatReferralDestination(clinicalState.referralDestination) : null);
+  } else if (clinicalState.referralDestination) {
+    // During live chat probing, update immediately on every caller turn
+    effectiveReferral = formatReferralDestination(clinicalState.referralDestination);
+  } else if (activeDirective?.badge && (!messages || !messages.length)) {
+    effectiveReferral = activeDirective.badge;
   }
 
   return (

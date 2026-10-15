@@ -1,4 +1,6 @@
 // Firebase & Unified Database Layer with Ultra-Low Read Architecture
+import fs from "fs";
+import path from "path";
 
 // In-memory local cache/fallback for instant zero-config launch and 0-read execution
 let memoryFacilities = [];
@@ -6,7 +8,32 @@ let isFacilitiesLoadedFromFirestore = false;
 let deletedFacilityIds = new Set();
 let facilitiesVersion = Date.now();
 
-let memoryCases = [
+function loadDiskCachedCases() {
+  try {
+    const cachePath = path.join(process.cwd(), "src", "data", "cases_cache.json");
+    if (fs.existsSync(cachePath)) {
+      const raw = fs.readFileSync(cachePath, "utf-8");
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length > 0) {
+        return list;
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to load local cases_cache.json:", e.message);
+  }
+  return null;
+}
+
+function saveDiskCachedCases(casesList) {
+  try {
+    const cachePath = path.join(process.cwd(), "src", "data", "cases_cache.json");
+    fs.writeFileSync(cachePath, JSON.stringify(casesList), "utf-8");
+  } catch (e) {
+    console.warn("Failed to save cases_cache.json:", e.message);
+  }
+}
+
+const fallbackSeedCases = [
   {
     id: "case-seed-1",
     case_ref: "CA0001AB01",
@@ -77,7 +104,11 @@ let memoryCases = [
   },
 ];
 
+const diskCases = loadDiskCachedCases();
+let memoryCases = diskCases && diskCases.length > 0 ? diskCases : fallbackSeedCases;
+
 let isCasesLoadedFromFirestore = false;
+let isFirestoreFetchInProgress = null;
 let cachedStats = null;
 let cachedStatsTimestamp = 0;
 
@@ -440,30 +471,50 @@ function normalizeUrgency(level) {
 export async function getCases(filters = {}) {
   const { urgency, q, since } = filters;
 
-  // Cold-boot load only once
-  if (!isCasesLoadedFromFirestore) {
-    const ctx = await getFirestoreContext();
-    if (ctx) {
+  // Background/cold-boot sync with Firestore
+  if (!isCasesLoadedFromFirestore && !isFirestoreFetchInProgress) {
+    const ctxPromise = getFirestoreContext();
+    isFirestoreFetchInProgress = (async () => {
       try {
-        let list = [];
-        if (ctx.type === "admin") {
-          const snap = await ctx.db.collection("cases").get();
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        } else {
-          const { collection, getDocs } = await import("firebase/firestore");
-          const snap = await getDocs(collection(ctx.db, "cases"));
-          list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
-        list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-        if (list.length > 0) {
-          memoryCases = list;
+        const ctx = await ctxPromise;
+        if (ctx) {
+          let list = [];
+          if (ctx.type === "admin") {
+            const snap = await ctx.db.collection("cases").get();
+            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } else {
+            const { collection, getDocs } = await import("firebase/firestore");
+            const snap = await getDocs(collection(ctx.db, "cases"));
+            list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          }
+          if (list.length > 0) {
+            list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            const sanitizedList = list.map((c) => {
+              if (Array.isArray(c.nearest_facilities) && c.nearest_facilities.length > 5) {
+                return { ...c, nearest_facilities: c.nearest_facilities.slice(0, 5) };
+              }
+              return c;
+            });
+            const existingIds = new Set(sanitizedList.map((c) => String(c.case_ref || c.id)));
+            const recentUnsynced = memoryCases.filter((c) => !existingIds.has(String(c.case_ref || c.id)));
+            memoryCases = [...recentUnsynced, ...sanitizedList];
+            isCasesLoadedFromFirestore = true;
+            saveDiskCachedCases(memoryCases);
+            recomputeCachedStats(memoryCases);
+          }
         }
       } catch (e) {
         console.warn("Firestore cold-boot cases fetch notice:", e.message);
+      } finally {
+        isFirestoreFetchInProgress = null;
       }
+    })();
+
+    // Only if memoryCases has only 1 case (seed) and no disk cache was loaded, wait up to 8s
+    if (memoryCases.length <= 1) {
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 8000));
+      await Promise.race([isFirestoreFetchInProgress, timeoutPromise]);
     }
-    isCasesLoadedFromFirestore = true;
-    recomputeCachedStats(memoryCases);
   }
 
   let list = memoryCases;
@@ -544,26 +595,32 @@ export async function getCasesByPhone(phone) {
  * Immediately prepends to server memory cache.
  */
 export async function saveCase(caseData) {
-  const ctx = await getFirestoreContext();
-  if (ctx) {
+  // Prepend directly to in-memory cache (instant 0-latency execution)
+  memoryCases = memoryCases.filter((c) => (c.case_ref !== caseData.case_ref) && (c.id !== caseData.id));
+  memoryCases.unshift(caseData);
+  saveDiskCachedCases(memoryCases);
+  recomputeCachedStats(memoryCases);
+
+  // Background persist to Firestore without delaying the API response
+  (async () => {
     try {
+      const ctx = await getFirestoreContext();
+      if (!ctx) return;
+      // Sanitize undefined fields to null or omit them so Firestore client SDK doesn't reject
+      const sanitized = JSON.parse(JSON.stringify(caseData, (k, v) => (v === undefined ? null : v)));
       if (ctx.type === "admin") {
-        const docRef = await ctx.db.collection("cases").add(caseData);
+        const docRef = await ctx.db.collection("cases").add(sanitized);
         caseData.id = docRef.id;
       } else {
         const { collection, addDoc } = await import("firebase/firestore");
-        const docRef = await addDoc(collection(ctx.db, "cases"), caseData);
+        const docRef = await addDoc(collection(ctx.db, "cases"), sanitized);
         caseData.id = docRef.id;
       }
     } catch (e) {
       console.warn("Could not save case to Firestore:", e.message);
     }
-  }
+  })().catch(() => {});
 
-  // Prepend directly to in-memory cache (0 reads needed!)
-  memoryCases = memoryCases.filter((c) => (c.case_ref !== caseData.case_ref) && (c.id !== caseData.id));
-  memoryCases.unshift(caseData);
-  recomputeCachedStats(memoryCases);
   return caseData;
 }
 
@@ -583,6 +640,7 @@ export async function updateCase(caseRefOrId, updates) {
     }
     return c;
   });
+  saveDiskCachedCases(memoryCases);
 
   // 2. Persist to Firestore with minimum reads (exact doc update or 1 query)
   const ctx = await getFirestoreContext();
@@ -696,6 +754,7 @@ export async function deleteCase(caseRef) {
   }
 
   memoryCases = memoryCases.filter((c) => c.case_ref !== caseRef && c.id !== caseRef);
+  saveDiskCachedCases(memoryCases);
   recomputeCachedStats(memoryCases);
   return true;
 }
@@ -715,7 +774,7 @@ export async function deleteCases(caseRefs = []) {
  * 0 Firestore reads on all subsequent calls!
  */
 export async function getCaseStats() {
-  if (!isCasesLoadedFromFirestore) {
+  if (memoryCases.length <= 1 && !isCasesLoadedFromFirestore) {
     await getCases();
   }
   return recomputeCachedStats(memoryCases);

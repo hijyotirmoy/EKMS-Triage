@@ -5,13 +5,19 @@ import {
   buildLearnedPromptSnippet,
   applyAlgorithmicFeedbackOverrides,
 } from "./feedbackLearningEngine.js";
+import {
+  calculateClinicalSeverityScore,
+  mapScoreToUrgency,
+  mapUrgencyToBaselineScore,
+  validateCallerMentionedDuration,
+} from "./clinicalScoring.js";
 
 /**
  * Evaluates whether ESIS Dispensaries are currently open in Assam (IST UTC+5:30).
  * Operating hours:
  * - Monday to Friday: 10:00 AM to 4:00 PM.
- * - 1st & 3rd Saturday: 10:00 AM to 12:00 PM.
- * - Closed: Sunday, 2nd & 4th (& 5th) Saturday.
+ * - 1st, 3rd & 5th Saturday: 10:00 AM to 12:00 PM.
+ * - Closed: Sunday, 2nd & 4th Saturday.
  */
 export function getDispensaryOperatingStatus(date = new Date()) {
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -22,9 +28,13 @@ export function getDispensaryOperatingStatus(date = new Date()) {
   const minute = istDate.getMinutes();
   const currentMinutes = hour * 60 + minute;
 
-  // 1st Saturday is date 1-7, 3rd Saturday is date 15-21
-  const is1stOr3rdSaturday = day === 6 && ((dateOfMonth >= 1 && dateOfMonth <= 7) || (dateOfMonth >= 15 && dateOfMonth <= 21));
-  const is2ndOr4thOr5thSaturday = day === 6 && !is1stOr3rdSaturday;
+  // 1st Saturday is date 1-7, 3rd Saturday is date 15-21, 5th Saturday is date 29-31
+  const is1st3rdOr5thSaturday =
+    day === 6 &&
+    ((dateOfMonth >= 1 && dateOfMonth <= 7) ||
+      (dateOfMonth >= 15 && dateOfMonth <= 21) ||
+      (dateOfMonth >= 29 && dateOfMonth <= 31));
+  const is2ndOr4thSaturday = day === 6 && !is1st3rdOr5thSaturday;
   const isSunday = day === 0;
 
   let isOpen = false;
@@ -33,16 +43,16 @@ export function getDispensaryOperatingStatus(date = new Date()) {
   if (isSunday) {
     isOpen = false;
     reason = "ESIS Dispensaries are closed on Sunday.";
-  } else if (is2ndOr4thOr5thSaturday) {
+  } else if (is2ndOr4thSaturday) {
     isOpen = false;
     reason = "ESIS Dispensaries are closed on 2nd & 4th Saturdays.";
-  } else if (is1stOr3rdSaturday) {
-    // 1st & 3rd Saturday: Open 10:00 AM (600) to 12:00 PM (720)
+  } else if (is1st3rdOr5thSaturday) {
+    // 1st, 3rd & 5th Saturday: Open 10:00 AM (600) to 12:00 PM (720)
     isOpen = currentMinutes >= 600 && currentMinutes < 720;
     if (currentMinutes < 600) {
-      reason = "ESIS Dispensaries open at 10:00 AM today (1st & 3rd Saturday hours: 10:00 AM – 12:00 PM).";
+      reason = "ESIS Dispensaries open at 10:00 AM today (1st, 3rd & 5th Saturday hours: 10:00 AM – 12:00 PM).";
     } else if (currentMinutes >= 720) {
-      reason = "ESIS Dispensaries closed for the day at 12:00 PM (1st & 3rd Saturday hours: 10:00 AM – 12:00 PM).";
+      reason = "ESIS Dispensaries closed for the day at 12:00 PM (1st, 3rd & 5th Saturday hours: 10:00 AM – 12:00 PM).";
     }
   } else {
     // Monday to Friday: Open 10:00 AM (600) to 4:00 PM (960)
@@ -58,12 +68,12 @@ export function getDispensaryOperatingStatus(date = new Date()) {
 
   return {
     isOpen,
-    isWeekend: isSunday || is2ndOr4thOr5thSaturday,
+    isWeekend: isSunday || is2ndOr4thSaturday,
     isSaturday: day === 6,
-    is1stOr3rdSaturday,
+    is1st3rdOr5thSaturday,
     isNight,
     reason,
-    operatingHoursText: "Mon–Fri: 10:00 AM – 4:00 PM · 1st & 3rd Sat: 10:00 AM – 12:00 PM",
+    operatingHoursText: "Mon–Fri: 10:00 AM – 4:00 PM · 1st, 3rd & 5th Sat: 10:00 AM – 12:00 PM",
   };
 }
 
@@ -125,7 +135,8 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
 
   // Explicit caller negations & symptom denials: e.g. "no accident", "no injury", "bleeding stopped", "vision is clear"
   const isAccidentDenied = /\b(no\s+accident|not\s+an\s+accident|no\s+injury|not\s+injured|without\s+injury|accident\s+nahi|durghatna\s+nahi)\b/i.test(rawText);
-  const bleedingControlled = /\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut|no bleeding|bleeding nahi)\b/i.test(rawText);
+  const isSuperficialOrMinorCut = /\b(superficial|superficial cut|minor cut|small cut|paper cut|shallow cut|antiseptic cream|applied.*cream|cream.*applied|applied.*ointment|bandaid|bandage|scrape|scratch|scratched|chhoti chot|halki chot|minor injury|small scratch)\b/i.test(rawText);
+  const bleedingControlled = isSuperficialOrMinorCut || /\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut|no bleeding|bleeding nahi|no active bleeding|stopped bleeding)\b/i.test(rawText);
   const canSpeakNormally = (
     /\b(can\s+speak\s+normally|able\s+to\s+speak\s+normally|speaking\s+normally|no\s+gasping|not\s+gasping|not\s+turning\s+blue)\b/i.test(rawText) ||
     (/\b(can\s+speak|able\s+to\s+speak)\b/i.test(rawText) && !/\b(unable|cannot|can'?t|not\s+able|difficulty)\b/i.test(rawText))
@@ -147,33 +158,30 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
   // ONLY dispatch 108 for STRICT LIFE-AND-DEATH CRISES:
 
   // 1. Uncontrollable spurting / arterial bleeding, heavy bleeding, deep cuts (hand, finger, limb)
-  const hasUncontrollableBleeding = !bleedingControlled && !isAccidentDenied && (
+  const hasUncontrollableBleeding = !bleedingControlled && !isSuperficialOrMinorCut && !isAccidentDenied && (
     /\b(spurting\s*bleed\w*|arterial\s*bleed\w*|heavy\s*bleed\w*|massive\s*bleed\w*|amputation|crushed\s*limb|profuse\s*bleed\w*)\b/i.test(affirmativeText) ||
-    (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|heavy\s*cut|hand\s*cut|finger\s*cut|limb\s*cut|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(bleed\w*|khoon|heavy|deep|gehra|cut|wound)\b/i.test(affirmativeText)) ||
+    (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|heavy\s*cut|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(bleed\w*|khoon|heavy|deep|gehra|cut|wound)\b/i.test(affirmativeText) && /\b(spurting|uncontrolled|heavy|continuous|bhaari|ruk nahi)\b/i.test(affirmativeText)) ||
     /\b(heavy active bleeding|cannot stop bleeding|bleeding continuously|tez khoon|bahut khoon|bhaari khoon)\b/i.test(affirmativeText)
   );
 
   // 1b. Workplace Injury / Industrial / Machine / Hand & Finger Heavy Cut
-  const hasWorkplaceInjury = !isAccidentDenied && (
-    /\b(workplace injury|factory injury|industrial accident|machine cut|heavy cut|deep cut.*(?:hand|finger|arm|leg)|finger cut|hand cut|finger heavy cut|hand finger|ungli kat gayi|haath kat gaya|kat gaya|amputation|crushed finger|crushed hand|heavy wound)\b/i.test(affirmativeText)
+  const hasWorkplaceInjury = !isAccidentDenied && !isSuperficialOrMinorCut && !bleedingControlled && (
+    /\b(industrial accident|machine amputation|heavy machine crush|amputation|crushed finger|crushed hand|severed limb|severed finger|industrial heavy trauma)\b/i.test(affirmativeText) ||
+    (/\b(workplace injury|factory injury)\b/i.test(affirmativeText) && /\b(crushed|amputation|heavy bleeding|unconscious|deep laceration)\b/i.test(affirmativeText))
   );
 
   // 1c. Head Injury / Concussion / Trauma to Head
-  const hasHeadInjury = !isAccidentDenied && (
-    /\b(head injury|head trauma|head wound|hit (?:my|the|his|her)?\s*head|sar me chot|sar par chot|sir me chot|sir par chot|head bleeding|skull injury|concussion|head cut)\b/i.test(affirmativeText)
+  const hasHeadInjury = !isAccidentDenied && !isSuperficialOrMinorCut && (
+    /\b(head trauma|hit (?:my|the|his|her)?\s*head.*(?:unconscious|vomit|dizzy|concussion)|sar me chot.*(?:behosh|ulti|chakkar)|skull injury|skull fracture|concussion|heavy head bleeding)\b/i.test(affirmativeText)
   );
 
   // 1d. Any Road / Vehicular / Fall Accident
-  const hasAccident = !isAccidentDenied && (
-    /\b(accident|road accident|car accident|bike accident|vehicle accident|vehicular|motorcycle accident|hit by|durghatna|fall from height|fall down the stairs)\b/i.test(affirmativeText)
+  const hasAccident = !isAccidentDenied && !isSuperficialOrMinorCut && (
+    /\b(serious road accident|severe car accident|bike collision|vehicle collision|hit by car|durghatna.*(?:behosh|fracture|bleed)|fall from height|fall from roof)\b/i.test(affirmativeText)
   );
 
-  // 1e. Age > 50 with severe presentation or comorbidities
+  // 1e. Elderly comorbidities (managed at Hospital Casualty / OPD, NOT 108 Ambulance unless acute life threat)
   const callerAge = parseInt(intake?.age || tState?.age || "0", 10) || 0;
-  const isElderlyHighRisk = (callerAge >= 50 || /\b(age\s*(?:is\s*)?(?:5\d|[6-9]\d|100)|over 50|50\s*(?:plus|saal|years?)|60\s*(?:plus|saal|years?))\b/i.test(rawText)) && (
-    severity >= 7 ||
-    /\b(severe|critical|acute|unbearable|high fever|chest|chhati|heart|breathlessness|stroke|bp|sugar|diabet|kidney|paralysis)\b/i.test(affirmativeText)
-  );
 
   // 2. Severe Respiratory Failure / Breathlessness: Active gasping for air, cyanosis, unable to speak full sentences
   const hasSevereBreathing = !canSpeakNormally && (
@@ -185,9 +193,12 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
     /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|senseless|senselessness|not waking up|coma|collapsed and not responding|loss of consciousness)\b/i.test(affirmativeText)
   );
 
-  // 4. Acute Myocardial Infarction / Cardiac Arrest: Crushing chest pressure radiating to left arm/jaw with cold diaphoresis (not denied)
-  const hasCardiacArrest = !hasChestPainDenial && (
-    /\b(cardiac arrest|crushing chest pain.*(?:left arm|sweat|gasping)|heart attack.*crushing|chest pain.*sweating.*radiating)\b/i.test(affirmativeText)
+  // 4. Acute Myocardial Infarction / Cardiac Arrest / Critical Life-Threatening Cardiac Crisis:
+  // ONLY real life-threatening presentations: Crushing retrosternal pressure radiating to left arm/jaw WITH cold diaphoresis (sweating), collapse, gasping, or cardiac arrest.
+  // Note: Not all chest pain is an emergency! Isolated, muscular, burning/gas, or stable non-crushing chest pain is hospital or dispensary manageable.
+  const isNonCardiacOrMildChest = /\b(gas|acidity|acid reflux|gerd|muscle|pressing|sharp|stinging|stitching|prick|coughing|halka dard|mild|tolerable)\b/i.test(rawText);
+  const hasCardiacArrest = !hasChestPainDenial && !isNonCardiacOrMildChest && (
+    /\b(cardiac arrest|heart attack.*unconscious|heart attack.*collapse|crushing chest.*(?:left arm|sweat|pasina|collapse|gasping)|chest pain.*(?:sweating|pasina).*(?:radiat|left arm|baayein haath|behosh|collapse))\b/i.test(affirmativeText)
   );
 
   // 5. Catastrophic Major Trauma & Severe Accidents: Serious vehicular collision, fall from height/roof with head trauma/unconsciousness, visible deformity
@@ -212,8 +223,8 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
 
   // 10. Snake Bite Envenomation: Life-threatening emergency requiring immediate Anti-Snake Venom (ASV)
   const hasSnakeBite =
-    /\b(snake\s*bite|saap\s*(?:ne\s*)?kaat|saanp\s*(?:ne\s*)?kaat|snakebite|envenomation)\b/i.test(affirmativeText) ||
-    /\b(snake\s*bite|saap\s*kaat|saanp\s*kaat|snakebite|envenomation)\b/i.test(rawText);
+    /\b(snake\s*bite|bitten by (?:a\s+)?snake|snake.*(?:bite|bit|bitten)|saap\s*(?:ne\s*)?kaat|saanp\s*(?:ne\s*)?kaat|snakebite|envenomation)\b/i.test(affirmativeText) ||
+    /\b(snake\s*bite|bitten by (?:a\s+)?snake|snake.*(?:bite|bit|bitten)|saap\s*kaat|saanp\s*kaat|snakebite|envenomation)\b/i.test(rawText);
 
   // If a genuine life-and-death emergency is clinically verified:
   if (hasSnakeBite) {
@@ -236,9 +247,6 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
   }
   if (hasUncontrollableBleeding) {
     return { is108: true, reason: "Heavy bleeding / severe deep cut (hand, finger, or limb) requires immediate 108 Ambulance dispatch for wound compression and resuscitation." };
-  }
-  if (isElderlyHighRisk) {
-    return { is108: true, reason: "High-risk presentation in patient aged > 50 with severe symptoms requires immediate 108 Emergency Ambulance dispatch for hospital emergency admission." };
   }
   if (hasHighRiskPregnancy) {
     return { is108: true, reason: "High-risk pregnancy emergency (heavy bleeding, active labor/water broke, or eclampsia) requires immediate 108 Ambulance dispatch." };
@@ -790,11 +798,11 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Severe respiratory distress / Breathing issues / Gasping
   if (
     !deniesBreathing &&
-    /\b(severe breathlessness|saans.*takleef|gasping|gasping for air|suffocat|wheez|inability to speak|speech.*sentence|cyanosis|blue.*lip)\b/i.test(
+    /\b(struggling\s*(?:to|for)\s*breath\w*|struggle\s*to\s*breathe|cannot\s*breathe|can'?t\s*breathe|unable\s*to\s*breathe|hard\s*to\s*breathe|severe breathlessness|saans.*takleef|saans nahi|gasping|gasping for air|suffocat|wheez|inability to speak|speech.*sentence|cyanosis|blue.*lip)\b/i.test(
       affirmativeText
     )
   ) {
-    addPoint("Severe shortness of breath / gasping for air");
+    addPoint("Severe shortness of breath / struggling to breathe");
   }
 
   // Cardiac / Crushing chest pain radiating to left arm/jaw
@@ -817,14 +825,23 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
     addPoint("Seizure / convulsive episode");
   }
 
-  // Heavy bleeding / deep laceration / arterial bleed
+  // Heavy bleeding / deep laceration / arterial bleed / active bleeding
   if (
     !deniesBleeding &&
-    /\b(heavy bleed|khoon beh raha|profuse bleed|deep wound|arterial bleed|slit.*wrist|cut.*wrist)\b/i.test(
+    /\b(heavy bleed|khoon beh raha|profuse bleed|deep wound|arterial bleed|slit.*wrist|cut.*wrist|active.*bleed|workplace.*injury.*bleed|wound depth)\b/i.test(
       affirmativeText
     )
   ) {
     addPoint("Heavy uncontrollable bleeding / vascular injury");
+  }
+
+  // Weakness & dizziness / presyncope indicators
+  if (
+    /\b(dizzy and weak|weak and dizzy|feeling dizzy and weak|feeling faint|feel dizzy|faint|lightheaded|chakkar|chakkar aa raha|kamzori)\b/i.test(
+      affirmativeText
+    )
+  ) {
+    addPoint("Weakness & dizziness / presyncope indicators");
   }
 
   // Severe acute abdominal pain / rigid abdomen
@@ -1460,11 +1477,14 @@ export function extractCallerReportedProblems(params = {}) {
   }
 
   // Respiratory Distress / Cough / Cold (Strict separation: never bundle Cough or Cold if caller only had breathing difficulty!)
-  const hasBreathing = !deniesBreathing && /\b(shortness of breath|saans.*takleef|saans phoolna|breathlessness|difficulty breathing|trouble breathing|gasping|wheezing)\b/i.test(affirmativeText);
+  const hasStrugglingToBreathe = !deniesBreathing && /\b(struggling\s*(?:to|for)\s*breath\w*|struggle\s*to\s*breathe|cannot\s*breathe|can'?t\s*breathe|unable\s*to\s*breathe|hard\s*to\s*breathe|saans nahi aa rahi|gasping|gasping for air|suffocat)\b/i.test(affirmativeText);
+  const hasBreathing = !deniesBreathing && (hasStrugglingToBreathe || /\b(shortness of breath|saans.*takleef|saans phoolna|breathlessness|difficulty breathing|trouble breathing|wheezing)\b/i.test(affirmativeText));
   const hasCough = !deniesCough && /\b(cough|khansi)\b/i.test(affirmativeText);
   const hasCold = !deniesCold && /\b(cold|zukham|sardi|runny nose|sneeze)\b/i.test(affirmativeText);
 
-  if (hasBreathing) {
+  if (hasStrugglingToBreathe) {
+    addProblem("Severe Respiratory Distress / Struggling to Breathe", true);
+  } else if (hasBreathing) {
     const isPriority = /\b(breath|saans|phoolna|difficulty)\b/i.test(lastAffirmative);
     if (hasCough) {
       addProblem("Cough with Difficulty Breathing", isPriority);
@@ -1485,13 +1505,20 @@ export function extractCallerReportedProblems(params = {}) {
   }
 
   // Weakness & Dizziness
-  const callerMentionedWeakness = /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady)\b/i.test(combinedCallerText);
-  if (callerMentionedWeakness && !deniesOtherSymptoms && /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady)\b/i.test(affirmativeText)) {
-    addProblem("Weakness & Dizziness");
+  const callerMentionedWeakness = /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady|dizzy and weak|weak and dizzy|feel dizzy)\b/i.test(combinedCallerText);
+  if (callerMentionedWeakness && !deniesOtherSymptoms && /\b(dizziness|chakkar|vertigo|weakness|kamzori|feeling faint|lightheaded|unsteady|dizzy and weak|weak and dizzy|feel dizzy)\b/i.test(affirmativeText)) {
+    const isPriority = /\b(dizzy|weak|chakkar|kamzori)\b/i.test(lastAffirmative);
+    addProblem("Weakness & Dizziness", isPriority);
   }
 
   // Cut / Wound / Bleeding
-  if (!isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|khoon|tanka)\b/i.test(affirmativeText)) {
+  const hasHeavyBleeding = !isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(heavy bleed|active.*heavy|profuse bleed|active.*bleed|workplace.*injury|wound depth|deep wound|laceration|khoon beh raha|arterial)\b/i.test(combinedCallerText);
+  const hasGeneralCut = !isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|khoon|tanka)\b/i.test(affirmativeText);
+
+  if (hasHeavyBleeding) {
+    const isWorkplace = /\b(workplace|machine|factory|industrial)\b/i.test(combinedCallerText);
+    addProblem(isWorkplace ? "Workplace Injury with Active Bleeding" : "Laceration Injury with Active Bleeding", true);
+  } else if (hasGeneralCut) {
     addProblem("Superficial Cut / Laceration Injury");
   }
 
@@ -1585,7 +1612,7 @@ export function formatClinicalSummary(intake = {}, condition = "Reported Symptom
   } else if (refLower.includes("hospital") && (refLower.includes("esic") || !refLower.includes("district"))) {
     actionClause = "referred to nearest ESIC Hospital for in-person medical evaluation and secondary care.";
   } else if (refLower.includes("dispensary") || refLower.includes("esis")) {
-    actionClause = "guided to nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM; 1st & 3rd Sat 10:00 AM – 12:00 PM) for primary doctor consultation and medicine dispensing.";
+    actionClause = "guided to nearest ESIS Dispensary for primary doctor consultation and medicine dispensing.";
   } else if (refLower.includes("tie")) {
     actionClause = "referred to nearest Empanelled Tie-Up Facility for specialized clinical care under ESI empanelment.";
   } else if (refLower.includes("district")) {
@@ -1594,8 +1621,17 @@ export function formatClinicalSummary(intake = {}, condition = "Reported Symptom
     actionClause = `guided to ${primaryReferral} for medical evaluation.`;
   }
 
-  const cleanCond = sanitizeSymptomOrCondition(condition, `${intake.symptom_notes || ""} ${intake.complaint || ""}`);
-  const durText = duration && duration !== "Reported today" ? duration : "Reported today";
+  const chatHistory = intake.ekms_ai_context?.chatHistory || intake.chatHistory || [];
+  const historyText = Array.isArray(chatHistory)
+    ? chatHistory
+        .filter((m) => m && (m.sender === "user" || m.role === "user"))
+        .map((m) => (typeof m.content === "string" ? m.content : m.text || ""))
+        .join(" ")
+    : "";
+  const callerText = `${intake.symptom_notes || ""} ${intake.complaint || ""} ${intake.caller_spoken_text || ""} ${historyText}`.trim().toLowerCase();
+  const cleanCond = sanitizeSymptomOrCondition(condition, callerText);
+  const validDur = validateCallerMentionedDuration(duration, callerText);
+  const durText = validDur && validDur !== "Reported today" ? validDur : "Reported today";
 
   const normSev = (s) => {
     const str = String(s || "").trim().toLowerCase();
@@ -1618,11 +1654,13 @@ async function evaluateRawTriage(intake) {
   const ekmsCtx = intake.ekms_ai_context || {};
   const tState = ekmsCtx.triageState || ekmsCtx;
   const notes = String(intake.symptom_notes || "").toLowerCase();
+  const age = intake?.age != null && intake.age !== "" ? parseInt(intake.age, 10) : (tState?.age != null && tState.age !== "" ? parseInt(tState.age, 10) : null);
   const severity = Number(intake.severity_reported) || (tState?.severityScore || (tState?.severity === "High" ? 9 : 5));
-  let duration = String(intake.duration || tState?.duration || "Reported today");
-  if (/\b(fall|fell|falling|accident|injury|trauma|pain|chot|gir gaya|impact)\b/i.test(duration)) {
-    duration = "Reported today";
+  let rawDur = String(intake.duration || tState?.duration || "Reported today");
+  if (/\b(fall|fell|falling|accident|injury|trauma|pain|chot|gir gaya|impact)\b/i.test(rawDur)) {
+    rawDur = "Reported today";
   }
+  let duration = rawDur;
 
   // Extract caller's actual spoken text (excluding bot assistant prompts)
   const chatMsgs = ekmsCtx.chatHistory || [];
@@ -1710,8 +1748,9 @@ async function evaluateRawTriage(intake) {
   // Conditions for Category 8: District Hospital (Public Healthcare outside ESIC)
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(allText);
 
-  // FAST DIRECT SYNTHESIS (Instant, <5ms): If evaluated by chat engine OR psychiatric crisis OR NACO HIV OR Dist Hosp OR Tie-Up OR high effective severity (emergency)
-  if (isPsych || isNacoHIV || isDistHospRequest || isTieUpEligible || effectiveSeverity >= 8 || (tState && (tState.condition || tState.symptom || tState.suspectedCondition || tState.severity || tState.redFlagsDetected?.length))) {
+  // FAST DIRECT SYNTHESIS (Instant, <5ms): Clinical Severity Engine according to standard triage guidelines
+  const shouldRunFastPath = true;
+  if (shouldRunFastPath) {
     const rawFlags = [
       ...(tState?.redFlagsDetected || []),
       ...(tState?.associated || []),
@@ -1743,44 +1782,66 @@ async function evaluateRawTriage(intake) {
     // - Moderate: Forward to ESIC Hospital & Govt Hospital (Govt District Hospital)
     // - Mild: Forward to 104 Health Helpline & ESIS Dispensary (Open Mon-Fri 10am-4pm, 1st & 3rd Sat 10am-12pm)
 
-    const rawTStateSev = String(tState?.severity || "").toLowerCase();
-    const isSevereCandidate =
-      isEmergency108 ||
-      effectiveSeverity >= 8 ||
-      rawTStateSev.includes("sev") ||
-      rawTStateSev.includes("high") ||
-      (isPsych && (hasSelfHarmAction || callerHasSuicideWords));
+    duration = validateCallerMentionedDuration(duration, callerSpokenText);
 
-    const isModerateCandidate =
-      !isSevereCandidate &&
-      (effectiveSeverity >= 4 ||
-        rawTStateSev.includes("mod") ||
-        rawTStateSev.includes("urg") ||
-        chatChoseHospital ||
-        isDistHospRequest ||
-        isTieUpEligible ||
-        /\b(fever|bukhar|fracture|stitch|cut|wound|vomit|burn|infection|chest|pain|dard)\b/i.test(allText));
+    // Calculate clinical score (1-10) and standard category (Mild, Moderate, Severe)
+    const clinicalScoreResult = calculateClinicalSeverityScore({
+      symptom: intake.primary_complaint || tState?.symptom,
+      condition: tState?.condition || tState?.suspectedCondition,
+      callerSpokenText,
+      allText,
+      duration,
+      chatHistory: chatMsgs,
+      intake,
+      tState,
+    });
 
-    const normUrgency = isSevereCandidate ? "Severe" : (isModerateCandidate ? "Moderate" : "Mild");
+    const triageUrgencyScore = clinicalScoreResult.score;
+    const normUrgency = clinicalScoreResult.urgency_level;
 
     let primaryReferral = "ESIS Dispensary";
-    let primaryReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+    let primaryReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
     let secondaryReferral = "104 Health Helpline";
     let secondaryReason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
     let isDualProtocol = false;
     let call108 = false;
 
+    const isExtremeLifeThreat = Boolean(
+      /\b(cardiac arrest|unconscious|behosh|not breathing|saans nahi|collapse|crushing chest.*(?:sweat|pasina|left arm|radiat)|arterial bleed|snake\s*bite|drank poison|status epilepticus)\b/i.test(allText)
+    );
+    const hasAcuteLifeThreat = Boolean(
+      isEmergency108 ||
+      clinicalScoreResult.isLifeThreatening ||
+      /\b(struggling\s*(?:to|for)\s*breath\w*|cannot\s*breathe|unable\s*to\s*breathe|gasping for air|not breathing|saans nahi|cyanosis|heavy active bleed|spurting bleed|arterial bleed|crushing chest.*(?:sweat|pasina|left arm|radiat|collapse)|cardiac arrest|unconscious|behosh|unresponsive|collapse|seizure.*>|status epilepticus|drank poison|acid ingestion|snake\s*bite)\b/i.test(allText) ||
+      isExtremeLifeThreat
+    );
+
+    // Score 8 or manageable presentation routes to Hospital; only score 9-10 life-threatening emergencies route to 108
+    const isScore8 = triageUrgencyScore === 8;
+    const isScore8Manageable = isScore8 && !isExtremeLifeThreat;
+    const shouldForward108 = normUrgency === "Severe" && ((triageUrgencyScore >= 9 && hasAcuteLifeThreat) || isExtremeLifeThreat) && !isScore8Manageable;
+
     if (normUrgency === "Severe") {
-      primaryReferral = "108 Ambulance";
-      primaryReason = ambulanceEval.reason || "Severe life-threatening emergency or acute trauma casualty; dispatch 108 Ambulance immediately.";
-      call108 = true;
-      if (isPsych) {
-        secondaryReferral = "104 Health Helpline";
-        secondaryReason = "Concurrent acute psychiatric crisis; connect with 104 Health Helpline for emotional stabilization once ambulance is en route.";
-        isDualProtocol = false;
+      if (shouldForward108) {
+        primaryReferral = "108 Ambulance";
+        primaryReason = ambulanceEval.reason || "Severe life-threatening emergency; dispatch 108 Ambulance immediately.";
+        call108 = true;
+        if (isPsych) {
+          secondaryReferral = "104 Health Helpline";
+          secondaryReason = "Concurrent acute psychiatric crisis; connect with 104 Health Helpline for emotional stabilization once ambulance is en route.";
+          isDualProtocol = false;
+        } else {
+          secondaryReferral = "ESIC Hospital";
+          secondaryReason = "24x7 Casualty & Emergency Department at nearest ESIC Hospital for trauma resuscitation and admission.";
+          isDualProtocol = false;
+        }
       } else {
-        secondaryReferral = "ESIC Hospital";
-        secondaryReason = "24x7 Casualty & Emergency Department at nearest ESIC Hospital for trauma resuscitation and admission.";
+        // Severe condition manageable at hospital (Score 8, or severe presentation without life threat)
+        call108 = false;
+        primaryReferral = "ESIC Hospital";
+        primaryReason = "Severe condition manageable at hospital; direct patient immediately to nearest ESIC Hospital 24x7 Casualty (or Govt District Hospital).";
+        secondaryReferral = "Govt District Hospital";
+        secondaryReason = "Govt District Hospital for secondary hospital casualty backup.";
         isDualProtocol = false;
       }
     } else if (normUrgency === "Moderate") {
@@ -1804,7 +1865,7 @@ async function evaluateRawTriage(intake) {
       const wantsPhoneDoctor = allText.includes("phone doctor") || allText.includes("104") || allText.includes("tele-doctor");
       if (dispensaryStatus.isOpen && !wantsPhoneDoctor) {
         primaryReferral = "ESIS Dispensary";
-        primaryReason = "Mild sub-acute presentation; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+        primaryReason = "Mild sub-acute presentation; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
         secondaryReferral = "104 Health Helpline";
         secondaryReason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
         isDualProtocol = false;
@@ -1812,7 +1873,7 @@ async function evaluateRawTriage(intake) {
         primaryReferral = "104 Health Helpline";
         primaryReason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
         secondaryReferral = "ESIS Dispensary";
-        secondaryReason = "Visit nearest ESIS Dispensary during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+        secondaryReason = "Visit nearest ESIS Dispensary during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
         isDualProtocol = false;
       }
     }
@@ -1876,12 +1937,13 @@ async function evaluateRawTriage(intake) {
     }
 
     const triageUrgencyLevel = normUrgency;
-    const triageUrgencyScore = normUrgency === "Severe" ? 10 : (normUrgency === "Moderate" ? 6 : 3);
     const triageAssessedSeverity = normUrgency;
 
     const decision = {
       urgency_level: triageUrgencyLevel,
       urgency_score: triageUrgencyScore,
+      severity_score: triageUrgencyScore,
+      assessed_severity_score: triageUrgencyScore,
       confidence: "high",
       is_psychiatric: isPsych,
       has_self_harm: hasSelfHarmAction,
@@ -2024,14 +2086,21 @@ Output strict JSON with keys: urgency_level ('Severe'|'Moderate'|'Mild'), assess
     (notes.includes("heavy") || notes.includes("profuse") || notes.includes("ruk nahi"));
 
   // Evaluate Level (Strictly 3 Tiers: Severe, Moderate, Mild)
-  if (isCardiac && (hasRadiation || hasDiaphoresis || hasDyspnea || severity >= 8)) {
+  // Not all chest pain is an emergency! Only real life-threatening presentations trigger 108:
+  // crushing retrosternal pain radiating to left arm/jaw WITH cold sweating or severe breathlessness.
+  if (isCardiac && ((hasRadiation && hasDiaphoresis) || (hasRadiation && hasDyspnea))) {
     urgency_level = "Severe";
     urgency_score = 10;
     call_108 = true;
-    if (isCardiac) red_flags.push("Severe acute chest pain / cardiac symptoms");
+    red_flags.push("Severe acute chest pain with radiation & diaphoresis");
     if (hasRadiation) red_flags.push("Left arm tingling / radiation");
     if (hasDiaphoresis) red_flags.push("Cold sweating (diaphoresis)");
     if (hasDyspnea) red_flags.push("Difficulty breathing (dyspnea)");
+  } else if (isCardiac) {
+    urgency_level = severity >= 8 ? "Severe" : "Moderate";
+    urgency_score = severity >= 8 ? 8 : 6;
+    call_108 = false;
+    red_flags.push("Chest discomfort reported");
   } else if (isPoison) {
     red_flags.push("Toxic / agricultural chemical exposure");
     if (notes.includes("aankh") || notes.includes("eye")) {
@@ -2102,9 +2171,9 @@ Output strict JSON with keys: urgency_level ('Severe'|'Moderate'|'Mild'), assess
     // Mild
     summary_en = `${ageStr} ${sexStr} reports sub-acute symptoms (Mild) suitable for ESIS Dispensary OPD or 104 Health Helpline consultation.`;
     summary_hi = `${age || ""} वर्षीय ${sexStr === "female" ? "महिला" : "पुरुष"} को सामान्य लक्षण (Mild) हैं, 104 हेल्पलाइन या डिस्पेंसरी में नियमित जांच कराएं।`;
-    reasoning = `Stable clinical presentation without systemic danger signs. Can be managed safely during standard dispensary operating hours (Mon-Fri 10am-4pm, 1st & 3rd Sat 10am-12pm) or via 104 Health Helpline.`;
+    reasoning = `Stable clinical presentation without systemic danger signs. Can be managed safely during standard dispensary operating hours (Mon-Fri 10am-4pm, 1st, 3rd & 5th Sat 10am-12pm) or via 104 Health Helpline.`;
     recommended_facility_type = "ESIS Dispensary / 104 Health Helpline";
-    recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM) or call 104 for tele-doctor consultation.";
+    recommended_action = "Visit nearest ESIS Dispensary during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) or call 104 for tele-doctor consultation.";
     followup_questions = [
       "Has anyone else in the household or workplace fallen sick recently?",
       "Are you currently taking any regular medications?",
@@ -2142,7 +2211,6 @@ function normalizeTriageDecision(triage, intake) {
   const ekmsCtx = intake.ekms_ai_context || {};
   const tState = ekmsCtx.triageState || ekmsCtx;
   const referral = (tState?.referralDestination || "").toLowerCase();
-  const notes = `${intake.symptom_notes || ""} ${tState?.symptom || ""} ${tState?.condition || ""} ${triage.summary_en || ""} ${triage.reasoning || ""}`.toLowerCase();
 
   const chatMsgs = ekmsCtx.chatHistory || [];
   const callerUtterances = Array.isArray(chatMsgs)
@@ -2152,6 +2220,7 @@ function normalizeTriageDecision(triage, intake) {
         .join(" ")
     : "";
   const callerSpokenText = `${intake.symptom_notes || ""} ${callerUtterances}`.trim().toLowerCase();
+  const notes = `${callerSpokenText} ${tState?.symptom || ""} ${tState?.condition || ""}`.toLowerCase();
 
   if (triage.primary_complaint) {
     triage.primary_complaint = sanitizeSymptomOrCondition(triage.primary_complaint, callerSpokenText);
@@ -2174,22 +2243,25 @@ function normalizeTriageDecision(triage, intake) {
   const ambulanceEval = isLifeThreateningAmbulanceCase(notes, triage.urgency_score || intake.severity_reported, intake, tState);
   const isEmergency108 = ambulanceEval.is108;
 
-  // Normalize urgency into strictly 3 categories: Severe, Moderate, Mild
-  const normUrgency = (lvl) => {
-    const s = String(lvl || "").toLowerCase();
-    if (s.includes("sev") || s.includes("emerg") || s.includes("high") || s === "10" || s === "9" || s === "8") return "Severe";
-    if (s.includes("mod") || s.includes("urg") || s === "7" || s === "6" || s === "5") return "Moderate";
-    return "Mild";
-  };
+  const clinicalScore = calculateClinicalSeverityScore({
+    symptom: triage.primary_complaint || tState?.symptom,
+    condition: tState?.condition || tState?.suspectedCondition,
+    callerSpokenText,
+    allText: notes,
+    duration: triage.duration || tState?.duration,
+    chatHistory: chatMsgs,
+    intake,
+    tState,
+  });
 
-  let finalLevel = normUrgency(triage.urgency_level || triage.assessed_severity);
-  if (isEmergency108 || (isPsych && isPoisonOrTrauma)) {
-    finalLevel = "Severe";
-  }
+  let finalLevel = clinicalScore.urgency_level;
+  let finalScore = clinicalScore.score;
 
   triage.urgency_level = finalLevel;
   triage.assessed_severity = finalLevel;
-  triage.urgency_score = finalLevel === "Severe" ? 10 : (finalLevel === "Moderate" ? 6 : 3);
+  triage.urgency_score = finalScore;
+  triage.severity_score = finalScore;
+  triage.assessed_severity_score = finalScore;
 
   const dispensaryStatus = getDispensaryOperatingStatus();
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika)\b/i.test(notes);
@@ -2202,20 +2274,31 @@ function normalizeTriageDecision(triage, intake) {
   const istHour = istDate.getHours();
   const isMorningOrDaytime = istHour >= 6 && istHour < 18;
 
+  const isExtremeLifeThreat = Boolean(
+    /\b(cardiac arrest|unconscious|behosh|not breathing|saans nahi|collapse|crushing chest.*(?:sweat|pasina|left arm|radiat)|arterial bleed|snake\s*bite|drank poison|status epilepticus)\b/i.test(allText)
+  );
   const hasAcuteLifeThreat = Boolean(
     ambulanceEval.is108 ||
     referral.includes("108") ||
-    /\b(unconscious|behos|not breathing|sans nahi|collapse|cardiac|heart attack|chest pain with sweat|severe breath|gasping|choking|heavy bleed|khoon beh raha|arterial|seizure|daura|poison|zeher|electrocution|major accident|head injury unconscious)\b/i.test(notes)
+    /\b(struggling\s*(?:to|for)\s*breath\w*|cannot\s*breathe|unable\s*to\s*breathe|unconscious|behosh|unresponsive|not breathing|saans nahi|collapse|cyanosis|cardiac arrest|crushing chest.*(?:sweat|pasina|left arm|radiat|collapse)|gasping|choking|heavy active bleed|spurting bleed|arterial|seizure.*>|status epilepticus|drank poison|acid ingestion|snake\s*bite)\b/i.test(allText) ||
+    isExtremeLifeThreat
   );
-  const isManageableAtHospital = isMorningOrDaytime && !hasAcuteLifeThreat;
+
+  // User mandate:
+  // - Forward to 108 if it is severe life-threatening emergency in case of score 9 and 10.
+  // - In score 8 forward to hospital if not life-threatening and manageable in the hospital!
+  // - Not all chest pain is an emergency! Only real life-threatening chest pain forwards to 108.
+  const isScore8 = finalScore === 8;
+  const isScore8Manageable = isScore8 && !isExtremeLifeThreat;
+  const shouldForward108 = finalLevel === "Severe" && ((finalScore >= 9 && hasAcuteLifeThreat) || isExtremeLifeThreat) && !isScore8Manageable;
 
   if (finalLevel === "Severe") {
     triage.is_dual_protocol = true;
-    if (isManageableAtHospital) {
+    if (!shouldForward108) {
       triage.call_108 = false;
       triage.referral_destination = "ESIC Hospital";
       triage.call_referral_primary = "ESIC Hospital";
-      triage.referral_reason = "Severe condition manageable at hospital during morning/daytime; direct patient immediately to nearest ESIC Hospital Casualty (or Govt District Hospital).";
+      triage.referral_reason = "Severe condition manageable at hospital; direct patient immediately to nearest ESIC Hospital Casualty (or Govt District Hospital).";
       triage.secondary_referral_destination = "Govt District Hospital";
       triage.call_referral_secondary = "Govt District Hospital";
       triage.secondary_referral_reason = "Govt District Hospital for secondary hospital casualty backup.";
@@ -2225,7 +2308,7 @@ function normalizeTriageDecision(triage, intake) {
       triage.call_108 = true;
       triage.referral_destination = "108 Ambulance";
       triage.call_referral_primary = "108 Ambulance";
-      triage.referral_reason = ambulanceEval.reason || "Severe life-threatening emergency or trauma casualty; dispatch 108 Ambulance immediately.";
+      triage.referral_reason = ambulanceEval.reason || "Severe life-threatening emergency; dispatch 108 Ambulance immediately.";
       triage.secondary_referral_destination = isPsych ? "104 Health Helpline" : "ESIC Hospital";
       triage.call_referral_secondary = triage.secondary_referral_destination;
       triage.secondary_referral_reason = isPsych
@@ -2262,7 +2345,7 @@ function normalizeTriageDecision(triage, intake) {
     if (dispensaryStatus.isOpen && !referral.includes("104") && !isAdviceSeeking) {
       triage.referral_destination = "ESIS Dispensary";
       triage.call_referral_primary = "ESIS Dispensary";
-      triage.referral_reason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+      triage.referral_reason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
       triage.secondary_referral_destination = "104 Health Helpline";
       triage.call_referral_secondary = "104 Health Helpline";
       triage.secondary_referral_reason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
@@ -2272,10 +2355,10 @@ function normalizeTriageDecision(triage, intake) {
       triage.referral_reason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
       triage.secondary_referral_destination = "ESIS Dispensary";
       triage.call_referral_secondary = "ESIS Dispensary";
-      triage.secondary_referral_reason = "Visit nearest ESIS Dispensary during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+      triage.secondary_referral_reason = "Visit nearest ESIS Dispensary during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
     }
     triage.recommended_facility_type = "ESIS Dispensary / 104 Health Helpline";
-    triage.recommended_action = "Visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM) or call 104 for tele-doctor consultation.";
+    triage.recommended_action = "Visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) or call 104 for tele-doctor consultation.";
   }
 
   return triage;

@@ -74,6 +74,10 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
       val = val.replace(/\D/g, "").slice(0, 6);
     }
     setForm((f) => ({ ...f, [k]: val }));
+    if (result) {
+      setResult(null);
+      setActiveDirective(null);
+    }
   };
 
   const activeCallerId = useMemo(() => {
@@ -109,29 +113,9 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
           }
           setForm(parsed.form);
         }
-        if (parsed.result) {
-          const res = parsed.result;
-          const caseTarget = res.case_ref || res.case_id || res.id;
-          if (!res.is_forwarded) {
-            try {
-              const forwardStored = caseTarget
-                ? (sessionStorage.getItem(`ekms_forwarded_${caseTarget}`) || localStorage.getItem(`ekms_forwarded_${caseTarget}`))
-                : null;
-              if (forwardStored) {
-                const fParsed = JSON.parse(forwardStored);
-                if (fParsed.is_forwarded) {
-                  res.is_forwarded = true;
-                  res.forwarded_at = fParsed.forwarded_at;
-                  res.dispatch_id = fParsed.dispatch_id;
-                  res.forwarded_to = fParsed.forwarded_to;
-                  res.forwarded_short_name = fParsed.forwarded_short_name;
-                  res.status = "forwarded";
-                  res.dispatch_info = fParsed.dispatch_info;
-                }
-              }
-            } catch (e) {}
-          }
-          setResult(res);
+        // Never restore an already-forwarded completed case into active intake!
+        if (parsed.result && !parsed.result.is_forwarded && !parsed.result.forwarded_at) {
+          setResult(parsed.result);
         }
         if (parsed.callerFoundInfo) {
           const storedPhone10 = (parsed.callerFoundInfo.phone || "").replace(/\D/g, "").slice(-10);
@@ -584,7 +568,8 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
 
     const payload = {
       ...form,
-      case_ref: result?.case_ref || undefined,
+      // CRITICAL: NEVER pass result?.case_ref! Caller intake from console is always a NEW triage case.
+      // Passing old result?.case_ref caused previous forwarded/booked status from days ago to attach to this new triage!
       caller_id: activeCallerId,
       agent_id: agentCode,
       symptom_notes: compiledNotes,
@@ -601,7 +586,13 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
     Object.keys(payload).forEach((k) => payload[k] === "" && delete payload[k]);
     try {
       const { data } = await api.post("/triage", payload);
-      setResult(data);
+      const freshResult = {
+        ...data,
+        is_fresh_triage: true,
+        is_forwarded: false,
+        booked_appointment: null,
+      };
+      setResult(freshResult);
       setActiveRightTab("triage");
       
       // Update local storage cache & broadcast to other tabs instantly without extra Firestore reads
@@ -656,9 +647,11 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             onClick={() => {
               try {
                 sessionStorage.removeItem("ekms_active_triage_session");
+                sessionStorage.removeItem("ekms_active_ai_chat_session");
               } catch (e) {}
               setForm(EMPTY);
               setResult(null);
+              setActiveDirective(null);
               setChatPresetTrigger("");
               setEkmsContext(null);
               setCallerFoundInfo(null);
@@ -843,6 +836,17 @@ export const TriageConsole = ({ meta, onCaseCreated, incomingCaller, currentAgen
             onComplaintChange={(compiledNotes, ctx) => {
               setForm((f) => ({ ...f, symptom_notes: compiledNotes }));
               setEkmsContext(ctx);
+              setResult((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  ekms_ai_context: ctx,
+                  intake: {
+                    ...(prev.intake || {}),
+                    symptom_notes: compiledNotes,
+                  },
+                };
+              });
             }}
             onSyncFields={(field, val) => {
               setForm((f) => ({ ...f, [field]: val }));

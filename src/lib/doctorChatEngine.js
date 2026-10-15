@@ -21,6 +21,11 @@ import {
 } from "./assamLocations.js";
 import { isDispensary } from "./geo.js";
 import { buildAdaptiveProtocolPromptSnippet, matchProtocols } from "./protocolMatcher.js";
+import {
+  calculateClinicalSeverityScore,
+  mapScoreToUrgency,
+  validateCallerMentionedDuration,
+} from "./clinicalScoring.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
@@ -63,28 +68,31 @@ CORE CLINICAL RULES:
    - If the conversation started with one condition (e.g. Fever & Chills) and the caller later introduces or switches to another condition (e.g. hand cut, workplace injury, chest discomfort, abdominal pain), DO NOT forget the first condition!
    - Synthesize BOTH conditions together into your assessment, questions, and red flags.
 11. 108 EMERGENCY & ACCIDENT / SEVERE TRAUMA ROUTING:
-   - For all accidents, head injuries, heavy bleeding, severe cuts (hand/finger deep cuts, workplace machinery injuries), or life-threatening symptoms, IMMEDIATELY recommend 108 Ambulance / Emergency Casualty ("108 Ambulance") with severity "Severe".
+   - ONLY for true life-threatening crises (spurting arterial bleeding, severe deep gaping trauma, cardiac arrest, respiratory failure, unconsciousness, poisoning, snakebite).
+   - Superficial cuts, minor scrapes, bleeding stopped, or injuries where antiseptic cream was applied are NOT emergencies! Rate them Mild (score 1-4) or Moderate (score 5-7).
 12. BENEFICIARY FACILITY PREFERENCE:
    - If the beneficiary explicitly states or selects where they want to go (e.g. "Visit ESIC Hospital Casualty now", "hospital", "dispensary", "ambulance", "tele-doctor"), ALWAYS respect and route them to that preferred facility ("ESIC Hospital", "ESIS Dispensary", etc.) as PRIMARY!
-13. MANDATORY 3-TIER CLINICAL CATEGORIZATION & FORWARDING:
-   - Strictly classify all clinical cases into 3 categories only: "Severe", "Moderate", or "Mild".
-   - NEVER output legacy categories ("Routine", "Urgent", "Self-care", "Emergency") or numerical scale ratings (e.g., 3/10, 6/10, 9/10).
+13. MANDATORY 3-TIER CLINICAL CATEGORIZATION & BACKEND NUMBERING SYSTEM:
+   - Backend numbering system:
+     * Score 1 to 4: Mild
+     * Score 5, 6, 7: Moderate
+     * Score 8, 9, 10: Severe
    - Standard clinical criteria:
-     * Mild:
+     * Mild (Score 1 to 4):
        • Characterized by low-intensity, localized, or early-stage symptoms.
        • Little to no disruption of daily activities, normal functions, or vital signs.
        • Often managed via outpatient departments (OPDs), primary health centers (PHCs / ESIS Dispensaries), or basic supportive/conservative care.
        • Forwarding:
-         - During dispensary open hours (Mon-Fri 10am-4pm, 1st & 3rd Sat 10am-12pm): 1st: ESIS Dispensary, 2nd: 104 Health Helpline, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
+         - During dispensary open hours (Mon-Fri 10am-4pm, 1st, 3rd & 5th Sat 10am-12pm): 1st: ESIS Dispensary, 2nd: 104 Health Helpline, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
          - During dispensary closed hours: 1st: 104 Health Helpline, 2nd: ESIS Dispensary, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
-     * Moderate:
+     * Moderate (Score 5, 6, 7):
        • Characterized by noticeable symptoms that require more active intervention or medication.
        • Measurable interference with normal daily functioning, work, or physical activity.
        • Frequently managed by general physicians, district centers, or stepped-up pharmacological treatments (such as combination therapy).
        • Forwarding:
          - If ESIC Hospital is available within 15km distance: 1st: ESIC Hospital, 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
          - If ESIC Hospital is NOT available within 15km: 1st: Govt District Hospital, 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
-     * Severe:
+     * Severe (Score 8, 9, 10):
        • Characterized by high-intensity, widespread, or life-threatening symptoms.
        • Gross or total interference with basic physical function, organ systems, or consciousness.
        • Requires urgent, specialized, or inpatient/intensive care (ICU/emergency stabilization) at secondary or tertiary healthcare facilities.
@@ -100,6 +108,9 @@ CORE CLINICAL RULES:
    - NEVER suggest or name specific medicines to take.
 15. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
    - NEVER ask the caller to rate on a 1 to 10 scale. Ask functional, clinical questions (e.g. "Are you able to walk or are you too weak to stand?", "Is the fever accompanied by shivering?").
+16. DYNAMIC MULTI-TURN RE-ANALYSIS & DURATION GROUNDING:
+   - If an earlier turn appeared severe or high risk, but subsequent answers clarify that symptoms are mild or moderate (e.g. superficial cut, antiseptic cream applied, bleeding stopped, able to walk normally), YOU MUST RE-ANALYZE ALL ANSWERS TOGETHER AND DOWNGRADE TO MILD (score 1-4) OR MODERATE (score 5-7)! Never remain stuck at Severe if subsequent answers show no emergency!
+   - NEVER FABRICATE OR ASSUME DURATION: If the caller did NOT mention duration (did not state month, week, or days), NEVER assume 'more than a month' or invent any timeframe in your questions or summaries! Never say 'since this happened more than a month ago' unless the caller explicitly told you so. Treat unknown duration as recent / today.
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
@@ -111,7 +122,7 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
   "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms"],
-  "duration": "detected duration or accident time",
+  "duration": "detected duration ONLY if caller explicitly stated so; otherwise 'Reported today'; NEVER guess 'More than a month'",
   "comorbidity": "Known chronic conditions (e.g. Diabetes, Hypertension, Asthma) or 'None reported by caller'",
   "medications": "Specific medicines taken or leave empty string '' if none / no answer",
   "isReadyForSummary": true | false,
@@ -634,9 +645,11 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
 6. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
 7. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
 8. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
-9. 108 EMERGENCY ROUTING: For accidents, head injury, heavy bleeding, cuts/injuries, or age > 50 with acute complications, set referralDestination to "108 Ambulance".
+9. 108 EMERGENCY ROUTING: ONLY for life-threatening crises (spurting arterial bleeding, severe deep gaping trauma, cardiac arrest, respiratory failure, unconsciousness, poisoning, snakebite). Superficial cuts, minor scrapes, bleeding stopped, or injuries where antiseptic cream was applied are NOT emergencies! Rate them Mild (score 1-4) or Moderate (score 5-7).
 10. CALLER FACILITY PREFERENCE: If caller expresses a preference to go to ESIC Hospital or casualty, respect this and set referralDestination to "ESIC Hospital".
-11. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
+11. DYNAMIC MULTI-TURN RE-ANALYSIS: If an earlier turn appeared severe or high risk, but subsequent answers clarify that symptoms are mild or moderate (e.g. superficial cut, antiseptic cream applied, bleeding stopped, able to walk normally), RE-ANALYZE ALL ANSWERS TOGETHER AND DOWNGRADE TO MILD (score 1-4) OR MODERATE (score 5-7)!
+12. NEVER ASSUME OR FABRICATE DURATION: If the caller did NOT mention duration (did not state month, week, or days), NEVER assume 'more than a month' or invent any timeframe in your questions or summaries! Never say 'since this happened more than a month ago' unless the caller explicitly told you so. Treat unknown duration as recent / today.
+13. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
     },
     ...history.slice(-8).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
@@ -645,7 +658,7 @@ CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
     {
       role: "user",
       content: `Caller: "${cleanInput}".
-Clinical Context: Chief Complaint: "${initialChiefComplaint}", Current Condition: "${currentClinicalState.suspectedCondition || "Under Assessment"}", Known Duration: "${currentClinicalState.duration || "Not specified"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
+Clinical Context: Chief Complaint: "${initialChiefComplaint}", Current Condition: "${currentClinicalState.suspectedCondition || "Under Assessment"}", Known Duration: "${validateCallerMentionedDuration(currentClinicalState.duration, history.map((m) => m.content || m.text || "").join(" ")) || "Not specified"}", RedFlags: ${JSON.stringify(currentClinicalState.redFlagsDetected || [])}, Turn: ${userTurnsCount}.
 Already Asked Questions: ${JSON.stringify(askedQuestionsList)}.${learnedSnippet ? `\n\n${learnedSnippet}` : ""}
 
 Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 words):
@@ -1645,15 +1658,23 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     prevRef.includes("pharmacy") ||
     prevRef.includes("dispensary");
 
-  const normSevStr = (s) => {
-    const str = String(s || "").trim().toLowerCase();
-    if (str.includes("sev") || str.includes("emerg") || str.includes("high") || s === 9 || s === 10 || s === 8) return "Severe";
-    if (str.includes("mod") || str.includes("urg") || s === 6 || s === 7 || s === 5) return "Moderate";
-    return "Mild";
-  };
+  // Holistic clinical scoring calculation across all turns:
+  const rawCandidateDur = raw.duration || prevState.duration || "Reported today";
+  const validatedDurForScoring = validateCallerMentionedDuration(rawCandidateDur, allCallerText);
 
-  let severity = normSevStr(raw.severity || prevState.severity || (isPsych ? "Severe" : "Moderate"));
-  let severityScore = severity === "Severe" ? 10 : (severity === "Moderate" ? 6 : 3);
+  const holisticScore = calculateClinicalSeverityScore({
+    symptom: raw.suspectedCondition || prevState.suspectedCondition || prevState.symptom,
+    condition: raw.suspectedCondition || prevState.suspectedCondition,
+    callerSpokenText: allCallerText,
+    allText: allContext,
+    duration: validatedDurForScoring,
+    chatHistory: history,
+    intake: prevState,
+    tState: prevState,
+  });
+
+  let severity = holisticScore.urgency_level;
+  let severityScore = holisticScore.score;
 
   // STRICT RULE: If the case is NOT a genuine life-and-death emergency / acute trauma, DO NOT classify as Severe!
   if (!isEmergency108 && severity === "Severe" && !isPsych) {
@@ -1719,7 +1740,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   else {
     if (dispensaryStatus.isOpen && !is104PhoneDoctor && !isAdviceSeeking) {
       referralDestination = "ESIS Dispensary";
-      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
       secondaryReferral = "104 Health Helpline";
     } else {
       referralDestination = "104 Health Helpline";
@@ -1781,11 +1802,12 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     raw.redFlags.push("Recent fall / physical impact trauma");
   }
 
-  const duration =
+  const candidateDur =
     detectedDur ||
     (!isInvalidDuration && raw.duration && raw.duration !== "Not specified" ? raw.duration : null) ||
     prevState.duration ||
     "Reported today";
+  const duration = validateCallerMentionedDuration(candidateDur, allCallerText);
 
   let probingQuestion = raw.probingQuestion || 'Ask the IP: "Could you please describe how you are feeling and what symptoms are troubling you most?"';
 
@@ -2767,6 +2789,24 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const isCardiac = !hasChestPainDenial && callerSpokeCardiac;
 
   if (isCardiac) {
+    const isLifeThreateningCardiac =
+      /\b(crushing.*(?:sweat|pasina|radiat|left arm|collapse)|radiating.*(?:arm|jaw|sweat|pasina)|sweat.*(?:chest|pain)|pasina.*(?:chhati|seena)|gasping|unconscious|behosh)\b/i.test(allContext) &&
+      !/\b(burning|acidity|gas|sharp|stinging|mild|tolerable|muscle)\b/i.test(cleanInput);
+
+    const isNonCardiacChest = /\b(burning|acidity|acid reflux|gerd|gas|sharp|stinging|muscle)\b/i.test(allContext);
+    const isSevereHospitalCardiac = !isLifeThreateningCardiac && !isNonCardiacChest && /\b(severe|tightness|angina|continuous|heavy|intense)\b/i.test(allContext);
+
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
+    const hour = istDate.getHours();
+    const isNightAfter10PM = hour >= 22 || hour < 6;
+
+    let cardiacSeverity = isLifeThreateningCardiac ? "Severe" : (isSevereHospitalCardiac ? "Severe" : (isNonCardiacChest ? "Mild" : "Moderate"));
+    let cardiacSeverityScore = isLifeThreateningCardiac ? 9 : (isSevereHospitalCardiac ? 8 : (isNonCardiacChest ? 3 : 6));
+    let cardiacReferral = isLifeThreateningCardiac
+      ? "108 Ambulance"
+      : (cardiacSeverity === "Mild" ? "ESIS Dispensary" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital"));
+
     const cardiacSteps = [
       {
         id: "cardiac_character",
@@ -2807,31 +2847,26 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       {
         id: "cardiac_dispatch",
         condition: true,
-        question:
-          'Ask the IP: "Please sit upright, do not exert yourself, and loosen tight clothing. We are triggering 108 Emergency Ambulance to transport you to the nearest hospital casualty. Is someone with you?" (Hinglish: "Kripya aaram se baith jayein aur exertion na karein. Hum 108 Ambulance bhej rahe hain. Kya koi aapke saath hai?")',
-        options: [
-          "Yes, family member is with me",
-          "I am alone, please send ambulance immediately",
-          "Taking prescribed sorbitrate / aspirin",
-          "Awaiting ambulance arrival",
-        ],
+        question: isLifeThreateningCardiac
+          ? 'Ask the IP: "Please sit upright, do not exert yourself, and loosen tight clothing. We are triggering 108 Emergency Ambulance to transport you to the nearest hospital casualty. Is someone with you?" (Hinglish: "Kripya aaram se baith jayein aur exertion na karein. Hum 108 Ambulance bhej rahe hain. Kya koi aapke saath hai?")'
+          : 'Ask the IP: "Your chest symptoms require an ECG and medical evaluation at the hospital casualty. Please avoid sudden physical exertion. Can you safely travel to the hospital?" (Hinglish: "Aapke seene ke dard ke liye aspatal jaakar ECG karwana zaroori hai. Bhaari kaam na karein. Kya aap aspatal ja sakte hain?")',
+        options: isLifeThreateningCardiac
+          ? [
+              "Yes, family member is with me",
+              "I am alone, please send ambulance immediately",
+              "Taking prescribed sorbitrate / aspirin",
+              "Awaiting ambulance arrival",
+            ]
+          : [
+              "Yes, I will go to the nearest hospital",
+              "Going to ESIC Hospital casualty",
+              "Need nearest hospital address",
+              "Pain is tolerable, resting right now",
+            ],
       },
     ];
 
     const currentStep = cardiacSteps.find((s) => s.condition) || cardiacSteps[cardiacSteps.length - 1];
-
-    const isLifeThreateningCardiac =
-      /\b(crushing|radiating|left arm|baayein haath|sweat|pasina|gasping|unconscious)\b/i.test(allContext) &&
-      !/\b(burning|acidity|gas|sharp|stinging|mild|tolerable)\b/i.test(cleanInput);
-
-    const cardiacSeverity = isLifeThreateningCardiac ? "Severe" : "Moderate";
-    const cardiacSeverityScore = isLifeThreateningCardiac ? 9 : 6;
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
-    const hour = istDate.getHours();
-    const isNightAfter10PM = hour >= 22 || hour < 6;
-
-    let cardiacReferral = isLifeThreateningCardiac ? "108 Ambulance" : (isNightAfter10PM ? "104 Health Helpline" : "ESIC Hospital");
 
     return {
       probingQuestion: enforceSingleQuestion(currentStep.question),
@@ -2843,7 +2878,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       referralDestination: cardiacReferral,
       referralReason: isLifeThreateningCardiac
         ? "High-risk crushing chest pain symptoms requiring emergency cardiac evaluation and 108 Ambulance transport."
-        : "Chest pain requires medical review at hospital casualty.",
+        : "Chest pain requires medical review and ECG at hospital casualty.",
       redFlagsDetected: isLifeThreateningCardiac ? ["Suspected Acute Coronary Syndrome"] : ["Chest discomfort reported"],
       duration: prevState.duration || "< 2 hours",
       isReadyForSummary: history.length >= 2,
@@ -2858,12 +2893,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   }
   const hasBreathlessness =
     !isBreathingDenied &&
-    /\b(breathless\w*|difficulty\s*breath\w*|trouble\s*breath\w*|shortness\s*of\s*breath|saans\s*lene\s*me|saans\s*phool|gasp\w*|wheez\w*|stridor|asthma\s*attack|choking)\b/i.test(effectiveInput);
+    /\b(struggling\s*(?:to|for)\s*breath\w*|struggle\s*to\s*breathe|breathless\w*|difficulty\s*breath\w*|trouble\s*breath\w*|shortness\s*of\s*breath|saans\s*lene\s*me|saans\s*phool|gasp\w*|wheez\w*|stridor|asthma\s*attack|choking)\b/i.test(effectiveInput);
 
   if (hasBreathlessness) {
     const isSevereBreathing =
-      /\b(gasping\s*for\s*air|unable\s*to\s*speak\s*in\s*full\s*sentences|cannot\s*speak|cannot\s*talk|blue\s*lips|cyanosis|struggling\s*for\s*breath|suffocating|choking)\b/i.test(allContext) ||
-      /\b(yes,\s*gasping|gasping|emergency\)|unable to speak|blue lips)\b/i.test(cleanInput);
+      /\b(struggling\s*to\s*breathe|struggling\s*for\s*breath|gasping\s*for\s*air|unable\s*to\s*speak\s*in\s*full\s*sentences|cannot\s*speak|cannot\s*talk|blue\s*lips|cyanosis|suffocating|choking)\b/i.test(allContext) ||
+      /\b(yes,?\s*(?:i\s*am\s*)?struggling\s*to\s*breathe|struggling to breathe|yes,\s*gasping|gasping|emergency\)|unable to speak|blue lips)\b/i.test(cleanInput);
 
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(Date.now() + (new Date().getTimezoneOffset() * 60 * 1000) + istOffset);
@@ -3767,18 +3802,20 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   }
 
-  const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(effectiveInput, isSevere ? 9 : 5, { symptom_notes: cleanInput }, prevState);
-  const isLifeThreateningCrisis = ambulanceFallbackCheck.is108;
+  const holisticScoreFallback = calculateClinicalSeverityScore({
+    symptom: currentStep?.title || prevState.suspectedCondition || prevState.symptom,
+    condition: prevState.suspectedCondition,
+    callerSpokenText: allCallerText,
+    allText: allContext,
+    duration: prevState.duration || "Reported today",
+    chatHistory: history,
+    intake: prevState,
+    tState: prevState,
+  });
 
-  // STRICT RULE: Strictly 3 clinical categories: Severe, Moderate, Mild
-  const severity = isLifeThreateningCrisis
-    ? "Severe"
-    : (isSevere && !isLifeThreateningCrisis
-      ? "Moderate"
-      : /mild|no pain/i.test(cleanInput)
-      ? "Mild"
-      : (prevState.severity || "Moderate"));
-  const severityScore = severity === "Severe" ? 10 : (severity === "Moderate" ? 6 : 3);
+  const isLifeThreateningCrisis = holisticScoreFallback.isLifeThreatening;
+  const severity = holisticScoreFallback.urgency_level;
+  const severityScore = holisticScoreFallback.score;
 
   let referralDestination;
   let referralReason;
@@ -3808,7 +3845,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     // Mild
     if (fallbackDispensaryStatus.isOpen && !/advice|phone doctor|guidance|information/i.test(effectiveInput)) {
       referralDestination = "ESIS Dispensary";
-      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
       secondaryReferral = "104 Health Helpline";
     } else {
       referralDestination = "104 Health Helpline";
@@ -3828,7 +3865,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     referralReason = null;
   }
 
-  const duration = nlp.detectedDuration || prevState.duration || "Reported today";
+  const candidateFallbackDur = nlp.detectedDuration || prevState.duration || "Reported today";
+  const duration = validateCallerMentionedDuration(candidateFallbackDur, allCallerText);
   const fallbackComorbidity = extractComorbiditiesFromText(effectiveInput, prevState.comorbidity || prevState.comorbidities);
   const fallbackAllergies = extractAllergiesFromText(effectiveInput, prevState.allergies);
   const fallbackMedications = extractMedicationsFromText(effectiveInput, prevState.medications || prevState.medication);

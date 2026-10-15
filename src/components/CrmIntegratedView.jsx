@@ -9481,10 +9481,20 @@ export function CrmIntegratedView({
                             triageResult={triageOutcome}
                             activeDirective={triageActiveDirective}
                             fillHeight={true}
-                            className="h-full flex-1 min-h-0"
                             onComplaintChange={(compiledNotes, ctx) => {
                               setTriageNotes(compiledNotes);
                               setEkmsContext(ctx);
+                              setTriageOutcome((prev) => {
+                                if (!prev) return prev;
+                                return {
+                                  ...prev,
+                                  ekms_ai_context: ctx,
+                                  intake: {
+                                    ...(prev.intake || {}),
+                                    symptom_notes: compiledNotes,
+                                  },
+                                };
+                              });
                             }}
                             onSyncFields={() => {}}
                             onReadyToShowResult={() => {}}

@@ -100,14 +100,14 @@ export const ACTION_DIRECTIVES = {
   CALL_108: {
     id: "CALL_108",
     title: "CALL 108 AMBULANCE IMMEDIATELY",
-    category: "Emergency Dispatch",
+    category: "Emergency",
     badge: "108 Ambulance",
     badgeColor: "bg-rose-700 text-white font-bold",
     cardBorder: "border-rose-400 bg-rose-50 text-rose-950 shadow-xs",
     panelLightTint: "border-rose-300/80 bg-rose-50/50 dark:bg-rose-950/25",
     topBar: "bg-rose-700",
     icon: "🚨",
-    summary: "",
+    summary: "Immediate 108 emergency ambulance dispatch.",
     checklist: [
       "1. Verify caller's current location, landmark, and contact phone number.",
       "2. Initiate 108 Emergency Ambulance dispatch immediately.",
@@ -117,14 +117,14 @@ export const ACTION_DIRECTIVES = {
   ESIC_HOSPITAL: {
     id: "ESIC_HOSPITAL",
     title: "REFER / FORWARD TO NEAREST ESIC HOSPITAL",
-    category: "Secondary Care & Casualty Evaluation",
+    category: "ESIC Hospital",
     badge: "ESIC Hospital",
     badgeColor: "bg-amber-700 text-white font-bold",
     cardBorder: "border-amber-400 bg-amber-50 text-amber-950 shadow-xs",
     panelLightTint: "border-amber-300/80 bg-amber-50/50 dark:bg-amber-950/25",
     topBar: "bg-amber-700",
     icon: "🏥",
-    summary: "",
+    summary: "ESIC Hospital for clinical evaluation.",
     checklist: [
       "1. Locate the nearest ESIC Hospital shown in Facilities below.",
       "2. Instruct caller to carry their Pehchan Card and government photo ID for urgent OPD/casualty.",
@@ -133,15 +133,14 @@ export const ACTION_DIRECTIVES = {
   ESIS_DISPENSARY: {
     id: "ESIS_DISPENSARY",
     title: "DIRECT TO NEAREST ESIS DISPENSARY",
-    category: "Primary Healthcare & Routine Outpatient",
+    category: "Dispensary",
     badge: "ESIS Dispensary",
     badgeColor: "bg-emerald-700 text-white font-bold",
     cardBorder: "border-emerald-500 bg-emerald-50 text-emerald-950 shadow-xs",
     panelLightTint: "border-emerald-300/80 bg-emerald-50/50 dark:bg-emerald-950/25",
     topBar: "bg-emerald-700",
     icon: "🩺",
-    summary:
-      "Condition is suitable for primary clinic level care. Direct the IP to their registered or nearest ESIS Dispensary for doctor consultation and free medicine dispensing.",
+    summary: "ESIS Dispensary for doctor consultation.",
     checklist: [
       "1. Check the nearest ESIS Dispensary listed under Facilities below.",
       "2. Remind IP to carry their ESIC Pehchan / Insurance card for free consultations and prescribed medicines.",
@@ -150,15 +149,14 @@ export const ACTION_DIRECTIVES = {
   TELE_104: {
     id: "TELE_104",
     title: "FORWARD TO 104 HEALTH HELPLINE",
-    category: "Tele-Doctor Consultation",
+    category: "Tele-Doctor",
     badge: "104 Health Helpline",
     badgeColor: "bg-blue-700 text-white font-bold",
     cardBorder: "border-blue-400 bg-blue-50 text-blue-950 shadow-xs",
     panelLightTint: "border-blue-300/80 bg-blue-50/50 dark:bg-blue-950/25",
     topBar: "bg-blue-700",
     icon: "📞",
-    summary:
-      "Caller requests direct medical advice or consultation with a government doctor over the phone. Transfer call to 104 Health Helpline.",
+    summary: "104 Health Helpline doctor on call.",
     checklist: [
       "1. Inform caller: 'Connecting you to 104 Health Helpline doctor now.'",
       "2. Transfer call line to 104 Health Helpline triage queue.",
@@ -169,14 +167,14 @@ export const ACTION_DIRECTIVES = {
   TIE_UP_FACILITY: {
     id: "TIE_UP_FACILITY",
     title: "REFER TO EMPANELLED TIE-UP FACILITY",
-    category: "Empanelled Network Care",
+    category: "Tie-Up Care",
     badge: "Tie-Up Facility",
     badgeColor: "bg-cyan-700 text-white font-bold",
     cardBorder: "border-cyan-400 bg-cyan-50 text-cyan-950 shadow-xs",
     panelLightTint: "border-cyan-300/80 bg-cyan-50/50 dark:bg-cyan-950/25",
     topBar: "bg-cyan-700",
     icon: "🏥",
-    summary: "",
+    summary: "Empanelled Tie-Up hospital for care.",
     checklist: [
       "1. Check the nearest empanelled tie-up facility listed under Facilities below.",
       "2. Remind IP to carry their ESIC Pehchan / Insurance card for cashless treatment under ESIC tie-up guidelines.",
@@ -185,15 +183,14 @@ export const ACTION_DIRECTIVES = {
   DIST_HOSPITAL: {
     id: "DIST_HOSPITAL",
     title: "REFER TO DISTRICT HOSPITAL / PUBLIC HEALTHCARE",
-    category: "Public Healthcare Outside ESIC",
+    category: "District Hospital",
     badge: "Govt District Hospital",
     badgeColor: "bg-blue-800 text-white font-bold",
     cardBorder: "border-blue-500 bg-blue-50 text-blue-950 shadow-xs",
     panelLightTint: "border-blue-300/80 bg-blue-50/50 dark:bg-blue-950/25",
     topBar: "bg-blue-800",
     icon: "🏥",
-    summary:
-      "Beneficiary requires public healthcare services outside ESIC network, general public specialist care, non-ESIC admissions, or child immunization.",
+    summary: "Govt District Hospital for public care.",
     checklist: [
       "1. Check the nearest Govt District Hospital listed under Facilities below.",
       "2. Remind caller to carry government photo ID / Aadhaar and medical records for OPD/admissions.",
@@ -245,6 +242,13 @@ export function resolveDirectiveIds(t, result, activeFacilities = null) {
     result?.intake?.severity_reported
   );
 
+  const scoreNum = Number(
+    t?.urgency_score ??
+    result?.ekms_ai_context?.triageState?.severityScore ??
+    result?.intake?.severity_reported ??
+    (normSeverity === "Severe" ? 9 : normSeverity === "Moderate" ? 6 : 3)
+  );
+
   // Use activeFacilities (from location search/pincode entry) if available, else fallback to result facilities
   const facs = Array.isArray(activeFacilities) && activeFacilities.length > 0
     ? activeFacilities
@@ -253,11 +257,23 @@ export function resolveDirectiveIds(t, result, activeFacilities = null) {
   const nearestEsic = facs.find((f) => isEsicHospital(f));
   const isEsicWithin15Km = Boolean(nearestEsic && nearestEsic.distance_km != null && nearestEsic.distance_km <= 15);
 
+  const isExtremeLifeThreat = Boolean(
+    /\b(cardiac arrest|unconscious|behosh|not breathing|saans nahi|collapse|crushing chest.*(?:sweat|pasina|left arm|radiat)|arterial bleed|snake\s*bite|drank poison|status epilepticus)\b/i.test(allCallerText)
+  );
+
   const hasAcuteLifeThreat = Boolean(
     Boolean(t?.call_108) ||
-    /\b(heavy bleed|massive bleed|bleeding.*stop|uncontrolled bleed|crushing chest|cardiac arrest|unconscious|behosh|not breathing|sans nahi|collapse|seizure|poison)\b/i.test(allCallerText)
+    /\b(struggling\s*(?:to|for)\s*breath\w*|cannot\s*breathe|unable\s*to\s*breathe|gasping for air|not breathing|saans nahi|cyanosis|heavy active bleed|spurting bleed|arterial bleed|crushing chest.*(?:sweat|pasina|left arm|radiat|collapse)|cardiac arrest|unconscious|behosh|unresponsive|collapse|seizure.*>|status epilepticus|drank poison|acid ingestion|snake\s*bite)\b/i.test(allCallerText) ||
+    isExtremeLifeThreat
   );
-  const isManageableAtHospital = isMorningOrDaytime && !hasAcuteLifeThreat;
+
+  // User mandate:
+  // - Forward to 108 if it is severe life-threatening emergency in case of score 9 and 10.
+  // - In score 8 forward to hospital if not life-threatening and manageable in the hospital!
+  // - Not all chest pain is an emergency! Only real life-threatening chest pain forwards to 108.
+  const isScore8 = scoreNum === 8;
+  const isScore8Manageable = isScore8 && !isExtremeLifeThreat;
+  const shouldForward108 = normSeverity === "Severe" && ((scoreNum >= 9 && hasAcuteLifeThreat) || isExtremeLifeThreat) && !isScore8Manageable;
 
   // Caller explicit facility preferences
   const callerWantsHospital =
@@ -270,17 +286,18 @@ export function resolveDirectiveIds(t, result, activeFacilities = null) {
 
   // Strictly prioritize according to user mandate and real-time 15km threshold
   if (normSeverity === "Severe") {
-    if (isManageableAtHospital) {
-      if (isEsicWithin15Km) {
-        orderedDirectiveIds = ["ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
-      } else {
-        orderedDirectiveIds = ["DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
-      }
-    } else {
+    if (shouldForward108) {
       if (isEsicWithin15Km) {
         orderedDirectiveIds = ["CALL_108", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "TELE_104", "ESIS_DISPENSARY"];
       } else {
         orderedDirectiveIds = ["CALL_108", "DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "TELE_104", "ESIS_DISPENSARY"];
+      }
+    } else {
+      // Score 8 or manageable in hospital -> Hospital is primary!
+      if (isEsicWithin15Km) {
+        orderedDirectiveIds = ["ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
+      } else {
+        orderedDirectiveIds = ["DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "CALL_108", "TELE_104", "ESIS_DISPENSARY"];
       }
     }
   } else if (normSeverity === "Moderate" || callerWantsHospital) {
@@ -742,7 +759,8 @@ export const TriageResultPanel = ({
   }, [t, result, effectiveRawFacs]);
 
   const [forwardedStatus, setForwardedStatus] = useState(() => {
-    const caseRef = result?.case_ref || result?.case_id || result?.id;
+    if (isFreshTriage || result?.is_fresh_triage) return null;
+    const caseRef = propCaseRef || result?.case_ref || result?.case_id || result?.id;
     if (result?.is_forwarded || result?.forwarded_at || result?.dispatch_id) {
       return {
         directiveId: result.forwarded_directive_id || result.dispatch_info?.directiveId,
@@ -878,7 +896,11 @@ export const TriageResultPanel = ({
   }, [bookedStatus, effectiveRawFacs]);
 
   // Strict locking: If forwarded or booked, lock directive strictly so agent cannot switch
-  const lockedDirectiveId = forwardedDirectiveId || bookedDirectiveId;
+  // But if it is a fresh triage, ensure no old lock is active unless this fresh case was specifically forwarded
+  const isFresh = Boolean(isFreshTriage || result?.is_fresh_triage);
+  const lockedDirectiveId = isFresh
+    ? (result?.is_forwarded ? forwardedDirectiveId : null)
+    : (forwardedDirectiveId || bookedDirectiveId);
 
   const [manualDirectiveId, setManualDirectiveId] = useState(null);
 
@@ -945,7 +967,8 @@ export const TriageResultPanel = ({
       return;
     }
 
-    if (typeof window !== "undefined" && caseRef) {
+    // Only search stored or cached cases if this is explicitly an existing saved case (never for fresh intake triages!)
+    if (!isFreshTriage && !result?.is_fresh_triage && typeof window !== "undefined" && caseRef) {
       try {
         const stored =
           sessionStorage.getItem(`ekms_forwarded_${caseRef}`) ||
@@ -984,7 +1007,7 @@ export const TriageResultPanel = ({
 
     // Default to null if this case is not specifically forwarded
     setForwardedStatus(null);
-  }, [result]);
+  }, [result, isFreshTriage, propCaseRef]);
 
   // Listen to broadcast CASE_FORWARDED event
   useEffect(() => {
@@ -1399,6 +1422,32 @@ export const TriageResultPanel = ({
   const durationText = rawDuration;
   const severityAndDuration = `${assessedSeverity} · ${durationText}`;
 
+  const computedSummaryEn = useMemo(() => {
+    const activeComplaint = primaryComplaint;
+    if (activeComplaint && activeComplaint !== "Primary Clinical Assessment") {
+      const demoStr = callerIntake.age && callerIntake.sex
+        ? `${callerIntake.age}-year-old ${callerIntake.sex.toLowerCase()} caller`
+        : callerIntake.age
+        ? `${callerIntake.age}-year-old caller`
+        : callerIntake.sex
+        ? `${callerIntake.sex} caller`
+        : "Caller";
+      const actionClause = activeDirective.id === "CALL_108"
+        ? "requiring immediate 108 Emergency Ambulance dispatch for acute emergency/trauma care."
+        : activeDirective.id === "ESIC_HOSPITAL"
+        ? "referred to nearest ESIC Hospital for in-person medical evaluation and secondary care."
+        : activeDirective.id === "DIST_HOSPITAL"
+        ? "referred to nearest Govt District Hospital for acute hospital care."
+        : activeDirective.id === "TIE_UP_FACILITY"
+        ? "referred to nearest Empanelled Tie-Up Facility for clinical care."
+        : activeDirective.id === "TELE_104"
+        ? "guided to 104 Health Helpline for tele-doctor consultation."
+        : "guided to nearest ESIS Dispensary for primary doctor consultation and medicine dispensing.";
+      return `${demoStr} reports ${activeComplaint} (${assessedSeverity} · ${durationText}); ${actionClause}`;
+    }
+    return t.summary_en || "";
+  }, [primaryComplaint, callerIntake, activeDirective.id, assessedSeverity, durationText, t.summary_en]);
+
   // USER MANDATE: Near Urgent and Primary Referral 01 MUST show the exact same referral!
   const primaryReferralDest = activeDirective.badge;
 
@@ -1422,12 +1471,12 @@ export const TriageResultPanel = ({
 
   if (activeDirective.id === "DIST_HOSPITAL") {
     primaryReferralReason = nearestDistHosp
-      ? `Direct patient to ${nearestDistHosp.name} (${nearestDistHosp.distance_km != null ? `${nearestDistHosp.distance_km} km away` : "nearest"}) as primary secondary hospital care (ESIC hospital > 15km).`
-      : "Direct patient to nearest Govt District Hospital as primary secondary hospital care (ESIC hospital > 15km).";
+      ? `Direct patient to ${nearestDistHosp.name} (${nearestDistHosp.distance_km != null ? `${nearestDistHosp.distance_km} km` : "nearest"}; ESIC > 15km).`
+      : "Direct patient to Govt District Hospital (ESIC > 15km).";
   } else if (activeDirective.id === "ESIC_HOSPITAL") {
     primaryReferralReason = nearestEsic
-      ? `Direct patient to ${nearestEsic.name} (${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 15km"}) for clinical evaluation and hospital care.`
-      : "Direct patient to nearest ESIC Hospital for clinical evaluation and hospital care.";
+      ? `Direct patient to ${nearestEsic.name} (${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km` : "<15km"}).`
+      : "Direct patient to ESIC Hospital (within 15km).";
   }
 
   const effectiveSecondaryDirective =
@@ -1563,7 +1612,7 @@ export const TriageResultPanel = ({
           </div>
 
           <p className="mt-4 text-base font-semibold leading-snug" data-testid="triage-summary-en">
-            {t.summary_en}
+            {computedSummaryEn}
           </p>
 
           {/* Unified Clinical Assessment & Action items directly inside Triage outcome panel */}
@@ -1707,11 +1756,35 @@ export const TriageResultPanel = ({
                     )
                   );
 
-                  const routingHint = isPrimary
-                    ? primaryReferralReason || dir.summary || dir.category
-                    : isSecondary
-                    ? secondaryReferralReason || dir.summary || dir.category
-                    : dir.summary || dir.category;
+                  const getCompactBoxSentence = (dirItem) => {
+                    if (dirItem.id === "CALL_108") {
+                      return "Immediate 108 emergency ambulance dispatch.";
+                    }
+                    if (dirItem.id === "ESIC_HOSPITAL") {
+                      return nearestEsic
+                        ? `${nearestEsic.name} (${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km` : "<15km"}) for hospital care.`
+                        : "Nearest ESIC Hospital for clinical evaluation.";
+                    }
+                    if (dirItem.id === "DIST_HOSPITAL") {
+                      return nearestDistHosp
+                        ? `${nearestDistHosp.name} (${nearestDistHosp.distance_km != null ? `${nearestDistHosp.distance_km} km` : "nearest"}) for public care.`
+                        : "Govt District Hospital for public healthcare.";
+                    }
+                    if (dirItem.id === "TIE_UP_FACILITY") {
+                      return nearestTieUp
+                        ? `${nearestTieUp.name} (${nearestTieUp.distance_km != null ? `${nearestTieUp.distance_km} km` : "nearest"}) for cashless care.`
+                        : "Empanelled Tie-Up hospital for care.";
+                    }
+                    if (dirItem.id === "TELE_104") {
+                      return "104 Health Helpline doctor on call.";
+                    }
+                    if (dirItem.id === "ESIS_DISPENSARY") {
+                      return "Nearest ESIS Dispensary for doctor consultation.";
+                    }
+                    return dirItem.summary || dirItem.category;
+                  };
+
+                  const compactSentence = getCompactBoxSentence(dir);
 
                   return (
                     <button
@@ -1734,7 +1807,7 @@ export const TriageResultPanel = ({
                         setManualDirectiveId(dir.id);
                         onDirectiveChange?.(dir.id);
                       }}
-                      className={`group relative rounded-xl p-3 text-left transition-all duration-200 border flex flex-col justify-between gap-2.5 shadow-2xs ${
+                      className={`group relative rounded-xl p-3 text-left transition-all duration-200 border flex flex-col justify-between gap-2 shadow-2xs ${
                         isSelected
                           ? `${dir.badgeColor} ring-2 ring-offset-1 ring-current shadow-md scale-[1.01] cursor-default`
                           : isLockedOther
@@ -1745,11 +1818,11 @@ export const TriageResultPanel = ({
                       {/* Top row: Label and Badges */}
                       <div className="flex items-center justify-between gap-1.5 w-full">
                         <span
-                          className={`text-[10px] font-bold uppercase tracking-wider truncate ${
+                          className={`text-[10px] font-bold uppercase tracking-wider ${
                             isSelected ? "text-white/90" : "text-muted-foreground"
                           }`}
                         >
-                          {dir.category || "Referral Directive"}
+                          {dir.category || "Referral"}
                         </span>
 
                         <div className="flex items-center gap-1 shrink-0">
@@ -1784,38 +1857,23 @@ export const TriageResultPanel = ({
                         <span className="text-base shrink-0 leading-none">{dir.icon}</span>
                         <div className="min-w-0">
                           <p
-                            className={`text-sm font-extrabold tracking-tight leading-snug truncate ${
+                            className={`text-sm font-extrabold tracking-tight leading-snug ${
                               isSelected ? "text-white" : "text-foreground"
                             }`}
                           >
                             {dir.badge}
                           </p>
-                          {dir.id === "DIST_HOSPITAL" && nearestDistHosp && (
-                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
-                              {nearestDistHosp.name} {nearestDistHosp.distance_km != null ? `(${nearestDistHosp.distance_km} km)` : ""}
-                            </p>
-                          )}
-                          {dir.id === "ESIC_HOSPITAL" && nearestEsic && (
-                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
-                              {nearestEsic.name} {nearestEsic.distance_km != null ? `(${nearestEsic.distance_km} km)` : ""}
-                            </p>
-                          )}
-                          {dir.id === "TIE_UP_FACILITY" && nearestTieUp && (
-                            <p className={`text-[10px] font-medium truncate ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
-                              {nearestTieUp.name} {nearestTieUp.distance_km != null ? `(${nearestTieUp.distance_km} km)` : ""}
-                            </p>
-                          )}
                         </div>
                       </div>
 
-                      {/* Clinical routing note */}
-                      {routingHint && (
+                      {/* Clinical routing note - completely visible small sentence */}
+                      {compactSentence && (
                         <p
-                          className={`text-[11px] font-medium leading-relaxed line-clamp-2 pt-1 border-t ${
+                          className={`text-[11px] font-medium leading-normal pt-1 border-t ${
                             isSelected ? "text-white/85 border-white/20" : "text-muted-foreground border-border/50"
                           }`}
                         >
-                          {routingHint}
+                          {compactSentence}
                         </p>
                       )}
                     </button>

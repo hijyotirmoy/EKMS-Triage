@@ -504,8 +504,8 @@ export function resolveCallerLocation(input, facilities = []) {
 /**
  * Checks if ESIS Dispensary is currently open in Assam:
  * - Monday to Friday: 10:00 AM – 4:00 PM IST
- * - 1st & 3rd Saturday: 10:00 AM – 12:00 PM IST
- * - Closed: 2nd, 4th, 5th Saturday & all Sundays
+ * - 1st, 3rd & 5th Saturday: 10:00 AM – 12:00 PM IST
+ * - Closed: 2nd & 4th Saturday & all Sundays
  */
 export function isDispensaryOpenNow(date = new Date()) {
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -517,11 +517,15 @@ export function isDispensaryOpenNow(date = new Date()) {
   const currentMinutes = hour * 60 + minute;
 
   const isSunday = day === 0;
-  const is1stOr3rdSaturday = day === 6 && ((dateOfMonth >= 1 && dateOfMonth <= 7) || (dateOfMonth >= 15 && dateOfMonth <= 21));
-  const is2ndOr4thOr5thSaturday = day === 6 && !is1stOr3rdSaturday;
+  const is1st3rdOr5thSaturday =
+    day === 6 &&
+    ((dateOfMonth >= 1 && dateOfMonth <= 7) ||
+      (dateOfMonth >= 15 && dateOfMonth <= 21) ||
+      (dateOfMonth >= 29 && dateOfMonth <= 31));
+  const is2ndOr4thSaturday = day === 6 && !is1st3rdOr5thSaturday;
 
-  if (isSunday || is2ndOr4thOr5thSaturday) return false;
-  if (is1stOr3rdSaturday) {
+  if (isSunday || is2ndOr4thSaturday) return false;
+  if (is1st3rdOr5thSaturday) {
     return currentMinutes >= 600 && currentMinutes < 720; // 10:00 AM to 12:00 PM IST
   }
   return currentMinutes >= 600 && currentMinutes < 960; // Mon-Fri 10:00 AM to 4:00 PM IST

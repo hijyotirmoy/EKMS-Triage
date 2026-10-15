@@ -12,6 +12,11 @@ import {
   isGovtDistrictHospital,
 } from "@/lib/geo";
 import { evaluateTriage, summarizeRedFlags, getDispensaryOperatingStatus, isLifeThreateningAmbulanceCase, formatClinicalSummary, extractCallerReportedProblems } from "@/lib/triageEngine";
+import {
+  calculateClinicalSeverityScore,
+  mapScoreToUrgency,
+  validateCallerMentionedDuration,
+} from "@/lib/clinicalScoring";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -113,55 +118,53 @@ export async function POST(request) {
       tState
     );
 
-    const isEmergency =
-      !isNacoHIV && (
-        triage.urgency_level === "Severe" ||
-        triage.urgency_level === "Emergency" ||
-        Number(intake.severity_reported) >= 8 ||
-        ambulanceEval.is108 ||
-        triage.call_108 ||
-        explicitReferral.includes("108")
-      );
+    const validatedDuration = validateCallerMentionedDuration(
+      intake.duration || tState?.duration || triage.duration,
+      callerSpokenText
+    );
+    intake.duration = validatedDuration;
+    triage.duration = validatedDuration;
 
-    const isSevere = isEmergency;
+    const clinicalScoreResult = calculateClinicalSeverityScore({
+      symptom: intake.primary_complaint || tState?.symptom,
+      condition: tState?.condition || tState?.suspectedCondition,
+      callerSpokenText,
+      allText: notes,
+      duration: validatedDuration,
+      chatHistory: Array.isArray(ekmsCtx.chatHistory) ? ekmsCtx.chatHistory : [],
+      intake,
+      tState,
+    });
 
-    const isPsychCase =
-      isPsychiatricCase ||
-      /tele.?manas|psychological|anxiety|depression|mental/i.test(triage.referral_destination || "") ||
-      /tele.?manas|psychological|anxiety|depression|mental/i.test(triage.call_referral_primary || "") ||
-      /anxious|anxiety|depression|depressed|stress|suicid|self.?harm|mental|panic/i.test(callerSpokenText);
+    const evaluatedScore = isNacoHIV ? 3 : clinicalScoreResult.score;
+    const urgencyCategory = isNacoHIV ? "Mild" : clinicalScoreResult.urgency_level;
+    const isSevere = urgencyCategory === "Severe";
+    const isModerate = urgencyCategory === "Moderate";
 
-    const chatChoseHospital =
-      explicitReferral.includes("hospital") ||
-      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
-      (triage.referral_destination || "").toLowerCase().includes("hospital") ||
-      (triage.call_referral_primary || "").toLowerCase().includes("hospital") ||
-      /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(callerSpokenText);
-
-    const isModerate =
-      !isSevere && !isNacoHIV && !isPsychCase && (
-        triage.urgency_level === "Moderate" ||
-        triage.urgency_level === "Urgent" ||
-        Number(intake.severity_reported) >= 4 ||
-        chatChoseHospital ||
-        explicitReferral.includes("hospital")
-      );
+    triage.urgency_level = urgencyCategory;
+    triage.assessed_severity = urgencyCategory;
+    triage.urgency_score = evaluatedScore;
+    triage.severity_score = evaluatedScore;
+    triage.assessed_severity_score = evaluatedScore;
 
     // Assess time of day in IST and hospital manageability for Severe cases
     const nowUtc = new Date();
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(nowUtc.getTime() + (nowUtc.getTimezoneOffset() * 60 * 1000) + istOffsetMs);
     const istHour = istDate.getHours();
-    const isMorningOrDaytime = istHour >= 6 && istHour < 18; // 6:00 AM to 6:00 PM IST
-
+    const isScore8 = evaluatedScore === 8;
+    const isExtremeLifeThreat = Boolean(
+      /\b(cardiac arrest|unconscious|behosh|not breathing|saans nahi|collapse|crushing chest.*(?:sweat|pasina|left arm|radiat)|arterial bleed|snake\s*bite|drank poison|status epilepticus)\b/i.test(notes)
+    );
     const hasAcuteLifeThreat = Boolean(
+      clinicalScoreResult.isLifeThreatening ||
       ambulanceEval.is108 ||
       explicitReferral.includes("108") ||
-      /\b(unconscious|behos|not breathing|sans nahi|collapse|cardiac|heart attack|chest pain with sweat|severe breath|gasping|choking|heavy bleed|khoon beh raha|arterial|seizure|daura|poison|zeher|electrocution|major accident|head injury unconscious)\b/i.test(notes)
+      /\b(struggling\s*(?:to|for)\s*breath\w*|cannot\s*breathe|unable\s*to\s*breathe|gasping for air|not breathing|saans nahi|cyanosis|heavy active bleed|spurting bleed|arterial bleed|crushing chest.*(?:sweat|pasina|left arm|radiat|collapse)|cardiac arrest|unconscious|behosh|unresponsive|collapse|seizure.*>|status epilepticus|drank poison|acid ingestion|snake\s*bite)\b/i.test(notes) ||
+      isExtremeLifeThreat
     );
-    const isManageableAtHospital = isMorningOrDaytime && !hasAcuteLifeThreat;
-
-    const urgencyCategory = isSevere ? "Severe" : (isModerate ? "Moderate" : "Mild");
+    const isScore8Manageable = isScore8 && !isExtremeLifeThreat;
+    const isManageableAtHospital = isScore8Manageable || !hasAcuteLifeThreat;
 
     // 2. Resolve location & rank nearest facilities safely (max 50km, exact pincode match first)
     let facilities = [];
@@ -191,6 +194,14 @@ export async function POST(request) {
     } catch {
       nearest_facilities = facilities;
     }
+
+    const isPsychCase = isPsychiatricCase;
+    const chatChoseHospital =
+      explicitReferral.includes("hospital") ||
+      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
+      (triage.referral_destination || "").toLowerCase().includes("hospital") ||
+      (triage.call_referral_primary || "").toLowerCase().includes("hospital") ||
+      /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(callerSpokenText);
 
     const hasExplicitSpecialReferral =
       isNacoHIV ||
@@ -237,7 +248,7 @@ export async function POST(request) {
       distance_km: nearestDispensary?.distance_km ?? null,
       role: "Primary Care Clinic",
       status: dispStatus.isOpen ? "Open Now" : "Closed",
-      hours: "Mon-Fri 10am-4pm, 1st & 3rd Sat 10am-12pm",
+      hours: "Mon-Fri 10am-4pm, 1st, 3rd & 5th Sat 10am-12pm",
     };
     const dir104 = {
       rank: 0,
@@ -306,7 +317,9 @@ export async function POST(request) {
       // -------------------------------------------------------------
       triage.urgency_level = "Severe";
       triage.assessed_severity = "Severe";
-      triage.urgency_score = 10;
+      triage.urgency_score = evaluatedScore;
+      triage.severity_score = evaluatedScore;
+      triage.assessed_severity_score = evaluatedScore;
 
       if (isManageableAtHospital) {
         // Morning / daytime manageable directly in hospital
@@ -365,30 +378,34 @@ export async function POST(request) {
       triage.call_108 = false;
       triage.urgency_level = "Moderate";
       triage.assessed_severity = "Moderate";
-      triage.urgency_score = 6;
+      triage.urgency_score = evaluatedScore;
+      triage.severity_score = evaluatedScore;
+      triage.assessed_severity_score = evaluatedScore;
 
       if (isEsicWithin15Km) {
         forwardingHierarchy = [dirEsic, dirGovt, dirTieUp, dirDispensary, dir104, dir108];
         triage.recommended_facility_type = nearestEsic
           ? `${nearestEsic.name} (ESIC Hospital · ${nearestEsic.distance_km != null ? `${nearestEsic.distance_km} km` : "within 15km"})`
           : "ESIC Hospital (Secondary Care)";
-        triage.recommended_action = `Moderate condition; ESIC Hospital is available within 15km. Advise patient to proceed to ${esicName} (${nearestEsic?.distance_km != null ? `${nearestEsic.distance_km} km away` : "within 15km"}) or Govt District Hospital for clinical evaluation.`;
+        const esicDistStr = nearestEsic?.distance_km != null ? `${nearestEsic.distance_km} km` : "<15km";
+        triage.recommended_action = `Direct patient to ${esicName} (${esicDistStr}).`;
         triage.referral_destination = esicName;
         triage.call_referral_primary = esicName;
-        triage.call_referral_primary_reason = `Direct patient to ${esicName} (within 15km) for clinical evaluation and hospital care.`;
+        triage.call_referral_primary_reason = `Direct patient to ${esicName} (${esicDistStr}).`;
         triage.call_referral_secondary = distName;
-        triage.call_referral_secondary_reason = `Govt District Hospital (${distName}) for secondary hospital care backup.`;
+        triage.call_referral_secondary_reason = `Govt District Hospital (${distName}) for backup care.`;
       } else {
         forwardingHierarchy = [dirGovt, dirTieUp, dirEsic, dirDispensary, dir104, dir108];
         triage.recommended_facility_type = nearestDistHosp
           ? `${nearestDistHosp.name} (Govt District Hospital)`
           : "Govt District Hospital";
-        triage.recommended_action = `Moderate condition; ESIC Hospital is beyond 15km. Advise patient to proceed to nearest Govt District Hospital (${distName}) or Empanelled Tie-Up Hospital.`;
+        const distDistStr = nearestDistHosp?.distance_km != null ? `${nearestDistHosp.distance_km} km; ` : "";
+        triage.recommended_action = `Direct patient to ${distName} (${distDistStr}ESIC > 15km).`;
         triage.referral_destination = distName;
         triage.call_referral_primary = distName;
-        triage.call_referral_primary_reason = `Direct patient to ${distName} as primary secondary hospital care (ESIC hospital > 15km).`;
+        triage.call_referral_primary_reason = `Direct patient to ${distName} (${distDistStr}ESIC > 15km).`;
         triage.call_referral_secondary = tieUpName;
-        triage.call_referral_secondary_reason = `Empanelled Tie-Up Hospital (${tieUpName}) for cashless secondary care.`;
+        triage.call_referral_secondary_reason = `Empanelled Tie-Up Hospital (${tieUpName}) for cashless care.`;
       }
     } else {
       // -------------------------------------------------------------
@@ -402,8 +419,9 @@ export async function POST(request) {
       // -------------------------------------------------------------
       triage.call_108 = false;
       triage.urgency_level = "Mild";
-      triage.assessed_severity = "Mild";
-      triage.urgency_score = 3;
+      triage.urgency_score = evaluatedScore;
+      triage.severity_score = evaluatedScore;
+      triage.assessed_severity_score = evaluatedScore;
 
       if (dispStatus.isOpen && !explicitReferral.includes("104")) {
         forwardingHierarchy = [dirDispensary, dir104, dirEsic, dirGovt, dirTieUp, dir108];
@@ -411,8 +429,8 @@ export async function POST(request) {
           ? `${nearestDispensary.name} (ESIS Dispensary · Open Now)`
           : "ESIS Dispensary (Primary Care OPD)";
         triage.recommended_action = nearestDispensary
-          ? `Dispensary is open now. Advise patient to visit ${nearestDispensary.name} (${nearestDispensary.pincode ? `PIN: ${nearestDispensary.pincode}, ` : ""}${nearestDispensary.distance_km != null ? `${nearestDispensary.distance_km} km away` : "nearest"}) during OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM) for doctor consultation and medicines.`
-          : "Dispensary is open now. Advise patient to visit nearest ESIS Dispensary during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM).";
+          ? `Dispensary is open now. Advise patient to visit ${nearestDispensary.name} (${nearestDispensary.pincode ? `PIN: ${nearestDispensary.pincode}, ` : ""}${nearestDispensary.distance_km != null ? `${nearestDispensary.distance_km} km away` : "nearest"}) during OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) for doctor consultation and medicines.`
+          : "Dispensary is open now. Advise patient to visit nearest ESIS Dispensary during regular OPD hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM).";
         triage.referral_destination = dispName;
         triage.call_referral_primary = dispName;
         triage.call_referral_primary_reason = nearestDispensary
@@ -423,12 +441,12 @@ export async function POST(request) {
       } else {
         forwardingHierarchy = [dir104, dirDispensary, dirEsic, dirGovt, dirTieUp, dir108];
         triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
-        triage.recommended_action = "Dispensary is currently closed. Advise caller to connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone, or visit ESIS Dispensary during open hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM).";
+        triage.recommended_action = "Dispensary is currently closed. Advise caller to connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone, or visit ESIS Dispensary during open hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM).";
         triage.referral_destination = "104 Health Helpline";
         triage.call_referral_primary = "104 Health Helpline";
         triage.call_referral_primary_reason = "Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
         triage.call_referral_secondary = dispName;
-        triage.call_referral_secondary_reason = `Visit nearest ESIS Dispensary (${dispName}) during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st & 3rd Sat 10:00 AM – 12:00 PM) for in-person checkup.`;
+        triage.call_referral_secondary_reason = `Visit nearest ESIS Dispensary (${dispName}) during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) for in-person checkup.`;
       }
     }
 
@@ -462,8 +480,8 @@ export async function POST(request) {
     triage.secondary_referral_destination = sDest;
 
     // Ensure clinical summary strictly synchronizes with the final primary forward destination and caller demographics
-    const finalSeverity = triage.urgency_level || (Number(intake.severity_reported) >= 8 ? "Severe" : (Number(intake.severity_reported) >= 4 ? "Moderate" : "Mild"));
-    const finalDuration = intake.duration || triage.duration || "Reported today";
+    const finalSeverity = evaluatedScore;
+    const finalDuration = validatedDuration;
     const callerProblems = extractCallerReportedProblems({
       result: { ekms_ai_context: ekmsCtx, intake, caller_spoken_text: callerSpokenText },
       callerIntake: intake,
@@ -473,6 +491,7 @@ export async function POST(request) {
       ? callerProblems.join(" · ")
       : (triage.primary_complaint || notes || "Primary Clinical Assessment");
     
+    intake.caller_spoken_text = callerSpokenText;
     const formattedSummary = formatClinicalSummary(
       intake,
       finalComplaint,
