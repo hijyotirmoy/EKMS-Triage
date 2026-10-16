@@ -212,9 +212,24 @@ export function calculateClinicalSeverityScore({
   // --- B. FEVER / INFECTION ---
   const isFever = /\b(fever|bukhar|temperature|taapman|chills|shivering|kampkampi|rigor)\b/i.test(combinedContext);
   if (isFever) {
-    const hasShakingChills = /\b(shivering|chills|kampkampi|rigor|teeth chattering)\b/i.test(combinedContext);
-    const hasHighTemp = /\b(high fever|>102|103|104|105|bahut tez bukhar)\b/i.test(combinedContext);
-    const hasAlteredMental = /\b(delirium|confusion|stiff neck|gardan akad|petechiae|rash)\b/i.test(combinedContext);
+    const isCallerStatingMildFever =
+      /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(combinedContext) ||
+      (/\b(fever|bukhar)\b/i.test(combinedContext) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(combinedContext));
+
+    const deniesChillsOrShivering =
+      /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(combinedContext);
+
+    const hasHighTemp =
+      !isCallerStatingMildFever &&
+      /\b(high fever|>102|103|104|105|bahut tez bukhar|severe fever)\b/i.test(combinedContext);
+
+    const hasShakingChills =
+      !deniesChillsOrShivering &&
+      !isCallerStatingMildFever &&
+      /\b(shivering|chills|kampkampi|rigor|teeth chattering)\b/i.test(combinedContext);
+
+    const hasAlteredMental =
+      /\b(delirium|confusion|stiff neck|gardan akad|petechiae|purpura)\b/i.test(combinedContext);
 
     if ((hasHighTemp && hasShakingChills) || hasAlteredMental) {
       // Severe febrile presentation with systemic sepsis signs
@@ -228,7 +243,10 @@ export function calculateClinicalSeverityScore({
       };
     }
 
-    if (hasHighTemp || hasShakingChills || /\b(2-3 days|4-7 days|body ache|badan dard|vomit|weakness)\b/i.test(combinedContext)) {
+    // Prolonged fever (> 5-7 days / > 1 week) or high fever without chills or persistent vomiting
+    const isProlongedFever = /\b(more than a week|weeks?|>7 days|5-7 days|persistent fever|continuous vomiting|cannot drink)\b/i.test(combinedContext);
+
+    if ((hasHighTemp || hasShakingChills || isProlongedFever) && !isCallerStatingMildFever) {
       // Score 5 to 7: Moderate
       const score = hasShakingChills ? 7 : 6;
       return {
@@ -236,18 +254,18 @@ export function calculateClinicalSeverityScore({
         urgency_level: "Moderate",
         assessed_severity: "Moderate",
         duration: validatedDuration,
-        reasoning: "Moderate febrile illness with measurable constitutional symptoms requiring general physician assessment and lab tests at hospital.",
+        reasoning: "Moderate febrile illness with high temperature or prolonged course (> 5-7 days) requiring physician evaluation and laboratory workup at hospital.",
         isLifeThreatening: false,
       };
     }
 
-    // Low-grade / early fever without chills: Score 1 to 4 (Mild)
+    // Mild low-grade fever (even with body aches or lasting 1-3 days): Score 1 to 4 (Mild)
     return {
       score: 3,
       urgency_level: "Mild",
       assessed_severity: "Mild",
       duration: validatedDuration,
-      reasoning: "Low-grade, early-stage fever with stable vitals; manageable through OPD (ESIS Dispensary / 104) with hydration and supportive care.",
+      reasoning: "Mild low-grade fever with stable vitals; manageable through outpatient care (ESIS Dispensary / 104 Health Helpline) with oral antipyretics, hydration, and rest.",
       isLifeThreatening: false,
     };
   }

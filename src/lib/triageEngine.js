@@ -375,6 +375,15 @@ export function stripNegatedPhrases(text = "") {
     " "
   );
 
+  // 6. Explicit clarification overrides (e.g. caller clarifies "no shivering" or "no chills" after chip had "fever with chills")
+  if (
+    /\b(?:no|without|bina|not\s+having)\s+(?:shivering|chills|kampkampi|hilaav|shaking)\b/i.test(text) ||
+    /\b(?:shivering|chills|kampkampi)\s*(?:nahi|nehi|nhi|theek|normal)\b/i.test(text) ||
+    /\b(?:mild\s+fever,?\s*no\s+shivering)\b/i.test(text)
+  ) {
+    clean = clean.replace(/\b(?:and\s+|with\s+)?(?:chills|shivering|kampkampi|shaking)\b/gi, " ");
+  }
+
   return clean.replace(/\s+/g, " ").trim();
 }
 
@@ -614,7 +623,12 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   const deniesChestPain = /\b(no\s+chest\s*pain|not\s+have\s+chest|don'?t\s+have\s+chest|chhati\s*me\s*dard\s*nahi|no\s+pain\s*in\s*chest)\b/i.test(text);
   const deniesBleeding = /\b(no\s+bleed|not\s+bleeding|don'?t\s+have\s+bleed|khoon\s*nahi|no\s+cut)\b/i.test(text);
   const deniesBreathing = /\b(no\s+breath|no\s+shortness|saans\s*theek|able\s+to\s+breathe|speak\s+normally)\b/i.test(text);
-  const deniesVomiting = /\b(no\s+vomit|not\s+vomiting|don'?t\s+have\s+vomit|ulti\s*nahi)\b/i.test(text);
+  const isCallerMildFever =
+    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(text) ||
+    (/\b(fever|bukhar)\b/i.test(text) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(text));
+
+  const callerDeniesChillsOrShivering =
+    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(text);
 
   // Check if a raw flag is genuinely supported by what the IP actually said
   const isFlagSupportedByCaller = (flagStr) => {
@@ -644,7 +658,14 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
       fLower.includes("rigor")
     ) {
       if (deniesFever) return false;
-      return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|kapkapi|10[2-5]\s*(?:°|f|deg))\b/i.test(affirmativeText);
+      if (fLower.includes("high fever") || fLower.includes("shiver") || fLower.includes("chill")) {
+        if (isCallerMildFever || callerDeniesChillsOrShivering) return false;
+        return (
+          /\b(high fever|tez bukhar|10[2-6]\s*(?:°|f|deg)|severe fever)\b/i.test(affirmativeText) &&
+          /\b(chills|shivering|rigor|kapkapi)\b/i.test(affirmativeText)
+        );
+      }
+      return /\b(high fever|tez bukhar|10[2-5]\s*(?:°|f|deg))\b/i.test(affirmativeText);
     }
 
     // Suicidal / Self-harm checks
@@ -788,7 +809,12 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // High Fever with chills, rigors, or shivering (Excluding helpline 104)
   if (
     !deniesFever &&
-    /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi|thand lagna|10[2-6]\s*(?:°|f|deg))\b/i.test(
+    !isCallerMildFever &&
+    !callerDeniesChillsOrShivering &&
+    /\b(high fever|tez bukhar|10[2-6]\s*(?:°|f|deg)|severe fever|bahut tez bukhar)\b/i.test(
+      affirmativeText
+    ) &&
+    /\b(chills|shivering|rigor|kapkapi|thand lagna)\b/i.test(
       affirmativeText
     )
   ) {
@@ -1459,9 +1485,16 @@ export function extractCallerReportedProblems(params = {}) {
     addProblem("Acute Diarrhea / Loose Motions", isPriority);
   }
 
-  // Fever & Chills / Shivering (Strict separation: never add chills if only fever was stated!)
+  // Fever & Chills / Shivering (Strict separation: never add chills if only fever was stated or if caller clarifies mild fever/no shivering!)
+  const isCallerMildFeverInProb =
+    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(combinedCallerText) ||
+    (/\b(fever|bukhar)\b/i.test(combinedCallerText) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(combinedCallerText));
+
+  const callerDeniesChillsInProb =
+    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(combinedCallerText);
+
   const callerMentionedFever = !deniesFever && /\b(fever|bukhar|temperature|high fever|tez bukhar)\b/i.test(combinedCallerText) && /\b(fever|bukhar|temperature|high fever|tez bukhar)\b/i.test(affirmativeText);
-  const callerMentionedChills = !deniesFever && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(combinedCallerText) && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(affirmativeText);
+  const callerMentionedChills = !deniesFever && !callerDeniesChillsInProb && !isCallerMildFeverInProb && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(combinedCallerText) && /\b(chills|shivering|kapkapi|thand lag rahi)\b/i.test(affirmativeText);
 
   if (callerMentionedFever && callerMentionedChills) {
     const isPriority = /\b(fever|bukhar|temperature|chills|shivering)\b/i.test(lastAffirmative);
@@ -1469,8 +1502,9 @@ export function extractCallerReportedProblems(params = {}) {
     addProblem(isHigh ? "High Fever with Chills & Shivering" : "Fever with Chills", isPriority);
   } else if (callerMentionedFever) {
     const isPriority = /\b(fever|bukhar|temperature)\b/i.test(lastAffirmative);
-    const isHigh = /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
-    addProblem(isHigh ? "High Fever" : "Fever", isPriority);
+    const isHigh = !isCallerMildFeverInProb && /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
+    const label = isHigh ? "High Fever" : (isCallerMildFeverInProb ? "Mild Fever" : "Fever");
+    addProblem(label, isPriority);
   } else if (callerMentionedChills) {
     const isPriority = /\b(chills|shivering|kapkapi)\b/i.test(lastAffirmative);
     addProblem("Chills & Shivering", isPriority);
@@ -1686,19 +1720,28 @@ async function evaluateRawTriage(intake) {
   const isElderly = age != null && age >= 60;
   const isChild = age != null && age < 12;
 
+  const isCallerMildFever =
+    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(allText) ||
+    (/\b(fever|bukhar)\b/i.test(allText) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(allText));
+
+  const callerDeniesChillsOrShivering =
+    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(allText);
+
   // Normal fever / mild illness check (e.g. 60+ with simple normal fever without red flags is NOT an emergency!)
   const isNormalFeverOrMild =
-    severity <= 5 &&
-    !/\b(chills|shivering|rigor|breath|saans|chest|bleed|fall|unconscious|headache|vomit|seizure|confusion)\b/i.test(allText) &&
+    (severity <= 5 || isCallerMildFever) &&
+    !/\b(high fever|tez bukhar|severe breath|saans nahi|chest|bleed|unconscious|seizure)\b/i.test(allText) &&
     !duration.includes("week") &&
     !duration.includes("4-7");
 
   // Determine effective severity considering age, clinical condition, and red flags:
   let effectiveSeverity = severity;
-  if (isElderly && !isNormalFeverOrMild && (severity >= 6 || /\b(chills|rigor|breath|chest|fall|weakness|dizzy|unsteady)\b/i.test(allText))) {
-    effectiveSeverity = Math.max(8, severity);
-  } else if (isChild && !isNormalFeverOrMild && severity >= 6) {
-    effectiveSeverity = Math.max(8, severity);
+  if (!isNormalFeverOrMild && !isCallerMildFever) {
+    if (isElderly && (severity >= 6 || /\b(chills|rigor|breath|chest|fall|weakness|dizzy|unsteady)\b/i.test(allText))) {
+      effectiveSeverity = Math.max(8, severity);
+    } else if (isChild && severity >= 6) {
+      effectiveSeverity = Math.max(8, severity);
+    }
   }
 
   // NACO 1097: HIV / AIDS / Sexual Disease / STI inquiry

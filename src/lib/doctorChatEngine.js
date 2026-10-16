@@ -2093,6 +2093,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       userUtterances
     ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever|high grade fever)\b/i.test(userUtterances);
 
+  const isCallerMildFever =
+    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(allContext) ||
+    (/\b(fever|bukhar)\b/i.test(allContext) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(allContext));
+
+  const callerDeniesChillsOrShivering =
+    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(allContext);
+
   let finalCondition = raw.suspectedCondition;
   if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
     finalCondition = "Traumatic Fall / Impact Injury Assessment";
@@ -2102,7 +2109,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     } else if (/\b(chest pain|chhati|heart)\b/i.test(affirmativeCallerText)) {
       finalCondition = "Acute Chest Pain / Discomfort";
     } else if (!callerDeniesFever && /\b(fever|bukhar)\b/i.test(affirmativeCallerText)) {
-      finalCondition = "Febrile Symptoms / Fever";
+      finalCondition = isCallerMildFever ? "Mild Febrile Symptoms / Low-Grade Fever" : "Febrile Symptoms / Fever";
     } else {
       const cleaned = finalCondition.replace(/^caller reports (?:an? )?/i, "").replace(/[.;].*$/, "");
       finalCondition = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
@@ -2139,6 +2146,12 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   const prevCondition = prevState.suspectedCondition || prevState.initialChiefComplaint || "";
   finalCondition = smartlyMergeConditions(prevCondition, finalCondition);
 
+  if (isCallerMildFever || callerDeniesChillsOrShivering) {
+    finalCondition = finalCondition.replace(/\bFever\s*&\s*Chills\b/gi, "Mild Fever");
+    finalCondition = finalCondition.replace(/\bFebrile Symptoms with Chills\b/gi, "Mild Febrile Symptoms");
+    finalCondition = finalCondition.replace(/\bHigh fever with chills and shivering\b/gi, "Mild Fever");
+  }
+
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
 
@@ -2169,7 +2182,14 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
         fLower.includes("pyrexia")
       ) {
         if (callerDeniesFever) return false;
-        return /\b(high fever|tez bukhar|bukhar|fever|chills|shivering|rigor|10[2-5]\s*(?:°|f|deg))\b/i.test(
+        if (fLower.includes("high fever") || fLower.includes("shiver") || fLower.includes("chill")) {
+          if (isCallerMildFever || callerDeniesChillsOrShivering) return false;
+          return (
+            /\b(high fever|tez bukhar|10[2-6]\s*(?:°|f|deg)|severe fever)\b/i.test(affirmativeCallerText) &&
+            /\b(chills|shivering|rigor|kapkapi)\b/i.test(affirmativeCallerText)
+          );
+        }
+        return /\b(high fever|tez bukhar|10[2-5]\s*(?:°|f|deg))\b/i.test(
           affirmativeCallerText
         );
       }
@@ -2203,7 +2223,13 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(affirmativeCallerText)) {
     addDetectedFlag("Inability to retain oral fluids");
   }
-  if (!callerDeniesFever && /\b(high fever|tez bukhar|chills|shivering|rigor|kapkapi)\b/i.test(affirmativeCallerText)) {
+  if (
+    !callerDeniesFever &&
+    !isCallerMildFever &&
+    !callerDeniesChillsOrShivering &&
+    /\b(high fever|tez bukhar|severe fever|10[2-6]\s*(?:°|f|deg)|bahut tez bukhar)\b/i.test(affirmativeCallerText) &&
+    /\b(chills|shivering|rigor|kapkapi|thand lagna)\b/i.test(affirmativeCallerText)
+  ) {
     addDetectedFlag("High fever with chills and shivering");
   }
   if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(affirmativeCallerText)) {
@@ -3220,7 +3246,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       };
     }
   } else if (/\b(fever|bukhar|temperature|chills|shivering|cold|sardi)\b/i.test(effectiveInput)) {
-    conditionLabel = "Febrile Symptoms with Chills";
+    const isMildInput = /\b(mild|halka|low grade)\b/i.test(effectiveInput);
+    conditionLabel = isMildInput ? "Mild Febrile Symptoms" : "Febrile Symptoms";
     if (!hasKnownDuration && !hasAsked(["kitne din", "how many days", "duration", "since when", "kab se"])) {
       currentStep = {
         title: "Febrile Pattern & Onset",
@@ -3231,19 +3258,20 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "4 to 7 days (Ongoing)",
           "More than a week (Persistent)",
         ],
-        severity: "Severe",
+        severity: isMildInput ? "Mild" : "Moderate",
       };
     } else if (!hasAsked(["gasping", "breath", "saans", "haanf", "full sentences", "chills"])) {
       currentStep = {
         title: "Febrile Associated Symptoms & Airway Warning Signs",
         question: 'Ask the IP: "Are you having chills with shivering, or any breathing difficulty like gasping for air or inability to speak in full sentences?" (Hinglish: "Kya bukhar ke saath thand/kampkampi hai, ya saans lene me takleef jaise haanfna ya poori baat na bol pana?")',
         options: [
+          "Mild fever, no shivering (Manageable at home/dispensary)",
           "High fever with chills and shivering, breathing is manageable",
           "No, I can speak normally but feel breathless",
           "Severe breathing difficulty, gasping for air (Emergency)",
           "High fever with severe body ache and headache",
         ],
-        severity: "Severe",
+        severity: /\b(high fever|tez bukhar|severe|chills|shivering)\b/i.test(effectiveInput) ? "Severe" : "Mild",
       };
     } else {
       currentStep = {
