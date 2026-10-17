@@ -16,6 +16,7 @@ import {
   calculateClinicalSeverityScore,
   mapScoreToUrgency,
   validateCallerMentionedDuration,
+  doesCaseNeedMedicalTreatment,
 } from "@/lib/clinicalScoring";
 
 export const dynamic = "force-dynamic";
@@ -463,6 +464,21 @@ export async function POST(request) {
           : "Visit nearest ESIS Dispensary during OPD hours.";
         triage.call_referral_secondary = "104 Health Helpline";
         triage.call_referral_secondary_reason = "104 Health Helpline for 24x7 tele-doctor consultation over the phone.";
+      } else if (doesCaseNeedMedicalTreatment({ severity: "Mild", score: evaluatedScore, text: notes, isPsych: isPsychCase, isNaco: isNacoHIV })) {
+        const primaryHospChoice = isEsicWithin15Km ? dirEsic : dirGovt;
+        const secondaryHospChoice = isEsicWithin15Km ? dirGovt : dirEsic;
+        const hospDestName = isEsicWithin15Km ? esicName : distName;
+
+        forwardingHierarchy = [primaryHospChoice, secondaryHospChoice, dirTieUp, dir104, dirDispensary, dir108];
+        triage.recommended_facility_type = isEsicWithin15Km
+          ? `${esicName} (24x7 Emergency / Casualty · within 15km)`
+          : `${distName} (Govt District Hospital · 24x7 Casualty)`;
+        triage.recommended_action = `Dispensary is currently closed and patient's condition requires medical treatment. Direct patient to ${hospDestName} for in-person evaluation. 104 Health Helpline available for interim tele-doctor guidance while traveling.`;
+        triage.referral_destination = hospDestName;
+        triage.call_referral_primary = hospDestName;
+        triage.call_referral_primary_reason = `Direct patient to ${hospDestName} casualty for in-person medical treatment (dispensary closed).`;
+        triage.call_referral_secondary = "104 Health Helpline";
+        triage.call_referral_secondary_reason = "104 Health Helpline for interim doctor consultation support.";
       } else {
         forwardingHierarchy = [dir104, dirDispensary, dirEsic, dirGovt, dirTieUp, dir108];
         triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";

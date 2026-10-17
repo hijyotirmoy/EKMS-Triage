@@ -449,8 +449,47 @@ export function calculateClinicalSeverityScore({
     };
   }
 
+  // --- D0. UPPER GI BLEEDING & PERSISTENT FLUID LOSS (HEMATEMESIS / DEHYDRATION) ---
+  const hasHematemesis = /\b(hematemesis|blood in (?:the\s+)?vomit|blood.*vomit|vomit.*blood|vomiting blood|coffee.?ground|khoon.*ulti|ulti.*khoon|blood in stool|melena|black tarry stool)\b/i.test(combinedContext) &&
+    !/\b(no\s+blood|without\s+blood|blood\s*nahi|khoon\s*nahi)\b/i.test(combinedContext);
+  const hasInabilityToRetainFluids = /\b(cannot keep.*fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|vomit immediately after drinking|pani nahi ruk raha|continuous vomit\w*|persistent vomit\w*)\b/i.test(combinedContext);
+
+  if (hasHematemesis || hasInabilityToRetainFluids) {
+    const isLifeThreateningGI = /\b(large amount of blood|massive blood|bright red.*large|fainted|blackout|behosh|collapse|unresponsive|pale and clammy|dizzy upon standing)\b/i.test(combinedContext);
+    if (isLifeThreateningGI) {
+      return {
+        score: 10,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Acute severe upper gastrointestinal hemorrhage with hemodynamic compromise; requires immediate 108 Emergency Ambulance dispatch for resuscitation and emergency endoscopy.",
+        isLifeThreatening: true,
+      };
+    }
+
+    if (hasHematemesis) {
+      return {
+        score: 8,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Hematemesis (blood in vomit) indicates upper gastrointestinal mucosal bleeding; requires immediate hospital casualty evaluation, IV fluid resuscitation, and emergency endoscopy.",
+        isLifeThreatening: false,
+      };
+    }
+
+    return {
+      score: 7,
+      urgency_level: "Moderate",
+      assessed_severity: "Moderate",
+      duration: validatedDuration,
+      reasoning: "Persistent vomiting with inability to retain oral fluids; requires physician examination, parenteral antiemetics, and IV rehydration at hospital.",
+      isLifeThreatening: false,
+    };
+  }
+
   if (isAbdominal) {
-    if (/\b(severe pet dard|rigid|vomiting blood|intense cramp|cannot stand)\b/i.test(combinedContext)) {
+    if (/\b(severe pet dard|rigid|intense cramp|cannot stand)\b/i.test(combinedContext)) {
       return {
         score: 7,
         urgency_level: "Moderate",
@@ -578,3 +617,46 @@ export function calculateClinicalSeverityScore({
     isLifeThreatening: false,
   };
 }
+
+/**
+ * Evaluates whether a case requires physical in-person medical treatment (doctor examination,
+ * medication dispensing, wound care/dressing, IV fluids, injections, procedures, or hospital admission)
+ * versus a case that can be safely managed by telephone consultation alone (104 Health Helpline).
+ *
+ * USER MANDATE:
+ * - Send to 104 ONLY where the condition can be fixed by consultation (advice, guidance, counselling).
+ * - If more than consultation is needed (medical treatment needed), and dispensary is closed,
+ *   DO NOT stop at 104; forward to healthcare facilities (ESIC Hospital / Govt District Hospital).
+ */
+export function doesCaseNeedMedicalTreatment({
+  severity = "Mild",
+  score = 3,
+  text = "",
+  isPsych = false,
+  isNaco = false,
+} = {}) {
+  // Pure consultation cases: Tele-MANAS emotional distress or NACO/HIV informational counselling
+  if (isPsych || isNaco) return false;
+
+  // Moderate or Severe presentations ALWAYS require hospital/physical clinical care
+  if (severity === "Severe" || severity === "Moderate" || Number(score) >= 5) {
+    return true;
+  }
+
+  const clean = (text || "").toLowerCase();
+
+  // Pure phone advice inquiries where caller explicitly only wants advice / information / helpline / counseling
+  const isPurePhoneAdvice =
+    /\b(phone doctor|tele.?consult|104 health|call doctor|doctor on phone|phone par baat|phone par doctor|advice only|salah chahiye|guidance|diet advice|home remedy|gharelu|vaccine schedule|tika schedule|general inquiry|general information|health tips)\b/i.test(clean) &&
+    !/\b(blood|bleed|cut|wound|fracture|burn|vomit.*blood|blood.*vomit|severe pain|intense pain|cannot breathe|fainted|fever|bukhar|infection|medicine prescription)\b/i.test(clean);
+
+  if (isPurePhoneAdvice) {
+    return false;
+  }
+
+  // Any reported physical symptom/illness that warrants doctor physical checkup or prescription medicines
+  const hasPhysicalMedicalSymptom = /\b(fever|bukhar|vomit|ulti|blood|khoon|cut|wound|ghao|pain|dard|cough|khansi|cold|sardi|burn|jalna|injury|chot|accident|sprain|fracture|rash|diarrhea|dast|loose motion|swelling|sujan|ear|eye|infection|stitch|abscess|chills|shivering|headache|weakness|dizzy|ache|sore|ill|sick|bimari|dawai|tablet|dose)\b/i.test(clean);
+
+  return hasPhysicalMedicalSymptom || !clean.includes("advice");
+}
+

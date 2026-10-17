@@ -391,12 +391,13 @@ async function callOpenRouterProxy({
   }
 
   const totalKeys = allKeys.length;
+  const attemptsLimit = Math.min(2, totalKeys);
 
-  for (let attempt = 0; attempt < totalKeys; attempt++) {
+  for (let attempt = 0; attempt < attemptsLimit; attempt++) {
     const keyIndex = (openrouterKeyPointer + attempt) % totalKeys;
     const currentKey = allKeys[keyIndex];
 
-    for (const model of candidateModels) {
+    for (const model of candidateModels.slice(0, 1)) {
       const startTime = Date.now();
       try {
         const controller = new AbortController();

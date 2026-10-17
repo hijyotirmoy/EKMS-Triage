@@ -71,12 +71,10 @@ export function matchProtocols(text, maxMatches = 2) {
  */
 export function buildAdaptiveProtocolPromptSnippet(latestInput, fullHistoryText = "", currentClinicalState = {}) {
   const combinedText = `${latestInput || ""} ${fullHistoryText || ""} ${currentClinicalState.suspectedCondition || ""} ${currentClinicalState.initialChiefComplaint || ""}`;
-  
-  // Also specifically match latestInput to detect sudden pivots / new symptoms
-  const latestMatches = matchProtocols(latestInput, 2);
-  const overallMatches = matchProtocols(combinedText, 2);
 
-  // Prioritize latest input matches if caller introduced something new
+  const latestMatches = matchProtocols(latestInput, 1);
+  const overallMatches = matchProtocols(combinedText, 1);
+
   const topMatches = [];
   const seenIds = new Set();
 
@@ -85,47 +83,19 @@ export function buildAdaptiveProtocolPromptSnippet(latestInput, fullHistoryText 
       seenIds.add(m.protocol.group_id);
       topMatches.push(m);
     }
-    if (topMatches.length >= 2) break;
+    if (topMatches.length >= 1) break;
   }
 
   if (topMatches.length === 0) {
     return "";
   }
 
-  const sections = topMatches.map(({ protocol, matchedKeywords }) => {
-    const probingSample = (protocol.probing_questions || []).slice(0, 4).map((q) => `   - "${q}"`).join("\n");
-    const redFlagsList = (protocol.red_flags || []).slice(0, 5).join(", ");
-    const patterns = (protocol.condition_mapping || []).map((m) => `   * When "${m.pattern}" -> Suspect: "${m.suspected}"`).join("\n");
+  const { protocol } = topMatches[0];
+  const redFlagsList = (protocol.red_flags || []).slice(0, 4).join(", ");
+  const rawLvl = String(protocol.urgency_level || "").toLowerCase();
+  const normBaseline = rawLvl.includes("emerg") || rawLvl.includes("sev") ? "Severe" : (rawLvl.includes("urg") || rawLvl.includes("mod") ? "Moderate" : "Mild");
 
-    const rawLvl = String(protocol.urgency_level || "").toLowerCase();
-    const normBaseline = rawLvl.includes("emerg") || rawLvl.includes("sev") ? "Severe" : (rawLvl.includes("urg") || rawLvl.includes("mod") ? "Moderate" : "Mild");
-    const routingTarget = normBaseline === "Severe" ? "108 Ambulance" : (normBaseline === "Moderate" ? "ESIC Hospital & Govt District Hospital" : "ESIS Dispensary & 104 Health Helpline");
-
-    return `### CLINICAL INTELLIGENCE ANCHOR: ${protocol.condition_name} [${protocol.group_name}]
-- Matched Caller Signals: ${matchedKeywords.join(", ") || "Clinical symptoms"}
-- Urgency Baseline: ${normBaseline} -> Recommended Routing: ${routingTarget}
-- Red-Flag Danger Signs to Watch: ${redFlagsList}
-- Relevant Probing Questions from Clinical Protocol:
-${probingSample}
-- Differential Mapping:
-${patterns}
-- Clinical Management Note: ${protocol.notes || "None"}`;
-  }).join("\n\n");
-
-  return `
-=== DYNAMIC CLINICAL PROTOCOL KNOWLEDGE (ADAPTIVE AI GUIDANCE) ===
-${sections}
-
-ADAPTIVE PROBING DIRECTIVE:
-1. LISTEN CAREFULLY TO THE CALLER'S EXACT LATEST RESPONSE:
-   - The caller might answer your previous question, or they might introduce a NEW symptom, complain of sudden worsening, or mention an unexpected problem.
-   - ALWAYS acknowledge and prioritize what the caller just reported.
-2. DYNAMIC PIVOTING:
-   - If the caller pivots or introduces a new, higher-severity symptom (e.g. bleeding, severe breathlessness, fainting, severe pain, eye changes), IMMEDIATELY pivot your clinical focus to assess that danger!
-   - Do NOT stubbornly stick to a scripted sequence if the patient's condition changes or if they bring up an acute red flag.
-3. ADAPTIVE QUESTION FORMULATION:
-   - Use the clinical protocol questions above as medical inspiration, but tailor your single question dynamically to the patient's actual words and situation.
-   - Frame your question with empathy: Ask the IP: "<English Question>" (Hinglish: "<Romanized Hinglish Question>")
-   - Update suspectedCondition and severity dynamically reflecting the cumulative findings!
-==================================================================`;
+  return `CLINICAL PROTOCOL FOCUS: ${protocol.condition_name} (Baseline Urgency: ${normBaseline})
+Key Red Flags to screen: ${redFlagsList}`;
 }
+

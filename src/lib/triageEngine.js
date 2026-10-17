@@ -10,6 +10,7 @@ import {
   mapScoreToUrgency,
   mapUrgencyToBaselineScore,
   validateCallerMentionedDuration,
+  doesCaseNeedMedicalTreatment,
 } from "./clinicalScoring.js";
 
 /**
@@ -1971,11 +1972,26 @@ async function evaluateRawTriage(intake) {
       // Mild
       call108 = false;
       const wantsPhoneDoctor = allText.includes("phone doctor") || allText.includes("104") || allText.includes("tele-doctor");
+      const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+        severity: "Mild",
+        score: triageUrgencyScore,
+        text: allText,
+        isPsych,
+        isNaco: isNacoHIV,
+      });
+
       if (dispensaryStatus.isOpen && !wantsPhoneDoctor) {
         primaryReferral = "ESIS Dispensary";
         primaryReason = "Mild sub-acute presentation; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
         secondaryReferral = "104 Health Helpline";
         secondaryReason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
+        isDualProtocol = false;
+      } else if (needsMedicalTreatment) {
+        // Dispensary is closed and patient needs medical treatment -> Forward to hospital!
+        primaryReferral = "ESIC Hospital";
+        primaryReason = "Dispensary is currently closed; patient condition requires in-person medical treatment. Proceed to nearest ESIC Hospital (or Govt District Hospital) casualty.";
+        secondaryReferral = "Govt District Hospital";
+        secondaryReason = "Govt District Hospital for secondary hospital medical consultation backup.";
         isDualProtocol = false;
       } else {
         primaryReferral = "104 Health Helpline";
@@ -2519,6 +2535,14 @@ function normalizeTriageDecision(triage, intake) {
     // Mild
     triage.call_108 = false;
     triage.is_dual_protocol = false;
+    const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: "Mild",
+      score: finalScore,
+      text: allText,
+      isPsych,
+      isNaco: false,
+    });
+
     if (dispensaryStatus.isOpen && !referral.includes("104") && !isAdviceSeeking) {
       triage.referral_destination = "ESIS Dispensary";
       triage.call_referral_primary = "ESIS Dispensary";
@@ -2526,6 +2550,18 @@ function normalizeTriageDecision(triage, intake) {
       triage.secondary_referral_destination = "104 Health Helpline";
       triage.call_referral_secondary = "104 Health Helpline";
       triage.secondary_referral_reason = "104 Health Helpline for 24x7 tele-doctor consultation backup.";
+      triage.recommended_facility_type = "ESIS Dispensary";
+      triage.recommended_action = "Visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) for doctor consultation and medicines.";
+    } else if (needsMedicalTreatment) {
+      // Dispensary is closed and condition requires medical treatment -> Forward to hospital!
+      triage.referral_destination = "ESIC Hospital";
+      triage.call_referral_primary = "ESIC Hospital";
+      triage.referral_reason = "Dispensary is currently closed; patient condition requires in-person medical treatment at hospital casualty.";
+      triage.secondary_referral_destination = "Govt District Hospital";
+      triage.call_referral_secondary = "Govt District Hospital";
+      triage.secondary_referral_reason = "Govt District Hospital for secondary hospital casualty care.";
+      triage.recommended_facility_type = "ESIC Hospital / Govt District Hospital";
+      triage.recommended_action = "Dispensary is currently closed and condition requires medical treatment. Direct patient to nearest ESIC Hospital or Govt District Hospital casualty. 104 available for tele-doctor consultation while traveling.";
     } else {
       triage.referral_destination = "104 Health Helpline";
       triage.call_referral_primary = "104 Health Helpline";
@@ -2533,9 +2569,9 @@ function normalizeTriageDecision(triage, intake) {
       triage.secondary_referral_destination = "ESIS Dispensary";
       triage.call_referral_secondary = "ESIS Dispensary";
       triage.secondary_referral_reason = "Visit nearest ESIS Dispensary during operating hours (Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+      triage.recommended_facility_type = "104 Health Helpline (Doctor on Call)";
+      triage.recommended_action = "Call 104 for tele-doctor consultation or visit nearest ESIS Dispensary during operating hours.";
     }
-    triage.recommended_facility_type = "ESIS Dispensary / 104 Health Helpline";
-    triage.recommended_action = "Visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Sat 10:00 AM – 12:00 PM) or call 104 for tele-doctor consultation.";
   }
 
   return triage;

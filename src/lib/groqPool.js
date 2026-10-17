@@ -176,7 +176,7 @@ export async function groqChatCompletion({
   messages,
   model = "qwen/qwen3.8-27b",
   candidateModels = ["qwen/qwen3.8-27b"],
-  response_format = { type: "json_object" },
+  response_format = null,
   temperature = 0.2,
   max_tokens = 550,
   timeoutMs = 3500,
@@ -191,19 +191,23 @@ export async function groqChatCompletion({
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+          const bodyPayload = {
+            model: m,
+            messages,
+            temperature,
+            max_tokens,
+          };
+          if (response_format) {
+            bodyPayload.response_format = response_format;
+          }
+
           const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
               Authorization: `Bearer ${activeKey}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              model: m,
-              messages,
-              response_format,
-              temperature,
-              max_tokens,
-            }),
+            body: JSON.stringify(bodyPayload),
             signal: controller.signal,
           });
 
@@ -229,18 +233,17 @@ export async function groqChatCompletion({
             return { status: res.status, isRestricted: true };
           }
 
-          if (res.status === 400) {
-            const errData = await res.json().catch(() => ({}));
-            const msg = (errData?.error?.message || "").toLowerCase();
-            if (msg.includes("restricted") || msg.includes("invalid api key") || errData?.error?.code === "organization_restricted") {
-              return { status: 400, isRestricted: true };
-            }
-            console.warn(`[GroqPool] Bad request (400) on model ${m}: ${errData?.error?.message || "Invalid payload"}`);
-            return null;
+          const errBody = await res.text().catch(() => "");
+          console.warn(`[GroqPool] HTTP ${res.status} on model ${m} with key #${keyIndex + 1}: ${errBody.slice(0, 160)}`);
+          if (errBody.includes("restricted") || errBody.includes("organization_restricted")) {
+            return { status: res.status, isRestricted: true };
           }
+          return null;
         } catch (fetchErr) {
           if (fetchErr.name === "AbortError") {
             console.warn(`[GroqPool] Timeout (${timeoutMs}ms) on model ${m} with key #${keyIndex + 1}`);
+          } else {
+            console.warn(`[GroqPool] Fetch error on model ${m}: ${fetchErr.message}`);
           }
         }
       }

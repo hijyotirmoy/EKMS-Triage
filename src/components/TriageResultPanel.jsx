@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { urgencyStyle, normalizeUrgency } from "../lib/api";
 import { UrgencyBadge } from "./UrgencyBadge";
 import { summarizeRedFlags, getDispensaryOperatingStatus, deduplicateRedFlags, extractCallerReportedProblems } from "../lib/triageEngine";
+import { doesCaseNeedMedicalTreatment } from "../lib/clinicalScoring";
 import { CaseHandoverForwarding } from "./CaseHandoverForwarding";
 import { getCachedCases } from "../lib/clientCache";
 import { MapWrapper } from "./map/MapWrapper";
@@ -309,9 +310,27 @@ export function resolveDirectiveIds(t, result, activeFacilities = null) {
   } else {
     // Mild
     const dispensaryStatus = getDispensaryOperatingStatus();
-    if (dispensaryStatus.isOpen && !isOffHours) {
-      orderedDirectiveIds = ["ESIS_DISPENSARY", "TELE_104", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108"];
+    const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: normSeverity,
+      score: scoreNum,
+      text: allCallerText,
+      isPsych,
+      isNaco: isNacoHIV,
+    });
+
+    if (needsMedicalTreatment) {
+      if (dispensaryStatus.isOpen && !isOffHours) {
+        orderedDirectiveIds = ["ESIS_DISPENSARY", isEsicWithin15Km ? "ESIC_HOSPITAL" : "DIST_HOSPITAL", isEsicWithin15Km ? "DIST_HOSPITAL" : "ESIC_HOSPITAL", "TIE_UP_FACILITY", "TELE_104", "CALL_108"];
+      } else {
+        // Dispensary is CLOSED: USER MANDATE: Do NOT stop at 104! Forward to hospital!
+        if (isEsicWithin15Km) {
+          orderedDirectiveIds = ["ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "TELE_104", "ESIS_DISPENSARY", "CALL_108"];
+        } else {
+          orderedDirectiveIds = ["DIST_HOSPITAL", "TIE_UP_FACILITY", "ESIC_HOSPITAL", "TELE_104", "ESIS_DISPENSARY", "CALL_108"];
+        }
+      }
     } else {
+      // Pure consultation case (only advice/guidance/counseling needed): 104 is primary
       orderedDirectiveIds = ["TELE_104", "ESIS_DISPENSARY", "ESIC_HOSPITAL", "DIST_HOSPITAL", "TIE_UP_FACILITY", "CALL_108"];
     }
   }

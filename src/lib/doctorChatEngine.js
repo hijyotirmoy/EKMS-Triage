@@ -25,116 +25,68 @@ import {
   calculateClinicalSeverityScore,
   mapScoreToUrgency,
   validateCallerMentionedDuration,
+  doesCaseNeedMedicalTreatment,
 } from "./clinicalScoring.js";
 
 const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-forwarding assistant for ESIC / ESIS helpline operators in Assam, India.
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
 
 CORE CLINICAL RULES:
-1. EMPATHY, WARMTH & HUMAN COMPASSION:
-   - When a caller reports distress, pain, injury, fever, dizziness, nausea, or anxiety, ALWAYS begin with genuine human sympathy, emotional reassurance, and comforting words:
-     * e.g. "I'm so sorry you're dealing with this fever and shivering; please rest and keep warm.",
-     * "I understand how distressing this chest discomfort feels; please sit down calmly and rest.",
-     * "I'm really sorry to hear about your severe pain; we are here to support you and find the best care."
-   - Speak with the genuine warmth and compassion of an experienced, caring doctor or nurse triage counselor.
+1. EMPATHY & COMPASSION OPENING:
+   - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
+   - For Head Injury: Express immediate compassion and probe critical neurological signs (loss of consciousness / blackout at impact, vomiting, severe dizziness, confusion). Head trauma CANNOT BE MILD! If caller reports LOC, blackout, vomiting, or dizziness, rate as SEVERE (Score 8-9, hospital IPD/casualty).
+   - For Deep Cuts/Wounds: Probe wound depth (whether yellow fat, muscle tissue, or bone is visible) and bleeding. When deep cut exposes muscle or fat with heavy bleeding/severe pain, rate as SEVERE (Score 10) and route to 108 Ambulance!
 
-2. ADAPTIVE CLINICAL PROBING FLOW (FLEXIBLE, THOROUGH & COMPASSIONATE):
-   - Do NOT rush to conclude or ask for location after just 2, 3, or 4 questions! Take time to thoroughly understand the caller's clinical condition.
-   - Stage 1: Clarify Specific Symptoms & Severity (e.g. for fever, probe whether it is high-grade with shivering or mild warmth; for pain, character, exact location, and radiation; for cuts/injuries, bleeding and movement).
-   - Stage 2: Duration & Onset Progression (e.g., "Since when have you been having this, and did it start suddenly today or a few days ago?").
-   - Stage 3: Associated Symptoms & Warning Signs (e.g., breathing trouble, nausea/vomiting, cold sweats, dizziness, rash, visual changes).
-   - Stage 4: Pre-Existing Conditions / Comorbidities (e.g., "Do you have any pre-existing health conditions such as high blood pressure, diabetes/sugar, asthma, heart, or kidney disease?").
-   - Stage 5: Medications Taken & Treatments (e.g., "Have you taken any medicines so far (such as Paracetamol or painkiller), and did they provide any relief?").
-   - Stage 6: Final Referral & Summary (Turn 5 to 7+):
-     * Set "isReadyForSummary": true ONLY when all key clinical facets (symptom details -> duration -> associated signs -> pre-existing diseases -> medications) have been thoroughly gathered, UNLESS there is an acute life-threatening emergency (cardiac arrest, massive bleeding, unresponsive) where immediate 108 dispatch is critical.
-   - FLEXIBLE RULE: If the caller already provided duration, a pre-existing disease, or medication in earlier turns, NEVER ask them again. Dynamically adapt and ask only what is still uncollected!
+2. ADAPTIVE CLINICAL PROBING FLOW (1 QUESTION PER TURN):
+   - Turn 1: Symptom specifics & severity (degree of fever/chills, pain character, wound depth & tissue exposure).
+   - Turn 2: Duration & onset progression (how long present, sudden vs gradual). NEVER fabricate duration if not stated.
+   - Turn 3: Associated symptoms & warning signs (breathing difficulty, vomiting, cold sweats, dizziness, neurological signs).
+   - Turn 4: Pre-existing chronic diseases / Comorbidities (High BP, Diabetes, Asthma, Heart, Kidney) -> extract into "comorbidity".
+   - Turn 5: Medications taken (Paracetamol, painkillers, BP meds) -> extract into "medications".
+   - Turn 6+: Set "isReadyForSummary": true. Never set on Turns 1-4 unless acute life-threatening emergency.
+   - If caller already provided duration, chronic conditions, or medications in earlier turns, move to the next uncollected aspect.
 
-3. FREE-FORM ENTITY EXTRACTION MANDATE:
-   - If the caller mentions ANY pre-existing condition (Diabetes, High BP, Asthma, Heart disease, Kidney disease, Thyroid, etc.) or ANY medication (Paracetamol, BP tablet, insulin, painkiller, etc.) at ANY turn, ALWAYS extract them into "comorbidity" and "medications" respectively!
-   - Even if your question was about associated symptoms, if the caller types a chronic disease or medicine, capture it immediately!
+3. FREE-FORM EXTRACTION MANDATE:
+   - When caller mentions ANY chronic condition or medicine at ANY turn, extract into "comorbidity" and "medications" respectively!
 
-4. ONE-QUESTION-AT-A-TIME: Ask EXACTLY ONE single, clear clinical question per turn. Never combine multiple inquiries.
-5. LANGUAGE PROTOCOL (ENGLISH + HINGLISH ONLY):
-   - Formulate the probing question in English, followed by a concise Romanized Hinglish translation in parentheses:
-     Format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
-   - DO NOT USE DEVANAGARI HINDI SCRIPT. Use ONLY English and Latin-script Hinglish!
-6. RELEVANT SUGGESTED ANSWERS: Provide 3 to 4 realistic suggestedAnswers in English/Hinglish directly answering your exact single question.
-7. IDENTITY ASSUMPTION: Assume caller is conscious and is the patient (IP) themselves unless they explicitly state calling for a family member. NEVER ask "Are you conscious?".
-8. ANTI-REPETITION MANDATE: Never repeat or re-ask questions that were already answered in the chat under any circumstance.
-9. MULTI-OPTION INPUT SYNTHESIS:
-   - When the caller provides or selects multiple options/symptoms (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), YOU MUST THOROUGHLY ANALYZE ALL SELECTED SYMPTOMS TOGETHER.
-   - Formulate your clinical evaluation and next probing question based on the COMBINED picture of all selected options.
-10. MULTI-CONDITION SHIFTS (NEVER FORGET PREVIOUS CONDITIONS):
-   - If the conversation started with one condition (e.g. Fever & Chills) and the caller later introduces or switches to another condition (e.g. hand cut, workplace injury, chest discomfort, abdominal pain), DO NOT forget the first condition!
-   - Synthesize BOTH conditions together into your assessment, questions, and red flags.
-11. 108 EMERGENCY & ACCIDENT / SEVERE TRAUMA ROUTING:
-   - ONLY for true life-threatening crises (spurting arterial bleeding, severe deep gaping trauma, cardiac arrest, respiratory failure, unconsciousness, poisoning, snakebite).
-   - Superficial cuts, minor scrapes, bleeding stopped, or injuries where antiseptic cream was applied are NOT emergencies! Rate them Mild (score 1-4) or Moderate (score 5-7).
-12. BENEFICIARY FACILITY PREFERENCE:
-   - If the beneficiary explicitly states or selects where they want to go (e.g. "Visit ESIC Hospital Casualty now", "hospital", "dispensary", "ambulance", "tele-doctor"), ALWAYS respect and route them to that preferred facility ("ESIC Hospital", "ESIS Dispensary", etc.) as PRIMARY!
-13. MANDATORY 3-TIER CLINICAL CATEGORIZATION & BACKEND NUMBERING SYSTEM:
-   - Backend numbering system:
-     * Score 1 to 4: Mild
-     * Score 5, 6, 7: Moderate
-     * Score 8, 9, 10: Severe
-   - Standard clinical criteria:
-     * Mild (Score 1 to 4, default 3):
-       • ALL normal viral, seasonal, and common illnesses (common cold, viral fever, mild cough, body aches, routine headaches, mild gastritis/indigestion/diarrhea without dehydration, superficial minor cuts/bruises, muscular aches/joint stiffness).
-       • ANY condition that can be managed, fixed, or treated with oral/topical medication, basic conservative care, or outpatient primary doctor consultation at an ESIS Dispensary or 104 Health Helpline tele-doctor.
-       • ALL standard Outpatient Department (OPD) presentations MUST be categorized as MILD (baseline score 2 to 3, maximum 4). DO NOT classify OPD cases or cases fixable by medication as Moderate!
-       • Forwarding:
-         - During dispensary open hours (Mon-Fri 10am-4pm, 1st, 3rd & 5th Sat 10am-12pm): 1st: ESIS Dispensary, 2nd: 104 Health Helpline, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
-         - During dispensary closed hours: 1st: 104 Health Helpline, 2nd: ESIS Dispensary, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
-     * Moderate (Score 5, 6, 7):
-       • STRICT REQUIREMENT: Reserved ONLY for cases requiring Inpatient Department (IPD) care, hospital admission (>= 1 day admission or overnight observation bed), or continuous IV saline/fluid infusion because patient cannot retain oral fluids.
-       • Cases requiring specialized doctor consultation or procedural treatment (deep lacerations needing sutures/stitches, broken bones/fractures/dislocations requiring reduction & plaster cast, minor surgical procedure / wound debridement / abscess drainage, specialist physician/surgeon/cardiologist review).
-       • Cases requiring hospital diagnostic laboratory workup or imaging (blood tests / CBC / malaria-dengue serology, diagnostic X-ray, hospital 12-lead ECG, ultrasound).
-       • If the condition can be treated or fixed with outpatient medication and does NOT require IPD hospitalization, procedures (stitches/casts), or hospital lab/imaging, it MUST NOT be Moderate — it MUST be MILD.
-       • Forwarding:
-         - If ESIC Hospital is available within 15km distance: 1st: ESIC Hospital, 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
-         - If ESIC Hospital is NOT available within 15km: 1st: Govt District Hospital, 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
-     * Severe (Score 8, 9, 10):
-       • Characterized by high-intensity, widespread, or life-threatening symptoms.
-       • Gross or total interference with basic physical function, organ systems, or consciousness.
-       • Requires urgent, specialized, or inpatient/intensive care (ICU/emergency stabilization) at secondary or tertiary healthcare facilities.
-       • Forwarding:
-         - During morning/daytime (6:00 AM – 6:00 PM) if manageable in hospital directly (no active collapse, patient alert & accompanied):
-           * If ESIC Hospital <= 15km: 1st: ESIC Hospital (24x7 Casualty), 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: 108 Ambulance, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
-           * If ESIC Hospital > 15km: 1st: Govt District Hospital (24x7 Casualty), 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: 108 Ambulance, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
-         - If needs 108 (critical collapse, acute respiratory failure, cardiac arrest, arterial bleed, seizure, poisoning, or caller requests 108):
-           1st: 108 Ambulance (Immediate Emergency Dispatch), 2nd: Nearest Hospital (ESIC if closer else Govt), 3rd: Govt District Hospital, 4th: Empanelled Tie-Up Hospital, 5th: 104 Health Helpline, 6th: ESIS Dispensary.
-14. NON-DOCTOR TRIAGE PROTOCOL (NO DISEASE DIAGNOSES, NO MEDICINES):
-   - We are triage helpline call operators, NOT diagnosing doctors.
-   - Describe condition ONLY using reported symptom areas (e.g. 'Abdominal Pain / Cramping', 'Chest Discomfort', 'Fever & Chills', 'Throbbing Headache').
-   - NEVER suggest or name specific medicines to take.
-15. NEVER ASK NUMERICAL SEVERITY OR SCALE QUESTIONS:
-   - NEVER ask the caller to rate on a 1 to 10 scale. Ask functional, clinical questions (e.g. "Are you able to walk or are you too weak to stand?", "Is the fever accompanied by shivering?").
-16. DYNAMIC MULTI-TURN RE-ANALYSIS & DURATION GROUNDING:
-   - If an earlier turn appeared severe or high risk, but subsequent answers clarify that symptoms are mild or moderate (e.g. superficial cut, antiseptic cream applied, bleeding stopped, able to walk normally), YOU MUST RE-ANALYZE ALL ANSWERS TOGETHER AND DOWNGRADE TO MILD (score 1-4) OR MODERATE (score 5-7)! Never remain stuck at Severe if subsequent answers show no emergency!
-   - NEVER FABRICATE OR ASSUME DURATION: If the caller did NOT mention duration (did not state month, week, or days), NEVER assume 'more than a month' or invent any timeframe in your questions or summaries! Never say 'since this happened more than a month ago' unless the caller explicitly told you so. Treat unknown duration as recent / today.
-17. NO FORWARDING / REFERRAL RESULTS OR DISPATCH ANNOUNCEMENTS IN THE CHAT:
-   - The probing question must be STRICTLY clinical diagnostic probing (clarifying symptoms, duration, red flags, pre-existing conditions, medications).
-   - NEVER announce routing decisions or dispatches in the probing question or chat (e.g. NEVER say "We are dispatching 108 Ambulance", "108 Ambulance is being alerted", "You need to travel to ESIC Hospital", "Transferring call to 104", etc.).
-   - All referral destinations and forwarding actions belong strictly in the backend JSON fields ("referralDestination", "referralReason", "severity") which are rendered in the final Triage Outcome card, NEVER inside "probingQuestion"!
-18. ABSOLUTELY NO "108" OR "EMERGENCY" WORDS IN SUGGESTED ANSWER CHIPS:
-   - "suggestedAnswers" must consist purely of plain, descriptive clinical symptom statements (e.g. "Severe chest pressure with left arm pain and sweating", "Accident with heavy bleeding", "Breathing difficulty and unable to speak in full sentences").
-   - NEVER include "(Emergency)", "(Emergency - 108)", "108", "(Ambulance dispatched)", or referral tags in "suggestedAnswers"!
+4. LANGUAGE PROTOCOL (ENGLISH + ROMANIZED HINGLISH):
+   - Ask exactly ONE question per turn in format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
+   - NO Devanagari Hindi script. Use ONLY English and Latin-script Hinglish.
+   - Provide 3-4 realistic suggestedAnswers directly answering the single question. NEVER include "(Emergency)", "(108)", or referral tags in suggestedAnswers.
 
-OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
+5. MULTI-OPTION & MULTI-TURN SYNTHESIS:
+   - When caller mentions multiple symptoms or answers across turns, synthesize ALL answers together to assess the complete situation.
+   - Do NOT restrict to Mild if other answers show Moderate or Severe.
+
+6. TRIAGE SEVERITY & ROUTING STRATIFICATION:
+   - Mild (Score 1-4, baseline 3): Normal, minor conditions without red flags (mild cold, low fever, superficial scrape with bleeding stopped).
+     * If medical treatment needed (doctor exam, meds, dressing):
+       - If dispensary is OPEN: "ESIS Dispensary".
+       - If dispensary is CLOSED: DO NOT STOP AT 104! Forward directly to "ESIC Hospital" (or "Govt District Hospital").
+     * "104 Health Helpline" is ONLY for conditions fixed by telephone consultation alone (general advice/counseling).
+   - Moderate (Score 5-7, baseline 6): Hospital care, procedural treatment (stitches/casts), diagnostic lab/imaging, persistent illness. Referral: "ESIC Hospital" or "ESIS Dispensary".
+   - Severe / IPD (Score 8-9): Hospital IPD/casualty (head injury with LOC/vomiting, hematemesis, severe illness). Referral: "ESIC Hospital".
+   - Severe / 108 Ambulance (Score 10): Acute life-threatening emergencies (deep cut exposing muscle/fat with heavy bleeding, coma/collapse, acute respiratory arrest, cardiac arrest). Referral: "108 Ambulance".
+
+7. NO DIAGNOSES, NO DRUG PRESCRIPTIONS, NO NUMERICAL SCALES:
+   - Describe condition by symptom area only (e.g. 'Fever & Chills', 'Deep Laceration / Arm Wound'). Never diagnose a disease or name prescription medications to take. Never ask 1-10 numerical severity scales.
+   - Never announce routing or ambulance dispatch in probingQuestion; routing belongs strictly in referralDestination and referralReason.
+
+OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown fences):
 {
   "probingQuestion": "Ask the IP: '...' (Hinglish: ...)",
   "suggestedAnswers": ["Option 1", "Option 2", "Option 3", "Option 4"],
-  "suspectedCondition": "Reported symptom area only (e.g. 'Fever & Chills'); NEVER diagnose a disease",
-  "isPsychiatric": true | false,
+  "suspectedCondition": "Reported symptom area only",
+  "isPsychiatric": false,
   "severity": "Severe" | "Moderate" | "Mild",
   "referralDestination": "108 Ambulance" | "104 Health Helpline" | "ESIS Dispensary" | "ESIC Hospital" | "Govt District Hospital" | null,
   "referralReason": "Clear action for operator" | null,
-  "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller; NEVER include denied symptoms"],
-  "duration": "detected duration ONLY if caller explicitly stated so; otherwise 'Reported today'; NEVER guess 'More than a month'",
-  "comorbidity": "Known chronic conditions (e.g. Diabetes, Hypertension, Asthma) or 'None reported by caller'",
-  "medications": "Specific medicines taken or leave empty string '' if none / no answer",
-  "isReadyForSummary": true | false,
-  "clinicalSummary": "Concise symptom-based triage summary in English without diagnosing diseases"
+  "redFlagsDetected": ["ONLY acute red flags explicitly reported by caller"],
+  "duration": "detected duration if caller explicitly stated so; otherwise 'Reported today'",
+  "comorbidity": "Known chronic conditions or 'None reported by caller'",
+  "medications": "Specific medicines taken or '' if none",
+  "isReadyForSummary": false,
+  "clinicalSummary": "Concise symptom-based triage summary in English under 25 words"
 }`;
 
 /**
@@ -542,16 +494,38 @@ export async function processDoctorConsultationTurn({
       district: detectedLoc.district,
       facilities: facilitiesPool,
     });
+    const dispStatus = getDispensaryOperatingStatus();
+    const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(`${cleanInput} ${initialChiefComplaint}`);
+    const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: currentClinicalState.severity || "Moderate",
+      score: currentClinicalState.severityScore || 5,
+      text: `${cleanInput} ${initialChiefComplaint} ${currentClinicalState.suspectedCondition || ""}`,
+      isPsych: Boolean(currentClinicalState.isPsychiatric),
+    });
+
+    const isDispensaryClosedAndNeedsTx = needsMedicalTreatment && !dispStatus.isOpen;
+
     const rec = buildFacilityRecommendationMessage({
       locationName: detectedLoc.name,
       pincode: detectedLoc.pincode,
-      nearestDispensary: facs.nearestDispensary,
+      nearestDispensary: isDispensaryClosedAndNeedsTx ? null : facs.nearestDispensary,
       nearestHospital: facs.nearestHospital,
       conditionLabel: initialChiefComplaint || currentClinicalState.suspectedCondition || "your condition",
-      severity: currentClinicalState.severity || "Moderate",
+      severity: isDispensaryClosedAndNeedsTx ? "High" : (currentClinicalState.severity || "Moderate"),
     });
 
-    const chosenFacility = rec.facility || facs.nearestDispensary || facs.nearestHospital;
+    const chosenFacility = rec.facility || (isDispensaryClosedAndNeedsTx ? (facs.nearestHospital || facs.nearestDispensary) : (facs.nearestDispensary || facs.nearestHospital));
+
+    let finalReferral = "ESIC Hospital";
+    if (isDispensaryClosedAndNeedsTx) {
+      finalReferral = isDistHospRequest ? "Govt District Hospital" : "ESIC Hospital";
+    } else if (isDispensary(chosenFacility)) {
+      finalReferral = "ESIS Dispensary";
+    } else if (isDistHospRequest) {
+      finalReferral = "Govt District Hospital";
+    } else {
+      finalReferral = "ESIC Hospital";
+    }
 
     return {
       probingQuestion: rec.text,
@@ -565,9 +539,11 @@ export async function processDoctorConsultationTurn({
       isPsychiatric: Boolean(currentClinicalState.isPsychiatric),
       severity: currentClinicalState.severity || "Moderate",
       severityScore: currentClinicalState.severityScore || 5,
-      referralDestination: isDispensary(chosenFacility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralDestination: finalReferral,
       referralReason: chosenFacility?.name
-        ? `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`
+        ? (isDispensaryClosedAndNeedsTx
+            ? `Dispensary is currently closed; condition requires physical medical treatment. Directed to nearest 24x7 hospital: ${chosenFacility.name}.`
+            : `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`)
         : `Registered location (${detectedLoc.name}) for triage referral.`,
       is_dual_protocol: false,
       call_referral_secondary: null,
@@ -651,51 +627,10 @@ export async function processDoctorConsultationTurn({
       role: "system",
       content: `${SYSTEM_PROMPT}
 
-SESSION MEMORY ANCHOR (CHIEF COMPLAINT):
-The caller started this triage conversation presenting with: "${initialChiefComplaint}".
-You must NEVER forget this starting point! Even when you probe for duration, associated symptoms, pre-existing diseases, or current medications, always anchor your empathy and questions around "${initialChiefComplaint}" (e.g. 'For this fever that you mentioned...', 'Have you taken any medicines for your fever?').
-
-CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
-1. EMPATHY & WARM REASSURANCE:
-   - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
-   - FOR HEAD INJURY / HEAD TRAUMA: Always express immediate compassion and human reassurance (e.g. 'I am very sorry to hear that you suffered a head injury. Let me assist you right away.') and clinically probe for critical neurological signs (loss of consciousness / blackout at impact, vomiting, severe dizziness, confusion, or scalp bleeding). CRITICAL PROTOCOL: Major trauma, severe damage, and head injury CANNOT BE MILD! If the caller reports loss of consciousness (even for a few seconds!), blackout, vomiting, or dizziness, it MUST be evaluated as SEVERE (Score 8-9, hospital IPD observation/casualty). Mild is strictly for normal, non-traumatic conditions without red flags.
-   - FOR DEEP CUTS & WOUNDS: Always ask in-depth probing questions about wound depth—specifically whether underlying yellow fat, muscle tissue, or bone is visible, and whether blood is continuously spurting or soaking through cloth. When a deep cut exposes muscle or fat along with heavy bleeding or severe pain, rate as SEVERE (Score 10) and route to 108 Ambulance!
-2. ADAPTIVE LISTENING & CALLER PIVOTS (HIGHEST PRIORITY):
-   - When answering a question, the caller may say something unexpected, introduce a NEW symptom, or describe a sudden worsening (e.g. asked about limb pain, but caller says 'no, but I threw up blood' or 'I fainted').
-   - NEVER ignore what the caller just reported! ADAPT IMMEDIATELY.
-   - Acknowledge the newly reported symptom, pivot your clinical focus to assess potential danger, and tailor your next question to this new information.
-3. THOROUGH ADAPTIVE CLINICAL PROGRESSION (DO NOT RUSH TO CONCLUDE):
-   - Turn 1: Main complaint specifics, nature of symptoms, and severity (probe fever degree/chills, pain character, wound depth & tissue exposure).
-   - Turn 2: Duration & onset progression (how long has this been present, did it start suddenly today or a few days ago).
-   - Turn 3: Associated symptoms & warning signs (breathing difficulty, nausea/vomiting, sweating, dizziness, rash, neurological signs).
-   - Turn 4: Pre-existing chronic diseases / Comorbidities (High BP, Diabetes/Sugar, Asthma, Heart, Kidney, Thyroid).
-   - Turn 5: Medications taken so far (Paracetamol, painkiller, BP medicines) and any relief.
-   - Turn 6+: Conclude clinical assessment with clear final referral and set "isReadyForSummary": true.
-   - DO NOT set "isReadyForSummary": true on Turns 1, 2, 3, or 4 unless it is a life-threatening crisis (cardiac arrest, unconscious, massive hemorrhage, deep cut exposing muscle/fat)!
-4. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
-5. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
-6. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
-7. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
-8. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
-9. TRIAGE SEVERITY & ROUTING STRATIFICATION:
-   - MILD (Score 1-4, baseline 3): ONLY for normal, routine, minor conditions without red flags (mild cold, low-grade fever 1-3 days, superficial scrape with bleeding stopped, mild tension headache). Referral: ESIS Dispensary or 104 Health Helpline.
-   - MODERATE (Score 5-7, baseline 6): For noticeable illness, persistent symptoms, deep cuts needing stitches with controlled bleeding, or head impact without LOC. Referral: ESIC Hospital or ESIS Dispensary.
-   - SEVERE / IPD (Score 8-9): For serious conditions requiring hospital IPD (inpatient admission / observation / specialist care). Includes head injury with loss of consciousness / vomiting / concussion observation, high fever with altered sensorium. Referral: ESIC Hospital (Casualty / IPD).
-   - 108 EMERGENCY AMBULANCE (Score 10): ONLY for acute life-threatening emergencies: deep cut exposing fat or muscle with heavy bleeding / unbearable pain, spurting arterial bleeding, unresponsiveness / coma / collapse, severe respiratory distress, crushing chest pain with cold diaphoresis, snake bite, acute poisoning.
-11. DYNAMIC MULTI-TURN RE-ANALYSIS & DURATION GROUNDING (TAKE ALL ANSWERS TOGETHER):
-   - CRITICAL USER RULE: DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word! You MUST synthesize ALL answers across the entire conversation before determining urgency.
-   - DURATION (1 TO 3 DAYS / 2-3 DAYS / TODAY / YESTERDAY):
-     * If the caller's other symptoms and answers are MILD (e.g. minor cold, low fever, superficial scrape with bleeding stopped, patient can walk and perform daily activities, oral fluids retained, no emergency red flags), evaluate as MILD (Score 1-4, baseline 3) -> Forward to ESIS Dispensary or 104 Health Helpline.
-     * BUT if the caller's other symptoms or answers evaluate to MODERATE LEVEL (Score 5-7, e.g. persistent fever, deep cut needing stitches with bleeding controlled, head impact without LOC, wheezing, moderate pain) or SEVERE LEVEL (Score 8-9 for hospital casualty IPD, Score 10 for 108 Ambulance): based on the whole situation, evaluate and SHOW MODERATE or SEVERE!
-     * DO NOT restrict or downgrade anything to Mild if the situation warrants Moderate or Severe.
-     * Based on every situation, route to the appropriate referral:
-       - Mild: ESIS Dispensary (regular OPD) or 104 Health Helpline (doctor on call).
-       - Moderate: ESIC Hospital / ESIS Dispensary (Hospital consultation / investigations / specialist care).
-       - Severe (Score 8-9 IPD): ESIC Hospital Casualty (urgent admission / observation / CT scan).
-       - Severe (Score 10 Crisis): 108 Ambulance (deep cut exposing muscle/fat with continuous bleeding, coma/LOC, acute respiratory collapse, cardiac arrest).
-13. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
+SESSION ANCHOR:
+Initial Chief Complaint: "${initialChiefComplaint}". Keep empathy and clinical focus anchored around this complaint.${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
     },
-    ...history.slice(-8).map((m) => ({
+    ...history.slice(-4).map((m) => ({
       role: m.sender === "user" || m.role === "user" ? "user" : "assistant",
       content: typeof m.content === "string" ? m.content : m.text || "",
     })),
@@ -717,13 +652,16 @@ Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 w
       model: "qwen/qwen3.8-27b",
       candidateModels: ["qwen/qwen3.8-27b"],
       temperature: 0.2,
-      max_tokens: 550,
-      timeoutMs: 3500,
-      maxAttempts: 3,
+      max_tokens: 380,
+      timeoutMs: 3800,
+      maxAttempts: 2,
     });
 
     if (groqResult?.content) {
-      const parsed = JSON.parse(groqResult.content);
+      const cleaned = groqResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const match = cleaned.match(/\{[\s\S]*\}/);
+      const toParse = match ? match[0] : cleaned;
+      const parsed = JSON.parse(toParse);
       if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
         return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
       }
@@ -732,89 +670,28 @@ Respond strictly in valid JSON format (keep "clinicalSummary" concise under 25 w
     console.warn("[DoctorChat] Groq pool notice:", groqErr.message);
   }
 
-  // 1.3 Direct OpenRouter Multi-Model Gateway Failover (Qwen 2.5 72B / Llama 3.3 70B)
+  // 1.3 Direct OpenRouter Fast Failover (Qwen 2.5 72B - 1 attempt, 2500ms max)
   if (process.env.OPENROUTER_API_KEY) {
     try {
       const orResult = await callOpenRouterProxy({
         messages: conversationMessages,
-        candidateModels: ["qwen/qwen-2.5-72b-instruct", "openrouter/free"],
+        candidateModels: ["qwen/qwen-2.5-72b-instruct"],
         temperature: 0.2,
-        max_tokens: 550,
-        response_format: { type: "json_object" },
-        timeoutMs: 3500,
+        max_tokens: 380,
+        timeoutMs: 2500,
       });
 
       if (orResult?.content) {
         const cleaned = orResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
+        const match = cleaned.match(/\{[\s\S]*\}/);
+        const toParse = match ? match[0] : cleaned;
+        const parsed = JSON.parse(toParse);
         if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
           return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
         }
       }
     } catch (orErr) {
       console.warn("[DoctorChat] OpenRouter notice:", orErr.message);
-    }
-  }
-
-  // 1.5 Direct Hugging Face Serverless (Qwen/Qwen3.8-27B) Failover
-  if (process.env.HUGGINGFACE_API_KEY) {
-    try {
-      const hfResult = await callHuggingFaceProxy({
-        messages: conversationMessages,
-        model: "Qwen/Qwen3.8-27B",
-        temperature: 0.2,
-        max_tokens: 550,
-        response_format: { type: "json_object" },
-        timeoutMs: 3500,
-      });
-
-      if (hfResult?.content) {
-        const cleaned = hfResult.content.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-          return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
-        }
-      }
-    } catch (hfErr) {
-      console.warn("[DoctorChat] Hugging Face notice:", hfErr.message);
-    }
-  }
-
-  // 2. Direct Gemini Flash (Fallback if upstream keys are exhausted)
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-
-      const promptText = `${SYSTEM_PROMPT}\n\nChief Complaint: "${initialChiefComplaint}"\nCaller: "${cleanInput}"\nContext: Condition: "${currentClinicalState.suspectedCondition || "Not yet determined"}", Turn: ${userTurnsCount}\nAlready asked: ${JSON.stringify(askedQuestionsList)}\n${learnedSnippet ? `\n${learnedSnippet}` : ""}\nStrictly return JSON object with anti-repetition.`;
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: 600 },
-          }),
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(timeoutId);
-
-      if (res.ok) {
-        const data = await res.json();
-        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (content) {
-          const parsed = JSON.parse(content);
-          if (parsed && (parsed.probingQuestion || parsed.clinicalSummary)) {
-            return normalizeDoctorOutput(parsed, cleanInput, { ...currentClinicalState, initialChiefComplaint }, askedQuestionsList, history);
-          }
-        }
-      }
-    } catch (geminiErr) {
-      console.warn("[DoctorChat] Gemini fallback notice:", geminiErr.message);
     }
   }
 
@@ -1888,11 +1765,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     severityScore = 3;
   }
 
-  if (severity === "Moderate" && !requiresHospitalCare) {
-    severity = "Mild";
-    severityScore = 3;
-  }
-
   let referralDestination;
   let referralReason;
   let secondaryReferral = null;
@@ -1947,16 +1819,32 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
     }
     isDualProtocol = false;
   }
-  // 3. Mild Category -> 104 Health Helpline & ESIS Dispensary
+  // 3. Mild Category -> ESIS Dispensary, ESIC Hospital (if dispensary closed & medical treatment needed), or 104 Health Helpline (if consultation only)
   else {
-    if (dispensaryStatus.isOpen && !is104PhoneDoctor && !isAdviceSeeking) {
-      referralDestination = "ESIS Dispensary";
-      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
-      secondaryReferral = "104 Health Helpline";
+    const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: "Mild",
+      score: severityScore,
+      text: allContext,
+      isPsych,
+    });
+
+    if (needsMedicalTreatment) {
+      if (dispensaryStatus.isOpen && !is104PhoneDoctor && !isAdviceSeeking) {
+        referralDestination = "ESIS Dispensary";
+        referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor checkup and medicines.";
+        secondaryReferral = "104 Health Helpline";
+      } else {
+        // Dispensary is closed and condition requires physical medical treatment:
+        // DO NOT stop at 104! Forward directly to Hospital!
+        referralDestination = isDistHospRequest ? "Govt District Hospital" : "ESIC Hospital";
+        referralReason = "Dispensary is currently closed; condition requires physical medical evaluation/treatment. Proceed to nearest ESIC Hospital (or Govt District Hospital) casualty.";
+        secondaryReferral = "104 Health Helpline";
+      }
     } else {
+      // Pure consultation case (can be fixed by phone consultation alone)
       referralDestination = "104 Health Helpline";
-      referralReason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-      secondaryReferral = "ESIS Dispensary";
+      referralReason = "Condition suitable for tele-consultation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
+      secondaryReferral = dispensaryStatus.isOpen ? "ESIS Dispensary" : "ESIC Hospital";
     }
     isDualProtocol = false;
   }
@@ -2453,7 +2341,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   // Check if caller provides Assam location, landmark, or 6-digit PIN code
   const detectedLoc = detectAssamLocationFromText(cleanInput);
   const isLastQuestionAskingLocation = askedQuestions.some((q, idx) =>
-    idx >= askedQuestions.length - 2 && /\b(location|landmark|pincode|address|pata|kahan|district|city)\b/i.test(q)
+    idx >= askedQuestions.length - 2 && /\b(postal PIN|6-digit|pincode|address\/landmark|confirm your location so I can direct you|nearest healthcare facility)\b/i.test(q)
   );
 
   if (detectedLoc.found) {
@@ -2464,16 +2352,38 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       district: detectedLoc.district,
       facilities: Array.isArray(prevState.facilities) ? prevState.facilities : [],
     });
+    const dispStatus = getDispensaryOperatingStatus();
+    const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(allContext);
+    const needsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: prevState.severity || "Moderate",
+      score: prevState.severityScore || 5,
+      text: allContext,
+      isPsych: Boolean(prevState.isPsychiatric),
+    });
+
+    const isDispensaryClosedAndNeedsTx = needsMedicalTreatment && !dispStatus.isOpen;
+
     const rec = buildFacilityRecommendationMessage({
       locationName: detectedLoc.name,
       pincode: detectedLoc.pincode,
-      nearestDispensary: facs.nearestDispensary,
+      nearestDispensary: isDispensaryClosedAndNeedsTx ? null : facs.nearestDispensary,
       nearestHospital: facs.nearestHospital,
       conditionLabel: initialChiefComplaint || prevState.suspectedCondition || "your condition",
-      severity: prevState.severity || "Moderate",
+      severity: isDispensaryClosedAndNeedsTx ? "High" : (prevState.severity || "Moderate"),
     });
 
-    const chosenFacility = rec.facility || facs.nearestDispensary || facs.nearestHospital;
+    const chosenFacility = rec.facility || (isDispensaryClosedAndNeedsTx ? (facs.nearestHospital || facs.nearestDispensary) : (facs.nearestDispensary || facs.nearestHospital));
+
+    let finalReferral = "ESIC Hospital";
+    if (isDispensaryClosedAndNeedsTx) {
+      finalReferral = isDistHospRequest ? "Govt District Hospital" : "ESIC Hospital";
+    } else if (isDispensary(chosenFacility)) {
+      finalReferral = "ESIS Dispensary";
+    } else if (isDistHospRequest) {
+      finalReferral = "Govt District Hospital";
+    } else {
+      finalReferral = "ESIC Hospital";
+    }
 
     return {
       probingQuestion: rec.text,
@@ -2487,12 +2397,14 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       isPsychiatric: Boolean(prevState.isPsychiatric),
       severity: prevState.severity || "Moderate",
       severityScore: prevState.severityScore || 5,
-      referralDestination: isDispensary(chosenFacility) ? "ESIS Dispensary" : "ESIC Hospital",
+      referralDestination: finalReferral,
       referralReason: chosenFacility?.name
-        ? `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`
+        ? (isDispensaryClosedAndNeedsTx
+            ? `Dispensary is currently closed; condition requires physical medical treatment. Directed to nearest 24x7 hospital: ${chosenFacility.name}.`
+            : `Located nearest healthcare facility for caller's area (${detectedLoc.name}): ${chosenFacility.name}.`)
         : `Registered location (${detectedLoc.name}) for triage referral.`,
       is_dual_protocol: false,
-      call_referral_secondary: null,
+      call_referral_secondary: finalReferral === "ESIC Hospital" ? "Govt District Hospital" : (finalReferral === "ESIS Dispensary" ? "104 Health Helpline" : "ESIS Dispensary"),
       redFlagsDetected: prevState.redFlagsDetected || [],
       duration: prevState.duration || "Reported today",
       comorbidity: prevState.comorbidity || "None reported by caller",
@@ -2509,8 +2421,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   }
 
-  // If caller is answering a location question or entered an unrecognized locality:
-  if ((detectedLoc.needsPincode || (isLastQuestionAskingLocation && !detectedLoc.found)) && !/^(no|nahi|none|kuch nahi|not now|baad me)/i.test(cleanInput)) {
+  // If caller is answering a location question or entered an unrecognized locality during final summary stage:
+  const isLateStageForLocation = (botCount >= 5 || prevState.isReadyForSummary || prevState.isAwaitingPincode);
+  if (isLateStageForLocation && (detectedLoc.needsPincode || (isLastQuestionAskingLocation && !detectedLoc.found)) && !/^(no|nahi|none|kuch nahi|not now|baad me)/i.test(cleanInput)) {
     return {
       probingQuestion: 'Ask the IP: "Could you please share your 6-digit postal PIN code so we can pinpoint the exact nearest ESIS Dispensary or hospital near your area?" (Hinglish: "Kripya apna 6-digit PIN code batayein taaki hum aapke ilaqe ka sabse nazdeeki ESIS Dispensary dhoondh sakein?")',
       suggestedAnswers: [
@@ -3099,6 +3012,77 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     };
   }
 
+  // 8. Hematemesis / Upper GI Bleeding & Inability to Retain Oral Fluids (Medical Emergency / Hospital Casualty)
+  const isHematemesisEmergency = /\b(blood in vomit|vomiting blood|hematemesis|khoon.*ulti|ulti.*khoon|coffee-ground|cannot keep.*fluid|unable to retain fluid|vomit immediately after drinking)\b/i.test(effectiveInput);
+  if (isHematemesisEmergency) {
+    const hasReportedColorOrVolume = /\b(bright red|coffee ground|dark brown|laal|fresh|kala|black|teaspoon|cup|bowl)\b/i.test(effectiveInput);
+    const hasReportedDizziness = /\b(dizzy|chakkar|faint|behosh|weakness|kamzori|cold sweat|pasina)\b/i.test(effectiveInput);
+
+    const isAcuteCollapse = /\b(faint|behosh|unconscious|massive|huge amount|bowls of blood|blackout|gasping)\b/i.test(effectiveInput);
+    const hemSeverity = "Severe";
+    const hemSeverityScore = isAcuteCollapse ? 10 : 8;
+    const hemReferral = isAcuteCollapse ? "108 Ambulance" : "ESIC Hospital";
+    const hemReason = isAcuteCollapse
+      ? "Massive upper GI bleeding / hematemesis with collapse; immediate 108 Ambulance dispatch required for resuscitation."
+      : "Upper GI bleeding (hematemesis) / inability to retain oral fluids requires urgent hospital casualty evaluation, IV fluid resuscitation, and emergency physician care.";
+
+    let hemStep;
+    if (!hasReportedColorOrVolume) {
+      hemStep = {
+        title: "Hematemesis Character & Bleeding Acuity",
+        question: 'Ask the IP: "I am very concerned to hear that you are vomiting blood and unable to keep fluids down; please rest quietly and do not drink large quantities at once. Is the blood bright red and fresh, or dark brown resembling coffee grounds?" (Hinglish: "Ulti mein khoon aane ke baare mein sunkar chinta hui, kripya araam se baith jayein. Kya khoon taza laal rang ka hai ya coffee jaisa gehra bhura dikhta hai?")',
+        options: [
+          "Bright red, fresh active blood",
+          "Dark brown, coffee-ground appearance",
+          "Small streaks of blood mixed with fluid",
+          "Continuous vomiting, cannot keep even water down",
+        ],
+        severity: "Severe",
+      };
+    } else if (!hasReportedDizziness) {
+      hemStep = {
+        title: "Hemodynamic Stability & Secondary Red Flags",
+        question: 'Ask the IP: "Are you feeling dizzy, faint, having cold sweats, or noticed any black tarry stools (melena)?" (Hinglish: "Kya aapko chakkar, behoshi, thanda pasina, ya kala dast (black stool) aane ki takleef ho rahi hai?")',
+        options: [
+          "Severe dizziness, feeling faint when standing",
+          "Cold sweats and extreme physical weakness",
+          "Black tarry loose motions (melena)",
+          "No dizziness, but stomach is cramping and nauseated",
+        ],
+        severity: "Severe",
+      };
+    } else {
+      hemStep = {
+        title: "Ulcer & Medication History",
+        question: 'Ask the IP: "Do you have a history of stomach ulcers, liver disease, or taking painkiller medications (like Brufen or Diclofenac)?" (Hinglish: "Kya aapko pehle se pet me chhale/ulcer ya liver ki bimari hai, ya aapne koi painkiller dawai li hai?")',
+        options: [
+          "History of acidity / stomach ulcer",
+          "Took painkiller tablets on empty stomach",
+          "Known liver / gallbladder condition",
+          "No past stomach illness, started suddenly today",
+        ],
+        severity: "Severe",
+      };
+    }
+
+    return {
+      probingQuestion: enforceSingleQuestion(hemStep.question),
+      suggestedAnswers: hemStep.options,
+      suspectedCondition: "Hematemesis / Upper GI Bleeding",
+      isPsychiatric: false,
+      severity: hemSeverity,
+      severityScore: hemSeverityScore,
+      referralDestination: hemReferral,
+      referralReason: hemReason,
+      redFlagsDetected: ["Blood in vomit / Hematemesis", "Inability to retain oral fluids"],
+      duration: prevState.duration || "Reported today",
+      isReadyForSummary: history.length >= 2,
+      is_dual_protocol: false,
+      call_referral_secondary: isAcuteCollapse ? "ESIC Hospital" : "Govt District Hospital",
+      clinicalSummary: "Caller presents with hematemesis (blood in vomit) and inability to retain fluids. Urgently directed to ESIC Hospital Casualty / 108 Ambulance.",
+    };
+  }
+
   // 4. Truly Adaptive Clinical Synthesizer tailored to the caller's specific complaint
   const cleanInputWithoutTimestamps = stripClockAndCalendarTimestamps(cleanInput);
   const nlp = extractClinicalEntities(cleanInputWithoutTimestamps || cleanInput, "probing", prevState);
@@ -3641,40 +3625,45 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         severity: "Moderate",
       };
     }
-  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|trauma)\b/i.test(effectiveInput)) {
+  } else if (/\b(cut|bleeding|injury|chot|fracture|wound|trauma|laceration|chipped|kata|kat gaya)\b/i.test(effectiveInput)) {
     conditionLabel = "Traumatic Injury / Wound Assessment";
-    if (!hasAsked(["active continuous bleeding", "lagataar khoon", "bleeding from the wound"])) {
+    const hasDeepCutOrTissue = /\b(deep cut|fat visible|muscle visible|fats visible|bone visible|gaping|arterial|spurting|chheeda|gehra ghao)\b/i.test(allContext);
+    const hasHeavyBleeding = /\b(heavy bleed|continuous bleed|soaking|profuse|ruk nahi|bahut khoon)\b/i.test(allContext);
+    const hasFatMuscleWithHeavyBleed = hasDeepCutOrTissue && hasHeavyBleeding;
+    const cutSeverity = hasFatMuscleWithHeavyBleed ? "Severe" : (hasDeepCutOrTissue ? "Moderate" : "Moderate");
+
+    if (!hasAsked(["active continuous bleeding", "lagataar khoon", "bleeding from the wound", "tissue", "fat", "muscle"])) {
       currentStep = {
-        title: "Trauma & Hemorrhage Check",
-        question: 'Ask the IP: "I understand you have an injury. Is there active continuous bleeding from the wound, or is it manageable with firm pressure?" (Hinglish: "Hum samajh sakte hain aapko chot aayi hai. Kya ghaav se lagataar khoon beh raha hai ya dabav se ruka hua hai?")',
+        title: "Trauma & Hemorrhage Depth Check",
+        question: 'Ask the IP: "I understand you have an injury. Is there active continuous bleeding, and can you see yellowish fat or red muscle tissue inside the cut?" (Hinglish: "Hum samajh sakte hain aapko chot aayi hai. Kya ghaav se lagataar khoon beh raha hai, aur kya ghaav ke andar peeli charbi ya laal maaspeshi dikhai de rahi hai?")',
         options: [
-          "Heavy active bleeding requiring immediate pressure",
-          "Deep cut but bleeding stopped with cloth",
-          "Suspected fracture / limb deformity and swelling",
-          "Minor scrape or superficial cut with mild pain",
+          "Heavy active bleeding, fat/muscle tissue visible inside cut",
+          "Deep cut needing stitches, bleeding slowed with cloth pressure",
+          "Minor superficial scrape with minimal bleeding",
+          "Suspected bone fracture with intense pain and swelling",
         ],
-        severity: "Severe",
+        severity: cutSeverity,
       };
-    } else if (!hasAsked(["cloth", "pressure", "dabav", "tetanus", "tika"])) {
+    } else if (!hasAsked(["cloth", "pressure", "dabav", "tetanus", "tika", "bandage"])) {
       currentStep = {
         title: "Wound Management & Cleanliness",
-        question: 'Ask the IP: "Have you washed the wound with clean water and covered it with a clean bandage or cloth?" (Hinglish: "Kya aapne ghaav ko saaf paani se dho kar saaf kapde ya patti se dhaka hai?")',
+        question: 'Ask the IP: "Have you pressed a clean cloth firmly on the wound to control bleeding, and when did you last take a tetanus injection?" (Hinglish: "Kya aapne saaf kapde se ghaav ko daba kar rakha hai, aur aakhri baar tetanus ka tika kab lagwaya tha?")',
         options: [
-          "Covered with clean cloth and holding pressure",
-          "Washed with water, cut is open",
-          "Need tetanus injection and dressing",
-          "Minor scrape requiring antiseptic",
+          "Holding continuous firm pressure with clean cloth",
+          "Cut needs stitches (sutures) and tetanus shot",
+          "Washed with water, cut is gaping open",
+          "Superficial cut, cleaned and covered",
         ],
         severity: "Moderate",
       };
     } else {
       currentStep = {
         title: "Injury Functional Impact & Mobility",
-        question: 'Ask the IP: "Is the pain from the injury preventing you from moving the area or resting comfortably?" (Hinglish: "Kya chot ke dard ki wajah se hilna-dulna ya aaram karna mushkil ho raha hai?")',
+        question: 'Ask the IP: "Is the pain unbearable preventing you from moving the injured limb or resting comfortably?" (Hinglish: "Kya chot ka dard asahniya hai jisse aap haath-pair bilkul nahi hila pa rahe?")',
         options: [
-          "Severe unbearable pain — cannot move the injured area",
-          "Continuous sharp pain, worsens on movement",
-          "Moderate stinging pain, manageable with rest",
+          "Unbearable pain — cannot move injured limb at all",
+          "Continuous sharp pain, worse on movement",
+          "Moderate stinging pain, manageable while resting",
           "Mild localized discomfort",
         ],
         severity: "Moderate",
@@ -4025,10 +4014,11 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   const fallbackDispensaryStatus = getDispensaryOperatingStatus();
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(effectiveInput);
+  const ambulanceFallbackCheck = isLifeThreateningAmbulanceCase(allContext, severityScore, prevState, prevState);
 
   if (isLifeThreateningCrisis || (severity === "Severe" && severityScore >= 10)) {
     referralDestination = "108 Ambulance";
-    referralReason = ambulanceFallbackCheck.reason || "Severe acute emergency or trauma requiring immediate 108 Ambulance dispatch.";
+    referralReason = ambulanceFallbackCheck?.reason || "Severe acute emergency or trauma requiring immediate 108 Ambulance dispatch.";
     secondaryReferral = isPsychFallback ? "104 Health Helpline" : "ESIC Hospital";
     isDualProtocol = Boolean(isPsychFallback);
   } else if (severity === "Severe") {
@@ -4049,14 +4039,29 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     isDualProtocol = false;
   } else {
     // Mild
-    if (fallbackDispensaryStatus.isOpen && !/advice|phone doctor|guidance|information/i.test(effectiveInput)) {
-      referralDestination = "ESIS Dispensary";
-      referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
-      secondaryReferral = "104 Health Helpline";
+    const fallbackNeedsMedicalTreatment = doesCaseNeedMedicalTreatment({
+      severity: "Mild",
+      score: severityScore,
+      text: allContext,
+      isPsych: isPsychFallback,
+    });
+
+    if (fallbackNeedsMedicalTreatment) {
+      if (fallbackDispensaryStatus.isOpen && !/advice|phone doctor|guidance|information/i.test(effectiveInput)) {
+        referralDestination = "ESIS Dispensary";
+        referralReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
+        secondaryReferral = "104 Health Helpline";
+      } else {
+        // Dispensary is closed and condition requires physical medical treatment:
+        // DO NOT stop at 104! Forward directly to Hospital!
+        referralDestination = isDistHospRequest ? "Govt District Hospital" : "ESIC Hospital";
+        referralReason = "Dispensary is currently closed; condition requires physical medical evaluation/treatment. Proceed to nearest ESIC Hospital (or Govt District Hospital) casualty.";
+        secondaryReferral = "104 Health Helpline";
+      }
     } else {
       referralDestination = "104 Health Helpline";
       referralReason = "Mild non-emergency presentation. Connect with 104 Health Helpline for 24x7 doctor tele-consultation over the phone.";
-      secondaryReferral = "ESIS Dispensary";
+      secondaryReferral = fallbackDispensaryStatus.isOpen ? "ESIS Dispensary" : "ESIC Hospital";
     }
     isDualProtocol = false;
   }
