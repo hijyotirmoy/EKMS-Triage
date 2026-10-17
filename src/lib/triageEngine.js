@@ -141,7 +141,10 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
     /\b(can\s+speak\s+normally|able\s+to\s+speak\s+normally|speaking\s+normally|no\s+gasping|not\s+gasping|not\s+turning\s+blue)\b/i.test(rawText) ||
     (/\b(can\s+speak|able\s+to\s+speak)\b/i.test(rawText) && !/\b(unable|cannot|can'?t|not\s+able|difficulty)\b/i.test(rawText))
   ) && !/\b(unable\s+to\s+speak|cannot\s+speak|can'?t\s+speak|struggling\s+to\s+speak|gasping)\b/i.test(rawText);
-  const isConsciousAlert = /\b(conscious|hosh me|awake|alert|responding normally|talking)\b/i.test(rawText);
+  const isConsciousAlert = (
+    /\b(alert|awake|responding normally)\b/i.test(rawText) ||
+    (/\b(conscious|hosh me)\b/i.test(rawText) && !/\b(loss of|lost|briefly|not|nahi|un)\b/i.test(rawText))
+  ) && !/\b(unconscious|behosh|lost consciousness|loss of consciousness|blackout|blacked out)\b/i.test(rawText);
   const hasChestPainDenial = /\b(no\s+chest\s+pain|seene\s*me\s*dard\s*nahi|chhati\s*dard\s*nahi|not\s+chest\s+pain)\b/i.test(rawText);
 
   // Strip negated phrases to obtain purely affirmative clinical context
@@ -157,30 +160,41 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
 
   // ONLY dispatch 108 for STRICT LIFE-AND-DEATH CRISES:
 
-  // 1. Uncontrollable spurting / arterial bleeding, heavy bleeding, deep cuts (hand, finger, limb)
-  const hasUncontrollableBleeding = !bleedingControlled && !isSuperficialOrMinorCut && !isAccidentDenied && (
+  // 1. Deep cut exposing fat, muscle, or bone WITH heavy continuous bleeding / severe pain -> 108 Ambulance!
+  const hasDeepCutMuscleFat = !isAccidentDenied && !isSuperficialOrMinorCut && (
+    /\b(muscle|fat|bone|deep gaping|exposing fat|exposing muscle|visible bone)\b/i.test(affirmativeText) &&
+    /\b(cut|laceration|wound|ghao|bleed)\b/i.test(affirmativeText) &&
+    /\b(heavy|continuous|spurting|cannot stop|profuse|severe pain|intense pain|bhaari)\b/i.test(affirmativeText)
+  );
+
+  // 1b. Uncontrollable spurting / arterial bleeding, heavy bleeding, deep cuts (hand, finger, limb)
+  const hasUncontrollableBleeding = hasDeepCutMuscleFat || (!bleedingControlled && !isSuperficialOrMinorCut && !isAccidentDenied && (
     /\b(spurting\s*bleed\w*|arterial\s*bleed\w*|heavy\s*bleed\w*|massive\s*bleed\w*|amputation|crushed\s*limb|profuse\s*bleed\w*)\b/i.test(affirmativeText) ||
     (/\b(deep\s*(?:gaping\s*)?cut|deep\s*laceration|heavy\s*cut|gehra\s*ghao|deep\s*wound)\b/i.test(affirmativeText) && /\b(bleed\w*|khoon|heavy|deep|gehra|cut|wound)\b/i.test(affirmativeText) && /\b(spurting|uncontrolled|heavy|continuous|bhaari|ruk nahi)\b/i.test(affirmativeText)) ||
     /\b(heavy active bleeding|cannot stop bleeding|bleeding continuously|tez khoon|bahut khoon|bhaari khoon)\b/i.test(affirmativeText)
-  );
+  ));
 
-  // 1b. Workplace Injury / Industrial / Machine / Hand & Finger Heavy Cut
+  // 1c. Workplace Injury / Industrial / Machine / Hand & Finger Heavy Cut
   const hasWorkplaceInjury = !isAccidentDenied && !isSuperficialOrMinorCut && !bleedingControlled && (
     /\b(industrial accident|machine amputation|heavy machine crush|amputation|crushed finger|crushed hand|severed limb|severed finger|industrial heavy trauma)\b/i.test(affirmativeText) ||
     (/\b(workplace injury|factory injury)\b/i.test(affirmativeText) && /\b(crushed|amputation|heavy bleeding|unconscious|deep laceration)\b/i.test(affirmativeText))
   );
 
-  // 1c. Head Injury / Concussion / Trauma to Head
-  const hasHeadInjury = !isAccidentDenied && !isSuperficialOrMinorCut && (
-    /\b(head trauma|hit (?:my|the|his|her)?\s*head.*(?:unconscious|vomit|dizzy|concussion)|sar me chot.*(?:behosh|ulti|chakkar)|skull injury|skull fracture|concussion|heavy head bleeding)\b/i.test(affirmativeText)
+  // 1d. Critical Head Injury / Trauma to Head (Critical Life Threat -> 108 Ambulance)
+  // Note: Head injury with brief LOC or concussion without coma is Severe -> ESIC Hospital Casualty IPD!
+  // Head injury with coma/unresponsive, CSF leak, skull fracture, or vehicular crash -> 108 Ambulance!
+  const hasCriticalHeadInjury = !isAccidentDenied && !isSuperficialOrMinorCut && (
+    (/\b(head trauma|hit (?:my|the|his|her)?\s*head|head injury|sar (?:par|me|pe)? chot|skull injury|skull fracture|concussion)\b/i.test(affirmativeText) &&
+     /\b(unresponsive|will not wake up|coma|skull fracture|fluid from (?:ear|nose)|bleeding from (?:ear|nose)|seizure|convulsion|spurting|arterial bleed|unconscious for a long time)\b/i.test(affirmativeText)) ||
+    /\b(skull fracture|heavy head bleeding.*unconscious|car accident.*head injury.*unconscious)\b/i.test(affirmativeText)
   );
 
-  // 1d. Any Road / Vehicular / Fall Accident
+  // 1e. Any Road / Vehicular / Fall Accident
   const hasAccident = !isAccidentDenied && !isSuperficialOrMinorCut && (
     /\b(serious road accident|severe car accident|bike collision|vehicle collision|hit by car|durghatna.*(?:behosh|fracture|bleed)|fall from height|fall from roof)\b/i.test(affirmativeText)
   );
 
-  // 1e. Elderly comorbidities (managed at Hospital Casualty / OPD, NOT 108 Ambulance unless acute life threat)
+  // 1f. Elderly comorbidities (managed at Hospital Casualty / OPD, NOT 108 Ambulance unless acute life threat)
   const callerAge = parseInt(intake?.age || tState?.age || "0", 10) || 0;
 
   // 2. Severe Respiratory Failure / Breathlessness: Active gasping for air, cyanosis, unable to speak full sentences
@@ -190,7 +204,7 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
 
   // 3. Unconsciousness / Senselessness / Coma / Sudden Collapse: Individual is unresponsive and will not wake up
   const hasUnconsciousness = !isConsciousAlert && (
-    /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|senseless|senselessness|not waking up|coma|collapsed and not responding|loss of consciousness)\b/i.test(affirmativeText)
+    /\b(unresponsive|will not wake up|won'?t wake up|unconscious|behosh|behoshi|senseless|senselessness|not waking up|coma|collapsed and not responding)\b/i.test(affirmativeText)
   );
 
   // 4. Acute Myocardial Infarction / Cardiac Arrest / Critical Life-Threatening Cardiac Crisis:
@@ -236,14 +250,17 @@ export function isLifeThreateningAmbulanceCase(textContext = "", severity = 5, i
   if (hasUnconsciousness) {
     return { is108: true, reason: "Senselessness / Unconsciousness: unresponsive individual requires immediate 108 Ambulance dispatch." };
   }
-  if (hasHeadInjury) {
-    return { is108: true, reason: "Head injury / trauma requires urgent 108 Emergency Ambulance dispatch for trauma stabilization and immediate hospital neuro-evaluation." };
+  if (hasCriticalHeadInjury) {
+    return { is108: true, reason: "Critical head trauma with coma, skull fracture, or neurological compromise requires immediate 108 Emergency Ambulance dispatch." };
   }
   if (hasAccident) {
     return { is108: true, reason: "Accident / vehicular casualty requires immediate 108 Emergency Ambulance dispatch for onsite emergency rescue and rapid hospital transfer." };
   }
   if (hasWorkplaceInjury) {
     return { is108: true, reason: "Workplace / industrial injury with heavy cut or bleeding requires immediate 108 Emergency Ambulance dispatch for trauma management." };
+  }
+  if (hasDeepCutMuscleFat) {
+    return { is108: true, reason: "Deep gaping cut exposing fat or muscle with heavy bleeding requires immediate 108 Ambulance dispatch for surgical hemostasis." };
   }
   if (hasUncontrollableBleeding) {
     return { is108: true, reason: "Heavy bleeding / severe deep cut (hand, finger, or limb) requires immediate 108 Ambulance dispatch for wound compression and resuscitation." };
@@ -842,7 +859,7 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   }
 
   // Loss of consciousness / Fainting / Blackout
-  if (/\b(unconscious|behosh|fainted|blackout|collapsed|syncope|unresponsive)\b/i.test(affirmativeText)) {
+  if (/\b(unconscious|behosh|fainted|blackout|blacked out|loss of consciousness|lost consciousness|collapsed|syncope|unresponsive)\b/i.test(affirmativeText)) {
     addPoint("Loss of consciousness / fainting episode");
   }
 
@@ -854,11 +871,11 @@ export function summarizeRedFlags(rawFlags = [], textContext = "", callerSaidSaf
   // Heavy bleeding / deep laceration / arterial bleed / active bleeding
   if (
     !deniesBleeding &&
-    /\b(heavy bleed|khoon beh raha|profuse bleed|deep wound|arterial bleed|slit.*wrist|cut.*wrist|active.*bleed|workplace.*injury.*bleed|wound depth)\b/i.test(
+    (/\b(heavy bleed|khoon beh raha|profuse bleed|deep wound|arterial bleed|slit.*wrist|cut.*wrist|active.*bleed|workplace.*injury.*bleed|wound depth)\b/i.test(
       affirmativeText
-    )
+    ) || /\b(muscle|fat|bone|deep gaping|exposing fat|exposing muscle)\b/i.test(affirmativeText))
   ) {
-    addPoint("Heavy uncontrollable bleeding / vascular injury");
+    addPoint("Heavy bleeding / deep laceration exposing tissue");
   }
 
   // Weakness & dizziness / presyncope indicators
@@ -1069,7 +1086,7 @@ export function sanitizeSymptomOrCondition(rawCondition = "", callerSpokenText =
     } else if (/\b(leg|knee|ankle|foot|feet|pair|taang|ghutna)\b/i.test(callerText)) {
       clean = "Leg & Lower Extremity Pain";
     } else if (/\b(headache|sir dard|sar dard|migraine)\b/i.test(callerText)) {
-      clean = "Severe Headache / Migraine";
+      clean = "Headache / Migraine";
     } else if (/\b(chest|chhati|heart)\b/i.test(callerText)) {
       clean = "Chest Discomfort / Pain";
     } else if (/\b(stomach|pet|gastric|acidity)\b/i.test(callerText)) {
@@ -1343,7 +1360,7 @@ export function extractCallerReportedProblems(params = {}) {
         else if (bp === "kamar") addProblem("Lower Back Pain / Backache", isPriority);
         else if (bp === "seene" || bp === "chhati") addProblem("Chest Discomfort / Pain", isPriority);
         else if (bp === "pet") addProblem("Abdominal / Gastric Pain", isPriority);
-        else if (bp === "sar" || bp === "sir") addProblem("Severe Headache / Migraine", isPriority);
+        else if (bp === "sar" || bp === "sir") addProblem("Headache / Migraine", isPriority);
         else if (bp === "gale") addProblem("Sore Throat / Pharyngeal Pain", isPriority);
         else if (bp === "pair" || bp === "taang") addProblem("Leg & Lower Extremity Pain", isPriority);
         else if (bp === "ghutne") addProblem("Knee Pain", isPriority);
@@ -1387,7 +1404,7 @@ export function extractCallerReportedProblems(params = {}) {
   // Headache / Migraine
   if (/\b(headache|sir dard|sar dard|migraine|sar me dard|heavy head|throbbing head)\b/i.test(affirmativeText)) {
     const isPriority = /\b(headache|sir dard|sar dard|migraine)\b/i.test(lastAffirmative);
-    addProblem("Severe Headache / Migraine", isPriority);
+    addProblem("Headache / Migraine", isPriority);
   }
 
   // Chest Discomfort / Pain
@@ -1498,11 +1515,11 @@ export function extractCallerReportedProblems(params = {}) {
 
   if (callerMentionedFever && callerMentionedChills) {
     const isPriority = /\b(fever|bukhar|temperature|chills|shivering)\b/i.test(lastAffirmative);
-    const isHigh = /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
-    addProblem(isHigh ? "High Fever with Chills & Shivering" : "Fever with Chills", isPriority);
+    const isHigh = /\b(high\s*fever|tez\s*bukhar|10[2-5]|severe\s*fever|high\s*temp\w*)\b/i.test(affirmativeText);
+    addProblem(isHigh ? "High Fever with Chills & Shivering" : "Fever & Chills", isPriority);
   } else if (callerMentionedFever) {
     const isPriority = /\b(fever|bukhar|temperature)\b/i.test(lastAffirmative);
-    const isHigh = !isCallerMildFeverInProb && /\b(high|tez|10[2-5]|severe)\b/i.test(affirmativeText);
+    const isHigh = !isCallerMildFeverInProb && /\b(high\s*fever|tez\s*bukhar|10[2-5]|severe\s*fever|high\s*temp\w*)\b/i.test(affirmativeText);
     const label = isHigh ? "High Fever" : (isCallerMildFeverInProb ? "Mild Fever" : "Fever");
     addProblem(label, isPriority);
   } else if (callerMentionedChills) {
@@ -1545,11 +1562,25 @@ export function extractCallerReportedProblems(params = {}) {
     addProblem("Weakness & Dizziness", isPriority);
   }
 
-  // Cut / Wound / Bleeding
-  const hasHeavyBleeding = !isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(heavy bleed|active.*heavy|profuse bleed|active.*bleed|workplace.*injury|wound depth|deep wound|laceration|khoon beh raha|arterial)\b/i.test(combinedCallerText);
-  const hasGeneralCut = !isSnakeBite && !isAnimalBite && !deniesBleeding && /\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|khoon|tanka)\b/i.test(affirmativeText);
+  // Head Injury / Head Trauma / Concussion
+  const isHeadTrauma = /\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|concussion|skull|hit.*head|head\s*wound)\b/i.test(combinedCallerText);
+  if (isHeadTrauma) {
+    const isPriority = /\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|concussion|skull)\b/i.test(lastAffirmative) || true;
+    const hasLOC = /\b(loss\s*of\s*consciousness|lost\s*consciousness|unconscious|blackout|blacked\s*out|behosh)\b/i.test(combinedCallerText);
+    const label = hasLOC ? "Head Injury with Loss of Consciousness" : "Head Injury / Head Trauma";
+    addProblem(label, isPriority);
+  }
 
-  if (hasHeavyBleeding) {
+  // Cut / Wound / Bleeding
+  const hasExposedTissueCut = !isSnakeBite && !isAnimalBite && !isHeadTrauma && !deniesBleeding &&
+    /\b(muscle|fat|bone|deep gaping|exposing fat|exposing muscle|visible bone)\b/i.test(combinedCallerText) &&
+    /\b(cut|wound|laceration|ghao|bleed)\b/i.test(combinedCallerText);
+  const hasHeavyBleeding = !isSnakeBite && !isAnimalBite && !isHeadTrauma && !deniesBleeding && /\b(heavy bleed|active.*heavy|profuse bleed|active.*bleed|workplace.*injury|wound depth|deep wound|laceration|khoon beh raha|arterial)\b/i.test(combinedCallerText);
+  const hasGeneralCut = !isSnakeBite && !isAnimalBite && !isHeadTrauma && !deniesBleeding && /\b(cut|wound|laceration|bleed|chot|injury|slit|scratch|khoon|tanka)\b/i.test(affirmativeText);
+
+  if (hasExposedTissueCut) {
+    addProblem("Deep Gaping Cut Exposing Muscle / Fat with Heavy Bleeding", true);
+  } else if (hasHeavyBleeding) {
     const isWorkplace = /\b(workplace|machine|factory|industrial)\b/i.test(combinedCallerText);
     addProblem(isWorkplace ? "Workplace Injury with Active Bleeding" : "Laceration Injury with Active Bleeding", true);
   } else if (hasGeneralCut) {
@@ -1839,8 +1870,42 @@ async function evaluateRawTriage(intake) {
       tState,
     });
 
-    const triageUrgencyScore = clinicalScoreResult.score;
-    const normUrgency = clinicalScoreResult.urgency_level;
+    let triageUrgencyScore = clinicalScoreResult.score;
+    let normUrgency = clinicalScoreResult.urgency_level;
+
+    // STRICT USER MANDATE: Normal OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+    // Send to Dispensary or 104.
+    // Moderate is ONLY where IPD treatment is needed, 1 day or more hospitalization needed,
+    // specialist doctor consultation or procedural treatment needed, or lab/imaging needed.
+    const requiresHospitalCare = Boolean(
+      isEmergency108 ||
+      isPsych ||
+      isTieUpEligible ||
+      isDistHospRequest ||
+      /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(allText) ||
+      /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(allText) ||
+      /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(allText) ||
+      /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut|stitches)\b/i.test(allText) ||
+      /\b(head injury|head trauma|sar.*chot|concussion|skull|hit.*head|loss of consciousness|lost consciousness|blackout|blacked out|behosh|unconscious|deep cut|gaping cut|exposing fat|exposing muscle)\b/i.test(allText)
+    );
+
+    // USER MANDATE:
+    // 1. For 1-3 days duration (or 2-3 days, today, yesterday):
+    //    If other condition or answers are Moderate level or Severe level, then based on the situation show Moderate or Severe!
+    //    DO NOT restrict anything. Based on every situation show the forward referral.
+    // 2. Only if other answers are genuinely mild, evaluate as Mild.
+    const isClinicalModerateOrSevere =
+      normUrgency === "Moderate" ||
+      normUrgency === "Severe" ||
+      triageUrgencyScore >= 5 ||
+      isEmergency108 ||
+      clinicalScoreResult.isLifeThreatening;
+
+    if (!isClinicalModerateOrSevere) {
+      normUrgency = "Mild";
+      triageUrgencyScore = (triageUrgencyScore >= 1 && triageUrgencyScore <= 4) ? triageUrgencyScore : 3;
+    }
+
 
     let primaryReferral = "ESIS Dispensary";
     let primaryReason = "Routine primary care; visit nearest ESIS Dispensary (Open Mon–Fri 10:00 AM – 4:00 PM, 1st, 3rd & 5th Saturday 10:00 AM – 12:00 PM) for doctor evaluation and medicines.";
@@ -2032,10 +2097,23 @@ async function evaluateRawTriage(intake) {
   // 1. Primary AI Evaluation via Centralized LLM Proxy (Groq 21-Keys -> Gemini -> Claude -> Other)
   try {
     const triageSystemPrompt = `You are an expert ESIC / ESIS medical triage clinical evaluator in Assam, India. Evaluate symptoms and classify strictly into 3 urgency levels based on standard clinical criteria: 'Severe', 'Moderate', 'Mild' (DO NOT use Emergency, Urgent, Routine, Self-care, or numerical ratings).
-Clinical Criteria:
-- Mild: Low-intensity, localized, or early-stage symptoms. Little to no disruption of daily activities, normal functions, or vital signs. Managed via OPDs, primary health centers (PHCs / ESIS Dispensary), or basic supportive/conservative care.
-- Moderate: Noticeable symptoms requiring active intervention or medication. Measurable interference with normal daily functioning, work, or physical activity. Managed by general physicians, district centers, stepped-up pharmacological treatments.
-- Severe: High-intensity, widespread, or life-threatening symptoms. Gross/total interference with basic physical function, organ systems, or consciousness. Requires urgent, specialized, or inpatient/intensive care (ICU/emergency stabilization).
+Clinical Criteria (STRICT USER RULES):
+- Take ALL answers and symptoms together: DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word! Evaluate all answers collectively.
+- 2-3 Days Duration is MILD: Symptoms lasting 2 to 3 days (or 1-3 days, today, yesterday) MUST be categorized as MILD if other symptoms are mild/outpatient (no hospital admission, no stitches/fracture, no lab workup).
+- Mild (Urgency Score 1-4, default 3):
+  * ALL normal viral, seasonal, and common illnesses (common cold, viral fever, mild cough, body aches, routine headaches, mild gastritis/indigestion/diarrhea without dehydration, superficial minor cuts/bruises, muscular aches/joint stiffness).
+  * ANY disease or condition that can be managed, fixed, or treated with oral/topical medication, basic conservative care, or outpatient primary doctor consultation at an ESIS Dispensary or 104 Health Helpline tele-doctor.
+  * ALL standard Outpatient Department (OPD) presentations MUST be categorized as MILD. DO NOT classify normal OPD conditions or conditions fixable by medication as Moderate!
+  * Forwarding: ESIS Dispensary (during working hours) or 104 Health Helpline (after hours). NEVER send normal OPD conditions to hospital!
+- Moderate (Urgency Score 5-7, default 6):
+  * STRICT REQUIREMENT: Reserved ONLY for cases requiring Inpatient Department (IPD) care / hospitalization (>= 1 day admission, overnight observation bed, or continuous IV saline/fluid infusion).
+  * Cases requiring very special procedural treatment (wound suturing/stitches for deep lacerations, reduction & plaster cast for fractures/dislocations, minor OT, wound debridement, or specialist physician/surgeon review).
+  * Cases requiring hospital diagnostic laboratory workup or imaging (blood tests, CBC, malaria/dengue/typhoid serology, diagnostic X-ray, hospital ECG, ultrasound).
+  * If a condition can be treated or fixed with medication and does NOT require IPD hospitalization, procedures (stitches/casts), or hospital lab/imaging, it MUST NOT be Moderate — it MUST be MILD!
+- Severe (Urgency Score 8-10):
+  * High-intensity, widespread, or life-threatening symptoms: acute respiratory failure (severe dyspnea, unable to speak full sentences), acute cardiac chest pain (crushing pain radiating to arm/jaw WITH cold sweat or collapse), altered consciousness/coma, continuous heavy arterial hemorrhage, acute anaphylaxis, poisoning, or convulsions.
+  * In case of score 9 or 10: forward immediately to 108 Ambulance.
+  * In case of score 8: if not immediately life-threatening and manageable in hospital casualty directly, forward to ESIC Hospital / Govt District Hospital Casualty.
 
 Forwarding Hierarchy Rules:
 - Mild:
@@ -2164,17 +2242,39 @@ Output strict JSON with keys: urgency_level ('Severe'|'Moderate'|'Mild'), assess
     call_108 = true;
     if (isNeuro) red_flags.push("Altered consciousness / neurological deficit");
     if (isSevereBleed) red_flags.push("Uncontrolled hemorrhage");
-  } else if (severity >= 4 || notes.includes("bukhar") || notes.includes("fever")) {
-    urgency_level = "Moderate";
-    urgency_score = 6;
-    call_108 = false;
-    if (notes.includes("chills") || notes.includes("kampkampi") || notes.includes("rigor")) {
-      red_flags.push("High fever accompanied by rigors / chills");
-    }
   } else {
-    urgency_level = "Mild";
-    urgency_score = 3;
-    call_108 = false;
+    // STRICT USER MANDATE: Normal OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+    // Send to Dispensary or 104.
+    // Moderate is ONLY where IPD treatment is needed, 1 day or more hospitalization needed,
+    // specialist doctor consultation or procedural treatment needed, or lab/imaging needed.
+    const requiresHospitalCare = Boolean(
+      /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(notes) ||
+      /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(notes) ||
+      /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(notes) ||
+      /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut)\b/i.test(notes)
+    );
+
+    const isClinicalModerateOrSevere =
+      urgency_level === "Moderate" ||
+      urgency_level === "Severe" ||
+      severity >= 5 ||
+      requiresHospitalCare ||
+      isNeuro ||
+      isSevereBleed;
+
+    if (severity >= 8) {
+      urgency_level = "Severe";
+      urgency_score = 8;
+      call_108 = false;
+    } else if (isClinicalModerateOrSevere) {
+      urgency_level = "Moderate";
+      urgency_score = (severity >= 5 && severity <= 7) ? severity : 6;
+      call_108 = false;
+    } else {
+      urgency_level = "Mild";
+      urgency_score = (severity >= 1 && severity <= 4) ? severity : 3;
+      call_108 = false;
+    }
   }
 
   // Generate Reasoning, Summaries and Actions
@@ -2264,6 +2364,7 @@ function normalizeTriageDecision(triage, intake) {
     : "";
   const callerSpokenText = `${intake.symptom_notes || ""} ${callerUtterances}`.trim().toLowerCase();
   const notes = `${callerSpokenText} ${tState?.symptom || ""} ${tState?.condition || ""}`.toLowerCase();
+  const allText = notes;
 
   if (triage.primary_complaint) {
     triage.primary_complaint = sanitizeSymptomOrCondition(triage.primary_complaint, callerSpokenText);
@@ -2299,6 +2400,39 @@ function normalizeTriageDecision(triage, intake) {
 
   let finalLevel = clinicalScore.urgency_level;
   let finalScore = clinicalScore.score;
+
+  // STRICT USER MANDATE: Normal OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+  // Send to Dispensary or 104.
+  // Moderate is ONLY where IPD treatment is needed, 1 day or more hospitalization needed,
+  // specialist doctor consultation or procedural treatment needed, or lab/imaging needed.
+  const requiresHospitalCare = Boolean(
+    isEmergency108 ||
+    isPsych ||
+    isPoisonOrTrauma ||
+    /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika)\b/i.test(notes) ||
+    /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(notes) ||
+    /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(notes) ||
+    /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(notes) ||
+    /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut|stitches)\b/i.test(notes)
+  );
+
+  // USER MANDATE:
+  // USER MANDATE:
+  // 1. For 1-3 days duration (or 2-3 days, today, yesterday):
+  //    If other condition or answers are Moderate level or Severe level, then based on the situation show Moderate or Severe!
+  //    DO NOT restrict anything. Based on every situation show the forward referral.
+  // 2. Only if other answers are genuinely mild, evaluate as Mild.
+  const isClinicalModOrSevFinal =
+    finalLevel === "Moderate" ||
+    finalLevel === "Severe" ||
+    finalScore >= 5 ||
+    isEmergency108 ||
+    clinicalScore.isLifeThreatening;
+
+  if (!isClinicalModOrSevFinal) {
+    finalLevel = "Mild";
+    finalScore = (finalScore >= 1 && finalScore <= 4) ? finalScore : 3;
+  }
 
   triage.urgency_level = finalLevel;
   triage.assessed_severity = finalLevel;

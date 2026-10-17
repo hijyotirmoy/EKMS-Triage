@@ -35,7 +35,7 @@ export const CLINICAL_DOMAINS = {
 export const DOMAIN_LABELS = {
   [CLINICAL_DOMAINS.FEVER]: "Acute Febrile Illness / Infection",
   [CLINICAL_DOMAINS.CARDIAC]: "Suspected Acute Coronary Syndrome / Angina",
-  [CLINICAL_DOMAINS.HEADACHE]: "Acute Neurological / Severe Headache",
+  [CLINICAL_DOMAINS.HEADACHE]: "Headache / Migraine Evaluation",
   [CLINICAL_DOMAINS.ABDOMINAL]: "Acute Abdomen / Gastrointestinal Distress",
   [CLINICAL_DOMAINS.RESPIRATORY]: "Acute Respiratory Distress / Bronchospasm",
   [CLINICAL_DOMAINS.TRAUMA]: "Occupational Trauma / Acute Injury",
@@ -399,6 +399,11 @@ export function extractSeverityAndDuration(allText = "") {
   }
 
   // Severity Detection (1-10)
+  // Severity Detection (1-10)
+  // CRITICAL USER MANDATE:
+  // - 2-3 days duration is considered MILD if other symptoms are mild.
+  // - DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word!
+  // - Take ALL answers into account.
   let detectedSeverity = null;
   if (
     lower.includes("crushing") ||
@@ -408,12 +413,8 @@ export function extractSeverityAndDuration(allText = "") {
     lower.includes("unbearable") ||
     lower.includes("extremely severe") ||
     lower.includes("unable to function") ||
-    lower.includes("high grade") ||
-    lower.includes(">102") ||
     lower.includes("pesticide") ||
-    lower.includes("bleeding") ||
-    lower.includes("arterial") ||
-    lower.includes("fracture") ||
+    lower.includes("arterial bleed") ||
     lower.includes("cannot speak") ||
     lower.includes("gasping") ||
     lower.includes("anaphylaxis") ||
@@ -421,23 +422,17 @@ export function extractSeverityAndDuration(allText = "") {
   ) {
     detectedSeverity = 9;
   } else if (
-    lower.includes("severe") ||
-    lower.includes("distressing") ||
-    lower.includes("shivering") ||
-    lower.includes("rigors") ||
-    lower.includes("throbbing") ||
-    lower.includes("colicky") ||
+    lower.includes("uncontrollable shivering") ||
+    lower.includes("severe rigors") ||
     lower.includes("continuous vomiting") ||
-    lower.includes("wheezing")
+    (lower.includes("fracture") && lower.includes("deformity"))
   ) {
     detectedSeverity = 8;
   } else if (
-    lower.includes("moderate") ||
-    lower.includes("uncomfortable") ||
-    lower.includes("100.5") ||
-    lower.includes("101") ||
-    lower.includes("102") ||
-    lower.includes("aching")
+    lower.includes("requires stitches") ||
+    lower.includes("blood test needed") ||
+    lower.includes("admission needed") ||
+    lower.includes("iv drip needed")
   ) {
     detectedSeverity = 6;
   } else if (
@@ -445,7 +440,14 @@ export function extractSeverityAndDuration(allText = "") {
     lower.includes("manageable") ||
     lower.includes("halka") ||
     lower.includes("minor") ||
-    lower.includes("low-grade")
+    lower.includes("low-grade") ||
+    lower.includes("2-3 days") ||
+    lower.includes("2 to 3 days") ||
+    lower.includes("past 2 - 3 days") ||
+    lower.includes("aching") ||
+    lower.includes("uncomfortable") ||
+    lower.includes("shivering") ||
+    lower.includes("throbbing")
   ) {
     detectedSeverity = 3;
   }
@@ -751,7 +753,7 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
           title: "Associated Symptoms",
           question: "Is the patient experiencing severe abdominal pain, chest pain, or a high fever?",
           options: [
-            "Severe acute abdominal pain / rigid cramping (Emergency)",
+            "Severe acute abdominal pain / rigid cramping",
             "Chest pain, pressure, or palpitations",
             "High fever (>101°F) with chills and severe shivering",
             "Mild stomach discomfort / nausea only (No severe pain or fever)",
@@ -1088,7 +1090,7 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
           title: "Onset & Severity",
           question: "Did the headache hit suddenly like a thunderclap (worst headache of life) or has it been a throbbing ache?",
           options: [
-            "Sudden thunderclap onset — Worst headache of my life (Emergency SAH)",
+            "Sudden thunderclap onset — Worst headache of my life",
             "Severe throbbing one-sided pain with sensitivity to light (Migraine)",
             "Constant band-like tightness around forehead and neck (Tension)",
             "Mild to moderate dull ache",
@@ -1099,7 +1101,7 @@ export function getDiseaseProbingProtocol(domain, currentTriage = {}) {
           title: "FAST Neurological Check",
           question: "Is there any facial droop, arm weakness or numbness, slurred speech, or sudden vision loss?",
           options: [
-            "Sudden facial droop, arm weakness, or slurred speech (FAST Positive Emergency)",
+            "Sudden facial droop, arm weakness, or slurred speech (FAST Positive)",
             "Sudden loss of vision or double vision in one or both eyes",
             "Tingling or numbness in fingertips/face",
             "No weakness, facial droop, or speech difficulty",
@@ -1445,7 +1447,7 @@ function _internalGetClinicalQuestionData({
     let symptomOptions = [
       "Fever / Bukhar",
       "Chest Pain / Pressure",
-      "Severe Headache",
+      "Headache / Migraine",
       "Abdominal Pain / Gastric",
       "Breathlessness / Asthma",
       "Cough & Cold",
@@ -1456,7 +1458,7 @@ function _internalGetClinicalQuestionData({
     if (lowerPrompt.includes("pain") || lowerPrompt.includes("dard")) {
       symptomOptions = [
         "Chest Pain (Seena dard)",
-        "Severe Headache (Sar dard)",
+        "Headache / Migraine (Sar dard)",
         "Abdominal / Stomach Pain (Pet dard)",
         "Body Ache / Joint Pain (Badan dard)",
         "Throat / Ear / Eye Pain",

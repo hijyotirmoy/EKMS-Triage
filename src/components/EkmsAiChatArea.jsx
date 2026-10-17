@@ -57,6 +57,20 @@ function formatReferralReason(reason) {
   return reason || "";
 }
 
+export function cleanChipText(text = "") {
+  if (!text || typeof text !== "string") return "";
+  let clean = text
+    .replace(/\s*\(\s*(?:emergency\s*-\s*108|emergency\s*sah|emergency|ambulance\s*dispatched|ambulance|call\s*108|108|severe)\s*\)/gi, "")
+    .replace(/\s*-\s*108\b/gi, "")
+    .replace(/\b108\b/gi, "")
+    .replace(/\s*\(\s*emergency\s*\)/gi, "")
+    .replace(/\bemergency\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  clean = clean.replace(/[\s\-,;:]+$/, "").replace(/^\s*[-–—]\s*/, "").trim();
+  return clean || text.replace(/108/g, "").trim();
+}
+
 function formatMsgTime(m) {
   const ts = m?.timestamp || m?.created_at || m?.time;
   if (ts) {
@@ -490,7 +504,7 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
         created_at: new Date(botTime).toISOString(),
         sender: "bot",
         text: data.agentScript || data.answer || "Could you describe any other symptoms?",
-        options: data.options || data.suggestedAnswers || [],
+        options: (data.options || data.suggestedAnswers || []).map(cleanChipText).filter(Boolean),
         suspectedCondition: nextClinicalState.suspectedCondition,
         severity: nextClinicalState.severity,
         referralDestination: nextClinicalState.referralDestination,
@@ -673,22 +687,6 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                 {effectiveSeverityLabel}
               </span>
             )}
-            {effectiveReferral && (
-              <span className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 sm:px-2 text-[9px] sm:text-[10px] font-bold shadow-2xs ${
-                effectiveReferral.toLowerCase().includes("108")
-                  ? "bg-rose-100 text-rose-950 border-rose-300 dark:bg-rose-950/50 dark:text-rose-200"
-                  : effectiveReferral.toLowerCase().includes("104")
-                  ? "bg-blue-100 text-blue-950 border-blue-300 dark:bg-blue-950/50 dark:text-blue-200"
-                  : effectiveReferral.toLowerCase().includes("hospital")
-                  ? "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/50 dark:text-amber-200"
-                  : effectiveReferral.toLowerCase().includes("tie")
-                  ? "bg-cyan-100 text-cyan-950 border-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-200"
-                  : "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-200"
-              }`}>
-                <PhoneForwarded className="h-3 w-3 shrink-0" />
-                <span className="max-w-[110px] sm:max-w-[280px] truncate">{effectiveReferral}</span>
-              </span>
-            )}
           </div>
         </div>
       </div>
@@ -801,8 +799,15 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
         {/* Message Stream */}
         {messages.map((m, mIdx) => {
           const isLatest = mIdx === messages.length - 1;
-          const isCurrentActiveTurn = isLatest && m.sender === "bot";
-          const cleanQuestionText = m.text ? m.text.replace(/^Ask the (IP|caller|patient):\s*['"]?|['"]?$/gi, "").trim() : "";
+          const isCurrentActiveTurn = isLatest && (m.sender === "bot" || m.sender === "assistant");
+          let cleanQuestionText = "";
+          if (m.text) {
+            cleanQuestionText = m.text.replace(/^Ask the (?:IP|caller|patient):\s*/i, "").trim();
+            if (cleanQuestionText.startsWith('"') || cleanQuestionText.startsWith("'")) {
+              cleanQuestionText = cleanQuestionText.replace(/^["']\s*/, "").replace(/["']\s*(\((?:Hinglish|Hindi):)/i, " $1");
+            }
+            cleanQuestionText = cleanQuestionText.replace(/(\((?:Hinglish|Hindi):\s*)["']/, "$1").replace(/["']\s*\)$/, ")");
+          }
 
           return (
             <div
@@ -926,7 +931,9 @@ export const EkmsAiChatArea = forwardRef(function EkmsAiChatArea(
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {m.options.map((opt, idx) => {
+                        {m.options.map((rawOpt, idx) => {
+                          const opt = cleanChipText(rawOpt);
+                          if (!opt) return null;
                           const isSelected = selectedOptions.includes(opt);
                           return (
                             <button

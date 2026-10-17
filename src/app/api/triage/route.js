@@ -136,8 +136,48 @@ export async function POST(request) {
       tState,
     });
 
-    const evaluatedScore = isNacoHIV ? 3 : clinicalScoreResult.score;
-    const urgencyCategory = isNacoHIV ? "Mild" : clinicalScoreResult.urgency_level;
+    let evaluatedScore = isNacoHIV ? 3 : clinicalScoreResult.score;
+    let urgencyCategory = isNacoHIV ? "Mild" : clinicalScoreResult.urgency_level;
+
+    const isPsychCase = isPsychiatricCase;
+    const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(notes);
+    const isTieUpEligible = /\b(tie-?up|empanelled|private partner hospital|super specialty)\b/i.test(notes);
+
+    // STRICT USER MANDATE: Normal OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+    // Send to Dispensary or 104.
+    // Moderate is ONLY where IPD treatment is needed, 1 day or more hospitalization needed,
+    // specialist doctor consultation or procedural treatment needed, or lab/imaging needed.
+    const requiresHospitalCare = Boolean(
+      ambulanceEval.is108 ||
+      isPsychCase ||
+      isNacoHIV ||
+      isTieUpEligible ||
+      isDistHospRequest ||
+      /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(notes) ||
+      /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(notes) ||
+      /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(notes) ||
+      /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut|stitches)\b/i.test(notes) ||
+      /\b(head injury|head trauma|sar.*chot|concussion|skull|hit.*head|loss of consciousness|lost consciousness|blackout|blacked out|behosh|unconscious|deep cut|gaping cut|exposing fat|exposing muscle)\b/i.test(notes)
+    );
+
+    // USER MANDATE:
+    // 1. For 1-3 days duration (or 2-3 days, today, yesterday):
+    //    If other condition or answers are Moderate level or Severe level, then based on the situation show Moderate or Severe!
+    //    DO NOT restrict anything. Based on every situation show the forward referral.
+    // 2. Only if other answers are genuinely mild, evaluate as Mild.
+    const isClinicalModerateOrSevere =
+      urgencyCategory === "Moderate" ||
+      urgencyCategory === "Severe" ||
+      evaluatedScore >= 5 ||
+      ambulanceEval.is108 ||
+      clinicalScoreResult.isLifeThreatening;
+
+    if (!isClinicalModerateOrSevere) {
+      urgencyCategory = "Mild";
+      evaluatedScore = (evaluatedScore >= 1 && evaluatedScore <= 4) ? evaluatedScore : 3;
+    }
+
+
     const isSevere = urgencyCategory === "Severe";
     const isModerate = urgencyCategory === "Moderate";
 
@@ -195,21 +235,6 @@ export async function POST(request) {
       nearest_facilities = facilities;
     }
 
-    const isPsychCase = isPsychiatricCase;
-    const chatChoseHospital =
-      explicitReferral.includes("hospital") ||
-      (tState?.referralDestination || "").toLowerCase().includes("hospital") ||
-      (triage.referral_destination || "").toLowerCase().includes("hospital") ||
-      (triage.call_referral_primary || "").toLowerCase().includes("hospital") ||
-      /\b(hospital|aspatal|hospital jaana|hospital jana|visit hospital|esic hospital|admit|bada aspatal|hospital me dikhana|emergency ward|emergency casualty|visit esic hospital casualty|hospital casualty|visit esic hospital|go to hospital|wants to go to hospital|want to go to hospital)\b/i.test(callerSpokenText);
-
-    const hasExplicitSpecialReferral =
-      isNacoHIV ||
-      isPsychCase ||
-      explicitReferral.includes("108") ||
-      explicitReferral.includes("104") ||
-      explicitReferral.includes("hospital") ||
-      chatChoseHospital;
 
     if (isPsychCase) {
       triage.call_referral_primary = "104 Health Helpline";
@@ -603,29 +628,91 @@ export async function POST(request) {
       fallbackNearest = [];
     }
 
+    const rawRep = Number(safeIntake.severity_reported) || 3;
+    const notesLower = String(safeIntake.symptom_notes || "").toLowerCase();
+    const isSevereFbk = rawRep >= 8 || /\b(cardiac arrest|unconscious|behosh|heavy active bleed|arterial bleed|snake\s*bite|drank poison|poisoning|status epilepticus)\b/i.test(notesLower);
+    const requiresHospFbk = isSevereFbk || rawRep >= 5 || /\b(ipd|admit|admission|hospitaliz\w*|specialist|surgeon|fracture|broken bone|stitches|taanke|blood test|cbc|x-ray|xray|ecg|usg|ultrasound)\b/i.test(notesLower);
+    const fallbackUrgency = isSevereFbk ? "Severe" : (requiresHospFbk ? "Moderate" : "Mild");
+    const fallbackScore = isSevereFbk ? (rawRep >= 8 ? rawRep : 9) : (requiresHospFbk ? 6 : 3);
+    const fallbackDispStatus = getDispensaryOperatingStatus();
+    const fallbackDispensary = fallbackNearest.find((f) => isDispensary(f)) || null;
+    const dispNameFbk = fallbackDispensary?.name || "ESIS Dispensary";
+
+    let fbkPrimary = "104 Health Helpline";
+    let fbkSecondary = dispNameFbk;
+    let fbkRecFacility = "104 Health Helpline (Doctor on Call)";
+    let fbkRecAction = "Mild condition; contact 104 Health Helpline for tele-doctor consultation or visit ESIS Dispensary during open hours.";
+
+    if (fallbackUrgency === "Severe") {
+      fbkPrimary = "108 Ambulance";
+      fbkSecondary = "ESIC Hospital";
+      fbkRecFacility = "108 Emergency Ambulance";
+      fbkRecAction = "Severe emergency. Immediate ambulance transport required.";
+    } else if (fallbackUrgency === "Moderate") {
+      fbkPrimary = "ESIC Hospital";
+      fbkSecondary = "Govt District Hospital";
+      fbkRecFacility = "ESIC Hospital / Govt District Hospital";
+      fbkRecAction = "Advise patient to proceed to the nearest ESIC Hospital or Govt District Hospital for clinical evaluation.";
+    } else {
+      if (fallbackDispStatus.isOpen) {
+        fbkPrimary = dispNameFbk;
+        fbkSecondary = "104 Health Helpline";
+        fbkRecFacility = `${dispNameFbk} (ESIS Dispensary · Open Now)`;
+        fbkRecAction = `Visit nearest ESIS Dispensary (${dispNameFbk}) during OPD hours or call 104.`;
+      } else {
+        fbkPrimary = "104 Health Helpline";
+        fbkSecondary = dispNameFbk;
+        fbkRecFacility = "104 Health Helpline (Doctor on Call)";
+        fbkRecAction = "Dispensary currently closed. Connect with 104 Health Helpline for 24x7 doctor tele-consultation, or visit ESIS Dispensary during open hours.";
+      }
+    }
+
+    const fallbackForwardingHierarchy = fallbackUrgency === "Severe"
+      ? [
+          { rank: 1, id: "CALL_108", name: "108 Ambulance", badge: "108 Ambulance", role: "Immediate Emergency Dispatch", status: "24x7 Emergency Response", hours: "24 Hours" },
+          { rank: 2, id: "ESIC_HOSPITAL", name: "ESIC Hospital", badge: "ESIC Hospital", role: "Secondary Hospital & Casualty", status: "24x7 Casualty Active", hours: "24 Hours" }
+        ]
+      : fallbackUrgency === "Moderate"
+      ? [
+          { rank: 1, id: "ESIC_HOSPITAL", name: "ESIC Hospital", badge: "ESIC Hospital", role: "Secondary Hospital & Casualty", status: "24x7 Casualty Active", hours: "24 Hours" },
+          { rank: 2, id: "DIST_HOSPITAL", name: "Govt District Hospital", badge: "Govt District Hospital", role: "Public District Hospital Care", status: "24x7 Casualty Active", hours: "24 Hours" }
+        ]
+      : fallbackDispStatus.isOpen
+      ? [
+          { rank: 1, id: "ESIS_DISPENSARY", name: dispNameFbk, badge: "ESIS Dispensary", role: "Primary Care Clinic", status: "Open Now", hours: "Mon-Fri 10am-4pm, Sat 10am-12pm" },
+          { rank: 2, id: "TELE_104", name: "104 Health Helpline", badge: "104 Health Helpline", role: "24x7 Tele-Doctor Consultation", status: "24x7 Active", hours: "24 Hours / 7 Days" }
+        ]
+      : [
+          { rank: 1, id: "TELE_104", name: "104 Health Helpline", badge: "104 Health Helpline", role: "24x7 Tele-Doctor Consultation", status: "24x7 Active", hours: "24 Hours / 7 Days" },
+          { rank: 2, id: "ESIS_DISPENSARY", name: dispNameFbk, badge: "ESIS Dispensary", role: "Primary Care Clinic", status: "Closed", hours: "Mon-Fri 10am-4pm, Sat 10am-12pm" }
+        ];
+
     return NextResponse.json({
       case_ref: fallbackCaseRef,
       case_id: fallbackCaseRef,
       agent_id: "A1",
       intake: safeIntake,
-      triage: {
-        urgency_level: "Moderate",
-        assessed_severity: "Moderate",
-        urgency_score: 6,
-        confidence: "medium",
-        summary_en: "Clinical evaluation completed; guidance to nearest health facility indicated.",
-        summary_hi: "चिकित्सीय मूल्यांकन संपन्न; निकटतम स्वास्थ्य सुविधा के लिए मार्गदर्शन।",
-        reasoning: "Clinical safety fallback activated.",
-        red_flags: [],
-        recommended_facility_type: "ESIC Hospital / Govt District Hospital",
-        recommended_action: "Advise patient to proceed to the nearest ESIC Hospital or Govt District Hospital for clinical evaluation.",
-        call_108: false,
-        detected_language: "Hinglish",
-        call_referral_primary: "ESIC Hospital",
-        call_referral_secondary: "Govt District Hospital",
-        referral_destination: "ESIC Hospital",
-        referral_reason: "Connect with ESIC Hospital or Govt District Hospital for clinical evaluation."
-      },
+        triage: {
+          urgency_level: fallbackUrgency,
+          assessed_severity: fallbackUrgency,
+          urgency_score: fallbackScore,
+          severity_score: fallbackScore,
+          confidence: "medium",
+          summary_en: `Clinical evaluation completed for reported ${notesLower.slice(0, 40) || "symptoms"}; guidance to ${fbkPrimary} indicated.`,
+          summary_hi: `चिकित्सीय मूल्यांकन संपन्न; ${fbkPrimary} के लिए मार्गदर्शन।`,
+          reasoning: "Clinical safety fallback activated.",
+          red_flags: [],
+          recommended_facility_type: fbkRecFacility,
+          recommended_action: fbkRecAction,
+          call_108: fallbackUrgency === "Severe",
+          detected_language: "Hinglish",
+          call_referral_primary: fbkPrimary,
+          call_referral_secondary: fbkSecondary,
+          referral_destination: fbkPrimary,
+          secondary_referral_destination: fbkSecondary,
+          referral_reason: `Connect with ${fbkPrimary} for clinical consultation.`,
+          forwarding_hierarchy: fallbackForwardingHierarchy,
+        },
       resolved_location: fallbackLoc,
       nearest_facilities: fallbackNearest,
       ekms_ai_context: null,

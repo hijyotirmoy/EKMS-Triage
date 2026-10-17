@@ -140,7 +140,15 @@ export function calculateClinicalSeverityScore({
   const hasProlongedSeizure = /\b(seizure.*> 5 min|continuous seizure|status epilepticus|continuous fits)\b/i.test(combinedContext);
   const hasPoisoningCrisis = /\b(drank poison|ingested pesticide|acid ingestion|consumed poison|poisoning|zeher)\b/i.test(combinedContext);
   const hasStrokeCrisis = /\b(stroke|paralysis|facial droop|slurred speech|sudden weakness one side|hemiplegia)\b/i.test(combinedContext);
-  const hasSevereHeadTrauma = /\b(head injury|hit head).*unconscious|skull fracture|unequal pupils|head trauma.*vomit|severe head trauma\b/i.test(combinedContext);
+  const hasLOCDenial = /\b(no\s+(?:loss\s+of\s+consciousness|blackout|behoshi|unconscious)|conscious|alert|not\s+unconscious|no\s+blackout)\b/i.test(combinedContext);
+  const hasVomitDenial = /\b(no\s+vomit\w*|without\s+vomit\w*|ulti\s+nahi|no\s+ulti)\b/i.test(combinedContext);
+  const hasSevereHeadTrauma =
+    !hasLOCDenial &&
+    (/\b(head injury|hit head|head trauma|sar.*chot|concussion|skull).*(?:unconscious|lost consciousness|loss of consciousness|blackout|blacked out|behosh|vomit|confusion|memory loss)|(?:unconscious|lost consciousness|loss of consciousness|blackout|blacked out|behosh|vomit).*(?:head injury|hit head|head trauma|sar.*chot|concussion)|skull fracture|unequal pupils|severe head trauma\b/i.test(combinedContext));
+  const hasDeepCutMuscleFat =
+    /\b(muscle|fat|bone|deep gaping cut|gaping cut|exposing fat|exposing muscle|visible bone)\b/i.test(combinedContext) &&
+    /\b(cut|laceration|wound|ghao|bleed)\b/i.test(combinedContext) &&
+    /\b(heavy|profuse|continuous|uncontrolled|severe pain|intense pain|spurting)\b/i.test(combinedContext);
   const hasMajorAccident = /\b(major car accident|serious road accident|fall from (?:height|roof)|severe burn|third degree burn)\b/i.test(combinedContext);
 
   // Explicit caller 108 request
@@ -153,6 +161,7 @@ export function calculateClinicalSeverityScore({
     hasRespiratoryFailure ||
     hasUnconsciousness ||
     hasArterialBleed ||
+    hasDeepCutMuscleFat ||
     hasProlongedSeizure ||
     hasPoisoningCrisis ||
     hasStrokeCrisis ||
@@ -162,7 +171,7 @@ export function calculateClinicalSeverityScore({
 
   if (isSevereCrisis) {
     let score = 9;
-    if (hasCardiacArrest || hasUnconsciousness || hasArterialBleed || hasSnakeBite) {
+    if (hasCardiacArrest || hasUnconsciousness || hasArterialBleed || hasSnakeBite || hasDeepCutMuscleFat) {
       score = 10;
     }
     return {
@@ -177,11 +186,98 @@ export function calculateClinicalSeverityScore({
 
   // 3. Domain-Specific Analysis:
 
+  // --- A0. HEAD INJURY / HEAD TRAUMA / CONCUSSION ---
+  const isHeadTrauma = /\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|concussion|skull|hit.*head|head\s*wound)\b/i.test(combinedContext);
+  if (isHeadTrauma) {
+    // 1. Critical Life-Threatening Head Trauma (108 Ambulance):
+    // Active coma/unresponsiveness, skull fracture, CSF or bleeding from ears/nose, repeated seizures, continuous arterial scalp hemorrhage
+    const isLifeThreateningHead = /\b(unresponsive|will not wake up|won'?t wake up|coma|skull fracture|fluid.*(?:ear|nose)|bleeding from (?:ear|nose)|continuous seizure|status epilepticus|spurting|arterial bleed|unconscious for a long time)\b/i.test(combinedContext);
+    if (isLifeThreateningHead) {
+      return {
+        score: 10,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Critical neurotrauma with coma, CSF leak, or intracranial compromise requiring immediate 108 Emergency Ambulance dispatch for trauma resuscitation.",
+        isLifeThreatening: true,
+      };
+    }
+
+    // 2. Severe Head Injury (IPD / Hospital Casualty):
+    // "severa for litle bit seriaous and ipd"
+    // Any loss of consciousness / blackout (even for a few seconds!), repeated vomiting, persistent severe headache, severe dizziness, confusion, disorientation, memory loss, blurred vision, or open scalp cut
+    const hasLOC = !hasLOCDenial && /\b(loss\s*of\s*consciousness|lost\s*consciousness|blackout|blacked\s*out|fainted|behosh|unconscious|passed\s*out)\b/i.test(combinedContext);
+    const hasNeuroRedFlags = (!hasVomitDenial && /\b(vomit|vomiting|ulti)\b/i.test(combinedContext)) || /\b(severe headache|tez sar dard|confusion|disorient|blurred vision|dhundhla|memory|bhool|stiff neck|gardan)\b/i.test(combinedContext);
+    const hasScalpBleeding = !isBleedingControlled && /\b(bleeding|bleed|khoon|cut|wound)\b/i.test(combinedContext);
+
+    if (hasLOC || hasNeuroRedFlags || hasScalpBleeding) {
+      return {
+        score: 9,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Head injury with loss of consciousness or neurological red flags; requires urgent hospital casualty evaluation, IPD neuro-observation, and CT scan.",
+        isLifeThreatening: false, // Hospital IPD care (routes to ESIC Hospital casualty, or 108 if acute deterioration)
+      };
+    }
+
+    // 3. Moderate Head Trauma:
+    // Impact to head, but NO loss of consciousness, alert, mild localized bump/pain, no vomiting
+    // USER MANDATE: Major trauma, head injury, severe damage CANNOT BE MILD!
+    return {
+      score: 6,
+      urgency_level: "Moderate",
+      assessed_severity: "Moderate",
+      duration: validatedDuration,
+      reasoning: "Head impact without reported loss of consciousness; requires doctor physical examination and neurological monitoring at hospital / dispensary.",
+      isLifeThreatening: false,
+    };
+  }
+
   // --- A. CUTS / LACERATIONS / WOUNDS / TRAUMA ---
-  const isWoundOrCut = /\b(cut|laceration|wound|ghao|injury|chot|scraped?|stab|bleeding)\b/i.test(combinedContext);
+  const isWoundOrCut = !isHeadTrauma && /\b(cut|laceration|wound|ghao|injury|chot|scraped?|stab|bleeding)\b/i.test(combinedContext);
   if (isWoundOrCut) {
-    // If superficial cut with antiseptic cream or bleeding stopped
-    if (isSuperficialOrMinorCut || (isBleedingControlled && !hasArterialBleed)) {
+    // 1. Deep cut exposing fat, muscle, or bone WITH heavy continuous bleeding / severe pain -> 108 Ambulance!
+    const hasExposedDeepTissue = /\b(muscle|fat|bone|deep gaping cut|gaping cut|exposing fat|exposing muscle|visible bone)\b/i.test(combinedContext);
+    const hasHeavyBleedingOrPain = /\b(heavy\s*bleed\w*|profuse\s*bleed\w*|continuous\s*bleed\w*|spurting|cannot stop|uncontrolled|severe pain|intense pain|asahniya dard)\b/i.test(combinedContext);
+
+    if (hasExposedDeepTissue && (hasHeavyBleedingOrPain || !isBleedingControlled)) {
+      return {
+        score: 10,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Deep laceration exposing subcutaneous fat or muscle with heavy active bleeding; requires immediate 108 Ambulance dispatch for surgical hemostasis and trauma management.",
+        isLifeThreatening: true,
+      };
+    }
+
+    // 2. Heavy active bleeding or deep gaping wound without exposed muscle/fat -> Severe
+    if (hasHeavyBleedingOrPain && !isBleedingControlled) {
+      return {
+        score: 9,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Severe laceration with heavy active bleeding; requires urgent hospital emergency casualty care and surgical intervention.",
+        isLifeThreatening: true,
+      };
+    }
+
+    // 3. Moderate wound: Deep laceration, stitches needed, oozing, but bleeding controlled with direct pressure, no exposed muscle/fat
+    if (/\b(deep cut|stitches|taanke|oozing|painful movement|swollen hand|swollen finger)\b/i.test(combinedContext) || (hasExposedDeepTissue && isBleedingControlled)) {
+      return {
+        score: 6,
+        urgency_level: "Moderate",
+        assessed_severity: "Moderate",
+        duration: validatedDuration,
+        reasoning: "Noticeable open laceration or wound requiring doctor evaluation, wound toilet, and suturing at hospital (ESIC Hospital / Govt District Hospital).",
+        isLifeThreatening: false,
+      };
+    }
+
+    // 4. Mild wound: ONLY superficial scrape, paper cut, small scratch with bleeding stopped / antiseptic cream applied
+    if (isSuperficialOrMinorCut || (isBleedingControlled && !hasHeavyBleedingOrPain)) {
       // Score 1 to 4: Mild
       const score = (isSuperficialOrMinorCut && isBleedingControlled) ? 2 : 3;
       return {
@@ -189,21 +285,7 @@ export function calculateClinicalSeverityScore({
         urgency_level: "Mild",
         assessed_severity: "Mild",
         duration: validatedDuration,
-        reasoning: "Superficial cut / minor localized injury with controlled bleeding; manageable via outpatient care (ESIS Dispensary / 104) for wound dressing and tetanus verification.",
-        isLifeThreatening: false,
-      };
-    }
-
-    // Moderate wound: Deep laceration, active oozing, needs stitches or tetanus toxoid, but no arterial spurting
-    if (/\b(deep cut|gaping|stitches|taanke|oozing|painful movement|swollen hand|swollen finger)\b/i.test(combinedContext)) {
-      // Score 5 to 7: Moderate
-      const score = 6;
-      return {
-        score,
-        urgency_level: "Moderate",
-        assessed_severity: "Moderate",
-        duration: validatedDuration,
-        reasoning: "Noticeable open laceration or wound requiring doctor evaluation, wound toilet, and possible suturing at secondary hospital (ESIC Hospital / Govt District Hospital).",
+        reasoning: "Superficial cut / minor localized injury with controlled bleeding; manageable via routine outpatient care (ESIS Dispensary / 104) for wound dressing and tetanus verification.",
         isLifeThreatening: false,
       };
     }
@@ -221,7 +303,7 @@ export function calculateClinicalSeverityScore({
 
     const hasHighTemp =
       !isCallerStatingMildFever &&
-      /\b(high fever|>102|103|104|105|bahut tez bukhar|severe fever)\b/i.test(combinedContext);
+      /\b(high\s*fever|>102|103|104|105|bahut\s*tez\s*bukhar|tez\s*bukhar|severe\s*fever|high\s*temp\w*)\b/i.test(combinedContext);
 
     const hasShakingChills =
       !deniesChillsOrShivering &&
@@ -243,10 +325,42 @@ export function calculateClinicalSeverityScore({
       };
     }
 
-    // Prolonged fever (> 5-7 days / > 1 week) or high fever without chills or persistent vomiting
-    const isProlongedFever = /\b(more than a week|weeks?|>7 days|5-7 days|persistent fever|continuous vomiting|cannot drink)\b/i.test(combinedContext);
+    // STRICT USER MANDATE:
+    // - 2-3 days duration is considered MILD if other symptoms/answers are mild.
+    // - DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word!
+    // - Take ALL answers into account.
+    const isDuration2to3DaysOrRecent = /\b(2\s*-\s*3\s*days?|2\s*to\s*3\s*days?|2\s*or\s*3\s*days?|do\s*teen\s*din|2\s*din|3\s*din|1\s*-\s*3\s*days?|1\s*to\s*3\s*days?|today|yesterday|kal|aaj|since\s*morning|morning|subah)\b/i.test(combinedContext);
+    const hasManageableFeverIndicators = canWalkAndFunction || isAlertConscious || !hasAlteredMental || /\b(paracetamol|tablet|dawai|relief|aaram|manageable|mild|tolerable)\b/i.test(combinedContext);
 
-    if ((hasHighTemp || hasShakingChills || isProlongedFever) && !isCallerStatingMildFever) {
+    // Only prolonged fever (> 5-7 days) or fever specifically requiring hospital lab blood test / IPD admission is Moderate
+    const isProlongedFever = /\b(more than a week|weeks?|>7 days|5-7 days|persistent fever|continuous vomiting|cannot drink)\b/i.test(combinedContext);
+    const requiresLabOrHospitalInFever = /\b(lab|blood test|cbc|serology|pathology|x-ray|xray|iv fluid|iv drip|saline drip|admit|admission|ipd|hospitaliz\w*)\b/i.test(combinedContext);
+
+    if (requiresLabOrHospitalInFever || isProlongedFever) {
+      return {
+        score: 6,
+        urgency_level: "Moderate",
+        assessed_severity: "Moderate",
+        duration: validatedDuration,
+        reasoning: requiresLabOrHospitalInFever
+          ? "Febrile illness requiring diagnostic laboratory blood tests (CBC, serology) or hospital clinical evaluation."
+          : "Prolonged febrile illness (> 5-7 days) requiring physician evaluation and laboratory workup at hospital.",
+        isLifeThreatening: false,
+      };
+    }
+
+    if (isDuration2to3DaysOrRecent && hasManageableFeverIndicators && !hasAlteredMental) {
+      return {
+        score: 3,
+        urgency_level: "Mild",
+        assessed_severity: "Mild",
+        duration: validatedDuration,
+        reasoning: "Mild viral or seasonal febrile presentation (2-3 days duration) with preserved functional status; manageable via outpatient care (ESIS Dispensary / 104 Health Helpline) with antipyretics and rest.",
+        isLifeThreatening: false,
+      };
+    }
+
+    if ((hasHighTemp || hasShakingChills) && !isCallerStatingMildFever && !isDuration2to3DaysOrRecent) {
       // Score 5 to 7: Moderate
       const score = hasShakingChills ? 7 : 6;
       return {
@@ -254,7 +368,7 @@ export function calculateClinicalSeverityScore({
         urgency_level: "Moderate",
         assessed_severity: "Moderate",
         duration: validatedDuration,
-        reasoning: "Moderate febrile illness with high temperature or prolonged course (> 5-7 days) requiring physician evaluation and laboratory workup at hospital.",
+        reasoning: "Moderate febrile illness with elevated temperature requiring physician evaluation and laboratory workup at hospital.",
         isLifeThreatening: false,
       };
     }
@@ -358,26 +472,109 @@ export function calculateClinicalSeverityScore({
   }
 
   // --- E. GENERAL / DEFAULT EVALUATION ---
+  // STRICT CLINICAL MANDATE:
+  // Normal / routine OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+  // Send to Dispensary or 104.
+  // Moderate is STRICTLY where:
+  // 1. IPD Treatment / Hospitalization Needed: >= 1 day admission, observation bed, or continuous IV fluids / drip.
+  // 2. Specialist Doctor Consultation or Treatment Needed: specialist physician (orthopedic, cardiologist, neurologist, surgeon, gynecologist, pediatrician) or procedural care (sutures/stitches, fracture reduction/plaster cast, minor OT, incision & drainage).
+  // 3. Diagnostic Lab Workup or Imaging Needed: blood tests (CBC, serology, biochemistry), X-ray, ECG, USG/ultrasound, CT.
+  const requiresIpdOrHospitalization = /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(combinedContext);
+
+  const requiresSpecialistOrHospitalProcedure = /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(combinedContext);
+
+  const requiresLabOrImaging = /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(combinedContext);
+
+  const hasHospitalCareNeed = requiresIpdOrHospitalization || requiresSpecialistOrHospitalProcedure || requiresLabOrImaging;
+
+  // USER MANDATE:
+  // 1. For 1-3 days duration (or 2-3 days, today, yesterday):
+  //    If other condition or answers are Moderate level or Severe level, then based on the situation show Moderate or Severe!
+  //    DO NOT restrict anything. Based on every situation show the forward referral.
+  // 2. Only if other answers are genuinely mild, evaluate as Mild.
+  const is2to3Days = /\b(2\s*-\s*3\s*days?|2\s*to\s*3\s*days?|2\s*or\s*3\s*days?|do\s*teen\s*din|2\s*din|3\s*din|1\s*-\s*3\s*days?|1\s*to\s*3\s*days?|today|yesterday|kal|aaj)\b/i.test(combinedContext);
   const rawSev = Number(intake?.severity_reported || tState?.severityScore);
-  if (rawSev && rawSev >= 1 && rawSev <= 10) {
-    const urgency = mapScoreToUrgency(rawSev);
+
+  const hasModerateSymptoms = Boolean(
+    hasHospitalCareNeed ||
+    (rawSev && rawSev >= 5 && rawSev <= 7) ||
+    /\b(moderate|painful|unable to walk|limping|swollen joint|sprain|burn|second degree|persistent|worsening|severe headache|migraine|urinary burning|hematuria|blood in urine|ear discharge|eye injury|blurred vision)\b/i.test(combinedContext)
+  );
+
+  const hasSevereSymptoms = Boolean(
+    isSevereCrisis ||
+    (rawSev && rawSev >= 8) ||
+    /\b(severe|intense|unbearable|high fever|rigors|cannot breathe|unconscious|behosh|convulsion|head injury|deep cut)\b/i.test(combinedContext)
+  );
+
+  if (is2to3Days) {
+    if (hasSevereSymptoms) {
+      return {
+        score: (rawSev && rawSev >= 8) ? rawSev : 8,
+        urgency_level: "Severe",
+        assessed_severity: "Severe",
+        duration: validatedDuration,
+        reasoning: "Acute presentation (1-3 days duration) with severe symptoms requiring urgent hospital casualty evaluation.",
+        isLifeThreatening: isSevereCrisis,
+      };
+    }
+    if (hasModerateSymptoms) {
+      return {
+        score: (rawSev && rawSev >= 5 && rawSev <= 7) ? rawSev : 6,
+        urgency_level: "Moderate",
+        assessed_severity: "Moderate",
+        duration: validatedDuration,
+        reasoning: "Presentation (1-3 days duration) with moderate clinical acuity requiring hospital / dispensary medical assessment.",
+        isLifeThreatening: false,
+      };
+    }
     return {
-      score: rawSev,
-      urgency_level: urgency,
-      assessed_severity: urgency,
+      score: 3,
+      urgency_level: "Mild",
+      assessed_severity: "Mild",
       duration: validatedDuration,
-      reasoning: `Clinical assessment based on reported symptom severity (Score ${rawSev}/10).`,
-      isLifeThreatening: urgency === "Severe",
+      reasoning: "Sub-acute presentation (1-3 days duration) with stable functional status and absence of hospital red flags; safely manageable via routine outpatient care (ESIS Dispensary / 104 Health Helpline).",
+      isLifeThreatening: false,
     };
   }
 
-  // Default to Mild (Score 3) for standard queries
+  if (hasSevereSymptoms || (rawSev && rawSev >= 8)) {
+    return {
+      score: (rawSev && rawSev >= 8) ? rawSev : 8,
+      urgency_level: "Severe",
+      assessed_severity: "Severe",
+      duration: validatedDuration,
+      reasoning: "High-intensity clinical presentation requiring urgent hospital casualty stabilization.",
+      isLifeThreatening: isSevereCrisis,
+    };
+  }
+
+  if (hasModerateSymptoms) {
+    const score = (rawSev && rawSev >= 5 && rawSev <= 7) ? rawSev : 6;
+    let specificReason = "Condition requires secondary hospital facilities (diagnostic lab tests, specialist doctor consultation, procedural care, or IPD admission).";
+    if (requiresIpdOrHospitalization) specificReason = "Condition requires IPD treatment, inpatient observation, or IV fluid rehydration at hospital.";
+    else if (requiresSpecialistOrHospitalProcedure) specificReason = "Condition requires specialist doctor consultation or specialized procedural treatment (sutures, plaster, minor OT) at hospital.";
+    else if (requiresLabOrImaging) specificReason = "Condition requires diagnostic laboratory investigations (blood tests) or imaging (X-ray / USG / ECG) at hospital.";
+    else specificReason = "Condition exhibits moderate symptom severity requiring clinical assessment at hospital / dispensary.";
+
+    return {
+      score,
+      urgency_level: "Moderate",
+      assessed_severity: "Moderate",
+      duration: validatedDuration,
+      reasoning: specificReason,
+      isLifeThreatening: false,
+    };
+  }
+
+  // ALL other normal / routine OPD conditions MUST be MILD (Dispensary / 104)
+  const mildScore = (rawSev && rawSev >= 1 && rawSev <= 4) ? rawSev : 3;
   return {
-    score: 3,
+    score: mildScore,
     urgency_level: "Mild",
     assessed_severity: "Mild",
     duration: validatedDuration,
-    reasoning: "Sub-acute presentation without acute red-flag signs; suitable for routine consultation at ESIS Dispensary or 104 Health Helpline.",
+    reasoning: "Normal outpatient condition manageable via routine OPD (ESIS Dispensary / 104 Health Helpline); does not require IPD hospitalization, specialist consultation, or hospital lab investigations.",
     isLifeThreatening: false,
   };
 }

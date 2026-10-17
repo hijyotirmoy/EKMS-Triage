@@ -78,17 +78,18 @@ CORE CLINICAL RULES:
      * Score 5, 6, 7: Moderate
      * Score 8, 9, 10: Severe
    - Standard clinical criteria:
-     * Mild (Score 1 to 4):
-       • Characterized by low-intensity, localized, or early-stage symptoms.
-       • Little to no disruption of daily activities, normal functions, or vital signs.
-       • Often managed via outpatient departments (OPDs), primary health centers (PHCs / ESIS Dispensaries), or basic supportive/conservative care.
+     * Mild (Score 1 to 4, default 3):
+       • ALL normal viral, seasonal, and common illnesses (common cold, viral fever, mild cough, body aches, routine headaches, mild gastritis/indigestion/diarrhea without dehydration, superficial minor cuts/bruises, muscular aches/joint stiffness).
+       • ANY condition that can be managed, fixed, or treated with oral/topical medication, basic conservative care, or outpatient primary doctor consultation at an ESIS Dispensary or 104 Health Helpline tele-doctor.
+       • ALL standard Outpatient Department (OPD) presentations MUST be categorized as MILD (baseline score 2 to 3, maximum 4). DO NOT classify OPD cases or cases fixable by medication as Moderate!
        • Forwarding:
          - During dispensary open hours (Mon-Fri 10am-4pm, 1st, 3rd & 5th Sat 10am-12pm): 1st: ESIS Dispensary, 2nd: 104 Health Helpline, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
          - During dispensary closed hours: 1st: 104 Health Helpline, 2nd: ESIS Dispensary, 3rd: ESIC Hospital, 4th: Govt District Hospital, 5th: Empanelled Tie-Up Hospital, 6th: 108 Ambulance.
      * Moderate (Score 5, 6, 7):
-       • Characterized by noticeable symptoms that require more active intervention or medication.
-       • Measurable interference with normal daily functioning, work, or physical activity.
-       • Frequently managed by general physicians, district centers, or stepped-up pharmacological treatments (such as combination therapy).
+       • STRICT REQUIREMENT: Reserved ONLY for cases requiring Inpatient Department (IPD) care, hospital admission (>= 1 day admission or overnight observation bed), or continuous IV saline/fluid infusion because patient cannot retain oral fluids.
+       • Cases requiring specialized doctor consultation or procedural treatment (deep lacerations needing sutures/stitches, broken bones/fractures/dislocations requiring reduction & plaster cast, minor surgical procedure / wound debridement / abscess drainage, specialist physician/surgeon/cardiologist review).
+       • Cases requiring hospital diagnostic laboratory workup or imaging (blood tests / CBC / malaria-dengue serology, diagnostic X-ray, hospital 12-lead ECG, ultrasound).
+       • If the condition can be treated or fixed with outpatient medication and does NOT require IPD hospitalization, procedures (stitches/casts), or hospital lab/imaging, it MUST NOT be Moderate — it MUST be MILD.
        • Forwarding:
          - If ESIC Hospital is available within 15km distance: 1st: ESIC Hospital, 2nd: Govt District Hospital, 3rd: Empanelled Tie-Up Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
          - If ESIC Hospital is NOT available within 15km: 1st: Govt District Hospital, 2nd: Empanelled Tie-Up Hospital, 3rd: ESIC Hospital, 4th: ESIS Dispensary, 5th: 104 Health Helpline, 6th: 108 Ambulance.
@@ -111,6 +112,13 @@ CORE CLINICAL RULES:
 16. DYNAMIC MULTI-TURN RE-ANALYSIS & DURATION GROUNDING:
    - If an earlier turn appeared severe or high risk, but subsequent answers clarify that symptoms are mild or moderate (e.g. superficial cut, antiseptic cream applied, bleeding stopped, able to walk normally), YOU MUST RE-ANALYZE ALL ANSWERS TOGETHER AND DOWNGRADE TO MILD (score 1-4) OR MODERATE (score 5-7)! Never remain stuck at Severe if subsequent answers show no emergency!
    - NEVER FABRICATE OR ASSUME DURATION: If the caller did NOT mention duration (did not state month, week, or days), NEVER assume 'more than a month' or invent any timeframe in your questions or summaries! Never say 'since this happened more than a month ago' unless the caller explicitly told you so. Treat unknown duration as recent / today.
+17. NO FORWARDING / REFERRAL RESULTS OR DISPATCH ANNOUNCEMENTS IN THE CHAT:
+   - The probing question must be STRICTLY clinical diagnostic probing (clarifying symptoms, duration, red flags, pre-existing conditions, medications).
+   - NEVER announce routing decisions or dispatches in the probing question or chat (e.g. NEVER say "We are dispatching 108 Ambulance", "108 Ambulance is being alerted", "You need to travel to ESIC Hospital", "Transferring call to 104", etc.).
+   - All referral destinations and forwarding actions belong strictly in the backend JSON fields ("referralDestination", "referralReason", "severity") which are rendered in the final Triage Outcome card, NEVER inside "probingQuestion"!
+18. ABSOLUTELY NO "108" OR "EMERGENCY" WORDS IN SUGGESTED ANSWER CHIPS:
+   - "suggestedAnswers" must consist purely of plain, descriptive clinical symptom statements (e.g. "Severe chest pressure with left arm pain and sweating", "Accident with heavy bleeding", "Breathing difficulty and unable to speak in full sentences").
+   - NEVER include "(Emergency)", "(Emergency - 108)", "108", "(Ambulance dispatched)", or referral tags in "suggestedAnswers"!
 
 OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
 {
@@ -128,6 +136,28 @@ OUTPUT STRICT VALID JSON OBJECT ONLY (no markdown, no backticks):
   "isReadyForSummary": true | false,
   "clinicalSummary": "Concise symptom-based triage summary in English without diagnosing diseases"
 }`;
+
+/**
+ * Sanitizes suggested answer chips to guarantee no "(Emergency)", "(Emergency - 108)",
+ * "108", or forwarding tags are exposed to the caller.
+ */
+export function sanitizeSuggestedAnswer(text) {
+  if (!text || typeof text !== "string") return "";
+  let cleaned = text
+    .replace(/\s*\((?:Emergency(?:\s*-\s*108)?|108(?:\s*Emergency)?|FAST\s+Positive\s+Emergency|Ambulance\s+dispatched|Emergency\s+SAH|Ambulance|Manageable\s+at\s+home\/dispensary|OPD\s+only)\)/gi, "")
+    .replace(/\s*-\s*108\b/gi, "")
+    .replace(/\s*-\s*Emergency\b/gi, "")
+    .replace(/\b108\s+emergency\s+ambulance\b/gi, "ambulance")
+    .replace(/\b108\s+ambulance\b/gi, "ambulance")
+    .replace(/\b108\b/gi, "")
+    .replace(/\bemergency\b/gi, "urgent")
+    .replace(/\s*-\s*urgent\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.-])/g, "$1")
+    .replace(/[-–—]\s*$/, "")
+    .trim();
+  return cleaned;
+}
 
 /**
  * Strips raw clock times (e.g. 10:30 AM, 14:00) and calendar dates (e.g. 29/09/2026, 2026-09-29)
@@ -200,7 +230,7 @@ export function detectDirectCallerReferralIntent(text) {
         "Need address of nearest ESIC Hospital",
         "Have severe symptoms needing hospital OPD today",
         "Carrying Pehchan card and doctor prescription",
-        "Need emergency casualty directions",
+        "Need hospital casualty directions",
       ],
     };
   }
@@ -237,12 +267,12 @@ export function detectDirectCallerReferralIntent(text) {
       destination: "108 Ambulance",
       reason:
         "Caller requested 108 Ambulance; immediately collect location landmarks and coordinate 108 dispatch.",
-      suspectedConditionSuffix: "108 Emergency Ambulance Dispatch",
+      suspectedConditionSuffix: "Ambulance Assistance",
       suggestedQuestion:
-        'Ask the IP: "What is your exact location and landmark right now for 108 Ambulance dispatch?" (Hinglish: "108 Ambulance bhejne ke liye apna exact location aur landmark batayein?")',
+        'Ask the IP: "What is your exact location and nearest landmark right now?" (Hinglish: "Apna exact location aur landmark batayein?")',
       suggestedAnswers: [
-        "Emergency at home — Need immediate ambulance",
-        "Accident on road / highway — Casualties present",
+        "At home — need urgent medical help",
+        "Accident on road / highway — multiple people injured",
         "Patient unconscious / unable to move",
         "Landmark details provided",
       ],
@@ -286,7 +316,7 @@ export function detectDirectCallerReferralIntent(text) {
         'Ask the IP: "Do you have an ESIC Hospital referral or need cashless emergency admission at an empanelled hospital?" (Hinglish: "Kya aapke paas ESIC Hospital ka referral letter hai ya empanelled hospital me emergency admission chahte hain?")',
       suggestedAnswers: [
         "Have ESIC Hospital referral letter",
-        "Need emergency inpatient (IPD) admission",
+        "Need hospital inpatient (IPD) admission",
         "Seeking nearest empanelled hospital address",
         "Pehchan card holder seeking tie-up care",
       ],
@@ -349,10 +379,10 @@ export function detectDirectCallerReferralIntent(text) {
         "Caller inquiring about HIV/AIDS, STI, or sexual health; transfer call to 104 Health Helpline for 24x7 confidential doctor guidance and counseling.",
       suspectedConditionSuffix: "HIV / AIDS & Sexual Health Guidance",
       suggestedQuestion:
-        'Ask the IP: "Your consultation is completely confidential. Are you seeking free testing information, counseling, or emergency guidance?" (Hinglish: "Aapki baatcheet bilkul confidential hai. Kya aap free test, counselling ya emergency guidance chahte hain?")',
+        'Ask the IP: "Your consultation is completely confidential. Are you seeking free testing information, counseling, or medical guidance?" (Hinglish: "Aapki baatcheet bilkul confidential hai. Kya aap free test, counselling ya medical guidance chahte hain?")',
       suggestedAnswers: [
         "Need confidential counseling & testing center info",
-        "Recent possible exposure — need emergency PEP guidance (< 72 hrs)",
+        "Recent possible exposure — need PEP guidance (< 72 hrs)",
         "Experiencing symptoms of sexually transmitted infection",
         "Need doctor consultation on 104 helpline",
       ],
@@ -466,11 +496,11 @@ export async function processDoctorConsultationTurn({
         "Physical symptoms or pain",
         "Need ESIC Doctor / Dispensary visit",
         "Emotional distress / Counselling",
-        "Emergency ambulance assistance",
+        "Need ambulance assistance",
       ],
       suspectedCondition: "Non-Health Query (Redirected to Medical)",
       differentialDiagnosis: [],
-      severity: "Moderate",
+      severity: "Mild",
       severityScore: 3,
       redFlagsDetected: [],
       referralDestination: "ESIS Dispensary",
@@ -528,7 +558,7 @@ export async function processDoctorConsultationTurn({
       suggestedAnswers: rec.options || [
         "Thank you, noted",
         "Connect me with 104 tele-doctor",
-        "Need ambulance / emergency help",
+        "Need ambulance assistance",
         "View triage summary",
       ],
       suspectedCondition: currentClinicalState.suspectedCondition || "Medical Consultation",
@@ -628,27 +658,41 @@ You must NEVER forget this starting point! Even when you probe for duration, ass
 CRITICAL ANTI-REPETITION & PROGRESSION DIRECTIVES:
 1. EMPATHY & WARM REASSURANCE:
    - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
+   - FOR HEAD INJURY / HEAD TRAUMA: Always express immediate compassion and human reassurance (e.g. 'I am very sorry to hear that you suffered a head injury. Let me assist you right away.') and clinically probe for critical neurological signs (loss of consciousness / blackout at impact, vomiting, severe dizziness, confusion, or scalp bleeding). CRITICAL PROTOCOL: Major trauma, severe damage, and head injury CANNOT BE MILD! If the caller reports loss of consciousness (even for a few seconds!), blackout, vomiting, or dizziness, it MUST be evaluated as SEVERE (Score 8-9, hospital IPD observation/casualty). Mild is strictly for normal, non-traumatic conditions without red flags.
+   - FOR DEEP CUTS & WOUNDS: Always ask in-depth probing questions about wound depth—specifically whether underlying yellow fat, muscle tissue, or bone is visible, and whether blood is continuously spurting or soaking through cloth. When a deep cut exposes muscle or fat along with heavy bleeding or severe pain, rate as SEVERE (Score 10) and route to 108 Ambulance!
 2. ADAPTIVE LISTENING & CALLER PIVOTS (HIGHEST PRIORITY):
    - When answering a question, the caller may say something unexpected, introduce a NEW symptom, or describe a sudden worsening (e.g. asked about limb pain, but caller says 'no, but I threw up blood' or 'I fainted').
    - NEVER ignore what the caller just reported! ADAPT IMMEDIATELY.
    - Acknowledge the newly reported symptom, pivot your clinical focus to assess potential danger, and tailor your next question to this new information.
 3. THOROUGH ADAPTIVE CLINICAL PROGRESSION (DO NOT RUSH TO CONCLUDE):
-   - Turn 1: Main complaint specifics, nature of symptoms, and severity (probe fever degree/chills, pain character, wound depth).
+   - Turn 1: Main complaint specifics, nature of symptoms, and severity (probe fever degree/chills, pain character, wound depth & tissue exposure).
    - Turn 2: Duration & onset progression (how long has this been present, did it start suddenly today or a few days ago).
-   - Turn 3: Associated symptoms & warning signs (breathing difficulty, nausea/vomiting, sweating, dizziness, rash).
+   - Turn 3: Associated symptoms & warning signs (breathing difficulty, nausea/vomiting, sweating, dizziness, rash, neurological signs).
    - Turn 4: Pre-existing chronic diseases / Comorbidities (High BP, Diabetes/Sugar, Asthma, Heart, Kidney, Thyroid).
    - Turn 5: Medications taken so far (Paracetamol, painkiller, BP medicines) and any relief.
    - Turn 6+: Conclude clinical assessment with clear final referral and set "isReadyForSummary": true.
-   - DO NOT set "isReadyForSummary": true on Turns 1, 2, 3, or 4 unless it is a life-threatening crisis (cardiac arrest, unconscious, massive hemorrhage)!
+   - DO NOT set "isReadyForSummary": true on Turns 1, 2, 3, or 4 unless it is a life-threatening crisis (cardiac arrest, unconscious, massive hemorrhage, deep cut exposing muscle/fat)!
 4. DYNAMIC FLEXIBILITY: If the caller already provided duration, chronic conditions, or medications in earlier turns, do not repeat! Naturally move to the next uncollected aspect.
 5. FREE-FORM EXTRACTION: Whenever the caller mentions ANY pre-existing disease or medicine in their message, ALWAYS extract them into "comorbidity" and "medications" respectively!
 6. NEVER ASK NUMERICAL SEVERITY (1-10 SCALE): Ask functional/descriptive clinical questions only.
 7. MULTI-OPTION SELECTION ANALYSIS: If caller provides or selects multiple symptoms/options (e.g. "Dizziness and physical weakness, Nausea and feeling like vomiting"), synthesize ALL symptoms together into your next question and assessment.
 8. MULTI-CONDITION SHIFTS: If the caller switches or adds conditions (e.g. from fever to a cut or injury), consider BOTH conditions together; do not forget earlier symptoms. Keep suspectedCondition unified without duplicate repetition.
-9. 108 EMERGENCY ROUTING: ONLY for life-threatening crises (spurting arterial bleeding, severe deep gaping trauma, cardiac arrest, respiratory failure, unconsciousness, poisoning, snakebite). Superficial cuts, minor scrapes, bleeding stopped, or injuries where antiseptic cream was applied are NOT emergencies! Rate them Mild (score 1-4) or Moderate (score 5-7).
-10. CALLER FACILITY PREFERENCE: If caller expresses a preference to go to ESIC Hospital or casualty, respect this and set referralDestination to "ESIC Hospital".
-11. DYNAMIC MULTI-TURN RE-ANALYSIS: If an earlier turn appeared severe or high risk, but subsequent answers clarify that symptoms are mild or moderate (e.g. superficial cut, antiseptic cream applied, bleeding stopped, able to walk normally), RE-ANALYZE ALL ANSWERS TOGETHER AND DOWNGRADE TO MILD (score 1-4) OR MODERATE (score 5-7)!
-12. NEVER ASSUME OR FABRICATE DURATION: If the caller did NOT mention duration (did not state month, week, or days), NEVER assume 'more than a month' or invent any timeframe in your questions or summaries! Never say 'since this happened more than a month ago' unless the caller explicitly told you so. Treat unknown duration as recent / today.
+9. TRIAGE SEVERITY & ROUTING STRATIFICATION:
+   - MILD (Score 1-4, baseline 3): ONLY for normal, routine, minor conditions without red flags (mild cold, low-grade fever 1-3 days, superficial scrape with bleeding stopped, mild tension headache). Referral: ESIS Dispensary or 104 Health Helpline.
+   - MODERATE (Score 5-7, baseline 6): For noticeable illness, persistent symptoms, deep cuts needing stitches with controlled bleeding, or head impact without LOC. Referral: ESIC Hospital or ESIS Dispensary.
+   - SEVERE / IPD (Score 8-9): For serious conditions requiring hospital IPD (inpatient admission / observation / specialist care). Includes head injury with loss of consciousness / vomiting / concussion observation, high fever with altered sensorium. Referral: ESIC Hospital (Casualty / IPD).
+   - 108 EMERGENCY AMBULANCE (Score 10): ONLY for acute life-threatening emergencies: deep cut exposing fat or muscle with heavy bleeding / unbearable pain, spurting arterial bleeding, unresponsiveness / coma / collapse, severe respiratory distress, crushing chest pain with cold diaphoresis, snake bite, acute poisoning.
+11. DYNAMIC MULTI-TURN RE-ANALYSIS & DURATION GROUNDING (TAKE ALL ANSWERS TOGETHER):
+   - CRITICAL USER RULE: DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word! You MUST synthesize ALL answers across the entire conversation before determining urgency.
+   - DURATION (1 TO 3 DAYS / 2-3 DAYS / TODAY / YESTERDAY):
+     * If the caller's other symptoms and answers are MILD (e.g. minor cold, low fever, superficial scrape with bleeding stopped, patient can walk and perform daily activities, oral fluids retained, no emergency red flags), evaluate as MILD (Score 1-4, baseline 3) -> Forward to ESIS Dispensary or 104 Health Helpline.
+     * BUT if the caller's other symptoms or answers evaluate to MODERATE LEVEL (Score 5-7, e.g. persistent fever, deep cut needing stitches with bleeding controlled, head impact without LOC, wheezing, moderate pain) or SEVERE LEVEL (Score 8-9 for hospital casualty IPD, Score 10 for 108 Ambulance): based on the whole situation, evaluate and SHOW MODERATE or SEVERE!
+     * DO NOT restrict or downgrade anything to Mild if the situation warrants Moderate or Severe.
+     * Based on every situation, route to the appropriate referral:
+       - Mild: ESIS Dispensary (regular OPD) or 104 Health Helpline (doctor on call).
+       - Moderate: ESIC Hospital / ESIS Dispensary (Hospital consultation / investigations / specialist care).
+       - Severe (Score 8-9 IPD): ESIC Hospital Casualty (urgent admission / observation / CT scan).
+       - Severe (Score 10 Crisis): 108 Ambulance (deep cut exposing muscle/fat with continuous bleeding, coma/LOC, acute respiratory collapse, cardiac arrest).
 13. Keep questions empathetic and clear in format: Ask the IP: "..." (Hinglish: "...")${adaptiveProtocolSnippet ? `\n\n${adaptiveProtocolSnippet}` : ""}`,
     },
     ...history.slice(-8).map((m) => ({
@@ -878,6 +922,24 @@ export function generateContextualAnswers(questionText, userInput = "", isPsych 
       "Severe pain in arm / leg / back",
       "Unable to get up from the floor",
       "Bruised and sore, but can move limbs",
+    ];
+  }
+
+  // 6b. Head Injury / Head Trauma / Concussion
+  if (/\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|concussion|skull|hit.*head)\b/i.test(qu)) {
+    if (/\b(bleeding|blood|scalp|khoon|leak|wound|fluid)\b/i.test(q)) {
+      return [
+        "Active continuous bleeding from scalp cut",
+        "Minor scalp cut, bleeding stopped with pressure",
+        "Clear fluid or bleeding from ear or nose",
+        "Painful swelling / bump without open bleeding",
+      ];
+    }
+    return [
+      "No loss of consciousness, alert and fully oriented",
+      "Mild headache and local swelling, no vomiting",
+      "Lost consciousness or blacked out for a few moments",
+      "Repeated vomiting, severe dizziness, or confusion",
     ];
   }
 
@@ -1304,29 +1366,37 @@ export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInp
 
   const isThirdParty = isThirdPartyCaller(`${allContext} ${cleanInput}`);
 
-  // If the caller is the patient themselves, forbid asking "are you conscious", "is the person conscious", etc.
-  const isAskingConscious = /\b(are (?:you|they) conscious|is (?:he|she|the person|the patient) conscious|conscious and (?:responding|able to speak)|hosh me|behosh|responding normally)\b/i.test(questionText);
+  // Questions inquiring about historical loss of consciousness (LOC) / syncope at trauma impact
+  // (e.g. "Did you lose consciousness?", "Did you black out?") are clinically essential and must NEVER be suppressed!
+  const isLossOfConsciousnessQuestion = /\b(lose consciousness|loss of consciousness|black\s*out|faint|unconscious for|pass(?:ed)? out|behosh hue the|behoshi aayi|loss of memory|amnesia)\b/i.test(questionText);
+
+  // Forbid only nonsensical queries asking a talking patient if they are currently awake/conscious right now on the phone
+  const isAskingConscious = !isLossOfConsciousnessQuestion && /\b(are (?:you|they) conscious\b|is (?:he|she|the person|the patient) conscious\b|conscious and (?:responding|able to speak)|are you awake right now|responding normally)\b/i.test(questionText);
   const isAskingAge = !isThirdParty && /\b(?:how old|what is your age|caller'?s? age|how old is (?:the caller|the person|the patient|the one who fell))\b/i.test(questionText);
 
   if ((isAskingConscious && !isThirdParty) || isAskingAge) {
+    // If it's a head injury / head trauma
+    if (/\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|hit.*head|head\s*wound|skull|concussion)\b/i.test(`${cleanInput} ${allContext}`)) {
+      return 'Ask the IP: "I am very sorry to hear you suffered a head injury. Did you lose consciousness or blackout when it happened, or are you having severe headache, vomiting, or dizziness?" (Hinglish: "Aapke sar par chot lagne ke baare me sunkar afsos hua. Kya chot lagte waqt aap behosh hue the, ya tez sar dard, ulti ya chakkar aa rahe hain?")';
+    }
     // If it's a fall / bed fall
     if (/\b(fall|fell|falling|gira|giri|bed|slip|tripped)\b/i.test(`${cleanInput} ${allContext}`)) {
-      return 'Ask the IP: "Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Kya girte waqt sar ya sharir ke kisi hisse me chot aayi?")';
+      return 'Ask the IP: "I understand you had a fall. Did you hit your head or injure your back or limbs when you fell?" (Hinglish: "Hum samajh sakte hain aap gir gaye the. Kya girte waqt sar ya sharir ke kisi hisse me chot aayi?")';
     }
     // If it's bleeding / trauma
     if (/\b(bleed|wound|cut|chot|injury|khoon)\b/i.test(`${cleanInput} ${allContext}`)) {
-      return 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")';
+      return 'Ask the IP: "I understand you have an injury. Is there active continuous bleeding from the wound, or is it manageable with firm pressure?" (Hinglish: "Hum samajh sakte hain aapko chot aayi hai. Kya ghaav se lagataar khoon beh raha hai ya dabav se ruka hua hai?")';
     }
     // If it's chest pain / cardiac
     if (/\b(chest|chhati|heart|angina)\b/i.test(`${cleanInput} ${allContext}`)) {
-      return 'Ask the IP: "Does the chest pain feel like heavy crushing pressure radiating to your arm or jaw?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baazu ya jabde ki taraf ja raha hai?")';
+      return 'Ask the IP: "I understand you are having chest discomfort. Does the pain feel like heavy crushing pressure radiating to your arm or jaw?" (Hinglish: "Kya seene me bhaari dabav mehsoos ho raha hai jo baazu ya jabde ki taraf ja raha hai?")';
     }
     // If it's weakness / dizziness
     if (/\b(dizzy|chakkar|kamzori|faint|weakness)\b/i.test(`${cleanInput} ${allContext}`)) {
-      return 'Ask the IP: "Are you feeling severe dizziness or unable to stand up right now?" (Hinglish: "Kya aapko bahut zyada chakkar ya kamzori mehsoos ho rahi hai?")';
+      return 'Ask the IP: "I understand you are feeling dizzy and weak. Are you able to stand and walk safely, or are you too unsteady to get up?" (Hinglish: "Kya aap bina sahare khade ho kar chal pa rahe hain ya bahut zyada chakkar aa rahe hain?")';
     }
     // Default sensible question directly to the IP
-    return 'Ask the IP: "Could you describe what specific symptoms or pain you are feeling right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kya takleef ya dard mehsoos ho raha hai?")';
+    return 'Ask the IP: "I understand you are feeling unwell. Could you describe what specific symptoms or pain you are feeling right now?" (Hinglish: "Kya aap bata sakte hain ki abhi aapko kya takleef ya dard mehsoos ho raha hai?")';
   }
 
   // Intercept and rewrite any numerical severity / scale of 1 to 10 questions into functional clinical probing
@@ -1614,6 +1684,108 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   // Pure caller context — NEVER mix assistant bot questions into caller symptom evaluation!
   const allContext = `${cleanInput} ${prevRef} ${affirmativeCallerText}`.toLowerCase();
 
+  const callerDeniesFever =
+    /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|do\s+not\s+have\s+fever|without\s+fever|fever\s+nahi|bukhar\s+nahi|no\s+chills|no\s+body\s*aches?|without\s+chills|nehi|nahi|not\s+having\s+fever)\b/i.test(
+      userUtterances
+    ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever|high grade fever)\b/i.test(userUtterances);
+
+  const isCallerMildFever =
+    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(allContext) ||
+    (/\b(fever|bukhar)\b/i.test(allContext) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(allContext));
+
+  const callerDeniesChillsOrShivering =
+    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(allContext);
+
+  const filteredRedFlags = (Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : []).filter(
+    (f) => {
+      if (!f || typeof f !== "string") return false;
+      const fLower = f.toLowerCase();
+      // Never allow duration in red flags!
+      if (
+        /\b(duration|since|days?|hours?|weeks?|months?|dino?|ghante?|yesterday|today|4-7 days|2-3 days|less than 2 hours)\b/i.test(fLower) ||
+        /^\d+\s*-\s*\d+\s*(?:days?|hours?|weeks?|months?)$/i.test(f.trim()) ||
+        /^duration:?\s*/i.test(f.trim())
+      ) {
+        return false;
+      }
+      // Never allow generic filler in red flags!
+      if (
+        fLower.includes("acute presentation") ||
+        fLower.includes("high severity reported") ||
+        fLower.includes("urgent ambulance transfer")
+      ) {
+        return false;
+      }
+      if (
+        fLower.includes("fever") ||
+        fLower.includes("bukhar") ||
+        fLower.includes("chills") ||
+        fLower.includes("pyrexia")
+      ) {
+        if (callerDeniesFever) return false;
+        if (fLower.includes("high fever") || fLower.includes("shiver") || fLower.includes("chill")) {
+          if (isCallerMildFever || callerDeniesChillsOrShivering) return false;
+          return (
+            /\b(high fever|tez bukhar|10[2-6]\s*(?:°|f|deg)|severe fever)\b/i.test(affirmativeCallerText) &&
+            /\b(chills|shivering|rigor|kapkapi)\b/i.test(affirmativeCallerText)
+          );
+        }
+        return /\b(high fever|tez bukhar|10[2-5]\s*(?:°|f|deg))\b/i.test(
+          affirmativeCallerText
+        );
+      }
+      if (fLower.includes("self-harm") || fLower.includes("suicid")) {
+        return /\b(wanna die|want to die|kill myself|mar jaunga|jaan de dunga|suicid)\b/i.test(
+          userUtterances
+        );
+      }
+      if (fLower.includes("chest") || fLower.includes("cardiac") || fLower.includes("coronary")) {
+        return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(
+          affirmativeCallerText
+        );
+      }
+      if (fLower.includes("bleed") || fLower.includes("wound") || fLower.includes("cut")) {
+        return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(affirmativeCallerText);
+      }
+      return true;
+    }
+  );
+
+  // Augment with caller-reported clinical situations
+  const addDetectedFlag = (flag) => {
+    if (!filteredRedFlags.some((f) => f.toLowerCase() === flag.toLowerCase())) {
+      filteredRedFlags.push(flag);
+    }
+  };
+
+  if (/\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal bleeding|gi bleed)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Gastrointestinal bleeding / hematemesis (blood in vomit)");
+  }
+  if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Inability to retain oral fluids");
+  }
+  if (
+    !callerDeniesFever &&
+    !isCallerMildFever &&
+    !callerDeniesChillsOrShivering &&
+    /\b(high fever|tez bukhar|severe fever|10[2-6]\s*(?:°|f|deg)|bahut tez bukhar)\b/i.test(affirmativeCallerText) &&
+    /\b(chills|shivering|rigor|kapkapi|thand lagna)\b/i.test(affirmativeCallerText)
+  ) {
+    addDetectedFlag("High fever with chills and shivering");
+  }
+  if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Severe shortness of breath");
+  }
+  if (/\b(unconscious|behosh|fainted|blackout|syncope|unresponsive)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Loss of consciousness / fainting episode");
+  }
+  if (/\b(seizure|convulsions?|fits?|mirgi)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Seizure / convulsions");
+  }
+  if (/\b(heavy bleed|profuse bleed|khoon beh raha)\b/i.test(affirmativeCallerText)) {
+    addDetectedFlag("Heavy uncontrolled bleeding");
+  }
+
   const userTextHasPsych =
     /\b(suicid\w*|mar ja\w*|jaan de dunga|depress\w*|udaas\b|\brona\b|hopeless\b|anxiety\b|ghabrahat\b|mental health|akelepan\b|\bpareshan\b|\bdie\b|kill myself|crying\b|cried\b|zindagi se thak|lonely\b|niraash\b)\b/i.test(
       cleanInput
@@ -1676,10 +1848,49 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   let severity = holisticScore.urgency_level;
   let severityScore = holisticScore.score;
 
-  // STRICT RULE: If the case is NOT a genuine life-and-death emergency / acute trauma, DO NOT classify as Severe!
-  if (!isEmergency108 && severity === "Severe" && !isPsych) {
+  // Score 8 is hospital-manageable Severe; non-severe cases that lack high acuity should not be Severe
+  if (!isEmergency108 && severity === "Severe" && severityScore < 8 && !isPsych) {
     severity = "Moderate";
     severityScore = 6;
+  }
+
+  // STRICT USER MANDATE: Normal OPD conditions must NOT be sent to hospital and must NOT be Moderate!
+  // Send to Dispensary or 104.
+  // Moderate is ONLY where IPD treatment is needed, 1 day or more hospitalization needed,
+  // specialist doctor consultation or procedural treatment needed, or lab/imaging needed.
+  const requiresHospitalCare = Boolean(
+    isEmergency108 ||
+    isPsych ||
+    /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(allContext) ||
+    /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(allContext) ||
+    /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(allContext) ||
+    /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut|stitches)\b/i.test(allContext)
+  );
+
+  // USER MANDATE:
+  // 1. Consider 2-3 days duration as MILD if other symptoms/answers are mild.
+  // 2. DO NOT decide Mild, Moderate, or Severe based on only one isolated condition or word! Take ALL answers together.
+  const is2to3Days = /\b(2\s*-\s*3\s*days?|2\s*to\s*3\s*days?|2\s*or\s*3\s*days?|do\s*teen\s*din|2\s*din|3\s*din|1\s*-\s*3\s*days?|today|yesterday|kal|aaj)\b/i.test(allContext);
+  const otherAnswersAreMild =
+    !requiresHospitalCare &&
+    !isEmergency108 &&
+    !/\b(unconscious|behosh|heavy active bleed|arterial bleed|fracture|broken bone|drank poison|snake\s*bite|seizure)\b/i.test(allContext);
+
+  if (is2to3Days && otherAnswersAreMild) {
+    severity = "Mild";
+    severityScore = 3;
+  }
+
+  // USER MANDATE: When there are no red flags and not a severe multiple condition, send to Mild
+  const hasNoRedFlags = !filteredRedFlags || filteredRedFlags.length === 0;
+  if (hasNoRedFlags && !isEmergency108 && !requiresHospitalCare) {
+    severity = "Mild";
+    severityScore = 3;
+  }
+
+  if (severity === "Moderate" && !requiresHospitalCare) {
+    severity = "Mild";
+    severityScore = 3;
   }
 
   let referralDestination;
@@ -1997,7 +2208,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
       probingQuestion = 'Ask the IP: "We have carefully noted all your symptoms and medical details. Please confirm your exact location so I can direct you to the nearest facility or dispatch assistance." (Hinglish: "Humne aapki saari takleef aur lakshan note kar liye hain. Kripya apna sahi pata ya landmark batayein taaki sahi suvidha tak margdarshan kiya ja sake.")';
       raw.suggestedAnswers = [
         "Please guide me to the nearest healthcare facility",
-        "Need immediate emergency assistance",
+        "Need immediate medical assistance",
         "Connect me with the 104 tele-doctor",
         "Will visit ESIC Hospital / Dispensary",
       ];
@@ -2088,18 +2299,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   const isDual = Boolean(isDualProtocol || raw.is_dual_protocol || raw.isDualProtocol || isSelfHarmTrauma);
   const secondaryRef = secondaryReferral || raw.call_referral_secondary || (isDual ? "Psychological Counselling Department" : null);
 
-  const callerDeniesFever =
-    /\b(no\s+fever|not\s+have\s+fever|don'?t\s+have\s+fever|do\s+not\s+have\s+fever|without\s+fever|fever\s+nahi|bukhar\s+nahi|no\s+chills|no\s+body\s*aches?|without\s+chills|nehi|nahi|not\s+having\s+fever)\b/i.test(
-      userUtterances
-    ) && !/\b(yes.*fever|fever.*hai|tez bukhar|severe fever|high grade fever)\b/i.test(userUtterances);
-
-  const isCallerMildFever =
-    /\b(mild\s+fever|halka\s+bukhar|low\s+grade\s+fever|halka\s+sa\s+bukhar|fever\s+is\s+mild|mild\s+warmth|kam\s+bukhar)\b/i.test(allContext) ||
-    (/\b(fever|bukhar)\b/i.test(allContext) && /\b(mild|halka|low grade|mild warmth|mild heat)\b/i.test(allContext));
-
-  const callerDeniesChillsOrShivering =
-    /\b(no\s+shivering|no\s+chills|without\s+shivering|without\s+chills|shivering\s+nahi|chills\s+nahi|no\s+kampkampi|kampkampi\s+nahi|bina\s+(?:zyada\s+)?hilaav|bina\s+shaking|mild fever,?\s*no shivering)\b/i.test(allContext);
-
   let finalCondition = raw.suspectedCondition;
   if (!finalCondition || /Caller reports (?:a )?fall/i.test(finalCondition)) {
     finalCondition = "Traumatic Fall / Impact Injury Assessment";
@@ -2155,96 +2354,6 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   // Strictly enforce non-doctor guideline: strip fabricated diseases unless spoken by caller
   finalCondition = sanitizeSymptomOrCondition(finalCondition, userUtterances);
 
-  const filteredRedFlags = (Array.isArray(raw.redFlagsDetected) ? raw.redFlagsDetected : []).filter(
-    (f) => {
-      if (!f || typeof f !== "string") return false;
-      const fLower = f.toLowerCase();
-      // Never allow duration in red flags!
-      if (
-        /\b(duration|since|days?|hours?|weeks?|months?|dino?|ghante?|yesterday|today|4-7 days|2-3 days|less than 2 hours)\b/i.test(fLower) ||
-        /^\d+\s*-\s*\d+\s*(?:days?|hours?|weeks?|months?)$/i.test(f.trim()) ||
-        /^duration:?\s*/i.test(f.trim())
-      ) {
-        return false;
-      }
-      // Never allow generic filler in red flags!
-      if (
-        fLower.includes("acute presentation") ||
-        fLower.includes("high severity reported") ||
-        fLower.includes("urgent ambulance transfer")
-      ) {
-        return false;
-      }
-      if (
-        fLower.includes("fever") ||
-        fLower.includes("bukhar") ||
-        fLower.includes("chills") ||
-        fLower.includes("pyrexia")
-      ) {
-        if (callerDeniesFever) return false;
-        if (fLower.includes("high fever") || fLower.includes("shiver") || fLower.includes("chill")) {
-          if (isCallerMildFever || callerDeniesChillsOrShivering) return false;
-          return (
-            /\b(high fever|tez bukhar|10[2-6]\s*(?:°|f|deg)|severe fever)\b/i.test(affirmativeCallerText) &&
-            /\b(chills|shivering|rigor|kapkapi)\b/i.test(affirmativeCallerText)
-          );
-        }
-        return /\b(high fever|tez bukhar|10[2-5]\s*(?:°|f|deg))\b/i.test(
-          affirmativeCallerText
-        );
-      }
-      if (fLower.includes("self-harm") || fLower.includes("suicid")) {
-        return /\b(wanna die|want to die|kill myself|mar jaunga|jaan de dunga|suicid)\b/i.test(
-          userUtterances
-        );
-      }
-      if (fLower.includes("chest") || fLower.includes("cardiac") || fLower.includes("coronary")) {
-        return /\b(chest|chhati|heart attack|dil ka dard|left arm|pressure on chest)\b/i.test(
-          affirmativeCallerText
-        );
-      }
-      if (fLower.includes("bleed") || fLower.includes("wound") || fLower.includes("cut")) {
-        return /\b(bleed|blood|khoon|deep wound|cut\s*wrist|fracture)\b/i.test(affirmativeCallerText);
-      }
-      return true;
-    }
-  );
-
-  // Augment with caller-reported clinical situations
-  const addDetectedFlag = (flag) => {
-    if (!filteredRedFlags.some((f) => f.toLowerCase() === flag.toLowerCase())) {
-      filteredRedFlags.push(flag);
-    }
-  };
-
-  if (/\b(hematemesis|blood in vomit|vomit.*blood|blood.*stool|melena|khoon.*ulti|ulti.*khoon|gastrointestinal bleeding|gi bleed)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Gastrointestinal bleeding / hematemesis (blood in vomit)");
-  }
-  if (/\b(cannot keep.*fluid|inability to retain fluid|unable to retain fluid|can'?t retain fluid|can'?t drink|paani.*ruk nahi|paani.*nahi pi|persistent vomit|continuous vomit)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Inability to retain oral fluids");
-  }
-  if (
-    !callerDeniesFever &&
-    !isCallerMildFever &&
-    !callerDeniesChillsOrShivering &&
-    /\b(high fever|tez bukhar|severe fever|10[2-6]\s*(?:°|f|deg)|bahut tez bukhar)\b/i.test(affirmativeCallerText) &&
-    /\b(chills|shivering|rigor|kapkapi|thand lagna)\b/i.test(affirmativeCallerText)
-  ) {
-    addDetectedFlag("High fever with chills and shivering");
-  }
-  if (/\b(severe breathlessness|saans.*takleef|gasping|gasping for air|shortness of breath)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Severe shortness of breath");
-  }
-  if (/\b(unconscious|behosh|fainted|blackout|syncope|unresponsive)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Loss of consciousness / fainting episode");
-  }
-  if (/\b(seizure|convulsions?|fits?|mirgi)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Seizure / convulsions");
-  }
-  if (/\b(heavy bleed|profuse bleed|khoon beh raha)\b/i.test(affirmativeCallerText)) {
-    addDetectedFlag("Heavy uncontrolled bleeding");
-  }
-
   const extractedComorbid = extractComorbiditiesFromText(allContext, prevState.comorbidity || prevState.comorbidities);
   const detectedComorbidity = 
     (extractedComorbid && !/^(none|nil|none reported)/i.test(extractedComorbid))
@@ -2273,7 +2382,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
 
   return {
     probingQuestion,
-    suggestedAnswers,
+    suggestedAnswers: (suggestedAnswers || []).map(sanitizeSuggestedAnswer).filter(Boolean),
     suspectedCondition: finalCondition,
     isPsychiatric: isPsych,
     severity,
@@ -2478,7 +2587,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Holding firm pressure on wound with cloth",
           "Bleeding is heavy, feeling dizzy or faint",
           "Someone is here with me helping hold pressure",
-          "Need immediate 108 emergency ambulance dispatch",
+          "Need immediate ambulance assistance",
         ],
       },
       {
@@ -2497,12 +2606,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         id: "harm_companion_support",
         condition: true,
         question:
-          'Ask the IP: "108 Ambulance is being alerted for immediate dispatch. Is there anyone nearby with you right now who can assist you?" (Hinglish: "108 Ambulance ko turant bheja ja raha hai. Kya aapke paas koi maujood hai jo madad kar sake?")',
+          'Ask the IP: "Please continue holding firm pressure on the wound. Is there anyone nearby with you right now who can assist you?" (Hinglish: "Kripya ghaav ko lagataar dabakar rakhein. Kya aapke paas koi maujood hai jo madad kar sake?")',
         options: [
-          "I am alone, please dispatch ambulance fast",
+          "I am alone, need medical help fast",
           "A family member / friend is with me now",
           "Neighbor is coming to help hold pressure",
-          "Waiting by the door for the ambulance",
+          "Holding pressure firmly right now",
         ],
       },
     ];
@@ -2636,9 +2745,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         'Ask the IP: "Are you pregnant and experiencing heavy vaginal bleeding, severe continuous abdominal/back pain, water breaking, or seizures / severe headache with high BP?" (Hinglish: "Kya pregnancy me tez khoon behna, pet me lagataar asahniya dard, paani ki thaili phatna, ya high BP ke saath daura/sir dard ho raha hai?")'
       ),
       suggestedAnswers: [
-        "Pregnant with heavy vaginal bleeding or severe continuous pain (Emergency)",
-        "Amniotic sac ruptured (water broke) / intense labor pains close together (Emergency)",
-        "High blood pressure with severe headache, vision changes, or seizures (Emergency)",
+        "Pregnant with heavy vaginal bleeding or severe continuous pain",
+        "Amniotic sac ruptured (water broke) / intense labor pains close together",
+        "High blood pressure with severe headache, vision changes, or seizures",
         "Mild pregnancy cramps / nausea without bleeding, routine inquiry",
       ],
       suspectedCondition: "High-Risk Pregnancy / Obstetric Emergency",
@@ -2679,8 +2788,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         'Ask the IP: "Is the person currently senseless, completely unresponsive and not waking up, or have they had a seizure/fit?" (Hinglish: "Kya marij abhi poori tarah behosh/senseless hai aur aawaz dene par bhi hosh me nahi aa raha, ya daura pada hai?")'
       ),
       suggestedAnswers: [
-        "Completely senseless / unresponsive and will not wake up (Emergency)",
-        "Unconscious after head injury or seizure / convulsion (Emergency)",
+        "Completely senseless / unresponsive and will not wake up",
+        "Unconscious after head injury or seizure / convulsion",
         "Fainted briefly for a few seconds, but now awake and alert",
         "Feeling dizzy or lightheaded, but fully conscious and talking",
       ],
@@ -2709,7 +2818,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   if (hasDeepCutOrBleed) {
     const isLifeThreateningBleed =
-      /\b(heavy\s*active\s*spurting|deep\s*gaping|spurting|arterial|uncontrolled|cannot\s*stop|not\s*stopping|soaking|profuse|massive)\b/i.test(allContext) &&
+      /\b(heavy\s*active\s*spurting|deep\s*gaping|spurting|arterial|uncontrolled|cannot\s*stop|not\s*stopping|soaking|profuse|massive|muscle|fat|exposing fat|exposing muscle|visible bone)\b/i.test(allContext) &&
       !/\b(bleeding stopped|khoon ruk gaya|not heavy bleeding|bleeding controlled|minor cut|small cut|stopped with firm pressure)\b/i.test(cleanInput);
 
     const istOffset = 5.5 * 60 * 60 * 1000;
@@ -2723,12 +2832,12 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
     return {
       probingQuestion: enforceSingleQuestion(
-        'Ask the IP: "How deep is the cut, and is blood spurting or soaking through cloths continuously despite firm direct pressure?" (Hinglish: "Ghaav kitna gehra hai, aur kya saaf kapde se dabane ke bawajood lagatar tez khoon beh raha hai?")'
+        'Ask the IP: "How deep is the cut—can you see underlying yellow fat, muscle tissue, or bone, and is blood continuously spurting or soaking through cloths?" (Hinglish: "Ghaav kitna gehra hai—kya charbi (fat), manspeshi ya haddi dikh rahi hai, aur kya dabav ke baad bhi lagatar tez khoon beh raha hai?")'
       ),
       suggestedAnswers: [
-        "Heavy active spurting bleeding — cannot stop with cloth (Emergency)",
-        "Deep gaping cut exposing fat or muscle, continuous bleeding (Severe)",
-        "Deep cut, but bleeding has slowed / stopped with firm pressure",
+        "Deep gaping cut exposing fat or muscle, continuous bleeding",
+        "Heavy active spurting bleeding — cannot stop with cloth",
+        "Deep cut needing stitches, but bleeding controlled with pressure",
         "Superficial cut / minor scrape with mild bleeding",
       ],
       suspectedCondition: "Deep Cut / Active Bleeding",
@@ -2787,9 +2896,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         'Ask the IP: "Was it an accident, head injury, or workplace injury with severe cut, heavy bleeding, or difficulty moving?" (Hinglish: "Kya yeh koi accident, sar par chot, ya workplace par lagne wala ghaav hai jisme tez khoon ya hilne me takleef ho rahi hai?")'
       ),
       suggestedAnswers: [
-        "Yes, accident with severe head injury / bone pain (Emergency - 108)",
-        "Yes, workplace injury with heavy cut / bleeding (Emergency - 108)",
-        "Deep hand or finger cut bleeding heavily (Emergency - 108)",
+        "Yes, accident with severe head injury / bone pain",
+        "Yes, workplace injury with heavy cut / bleeding",
+        "Deep hand or finger cut bleeding heavily",
         "Minor slip / cut, bleeding stopped with firm pressure",
       ],
       suspectedCondition: accidentCond,
@@ -2873,22 +2982,14 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       {
         id: "cardiac_dispatch",
         condition: true,
-        question: isLifeThreateningCardiac
-          ? 'Ask the IP: "Please sit upright, do not exert yourself, and loosen tight clothing. We are triggering 108 Emergency Ambulance to transport you to the nearest hospital casualty. Is someone with you?" (Hinglish: "Kripya aaram se baith jayein aur exertion na karein. Hum 108 Ambulance bhej rahe hain. Kya koi aapke saath hai?")'
-          : 'Ask the IP: "Your chest symptoms require an ECG and medical evaluation at the hospital casualty. Please avoid sudden physical exertion. Can you safely travel to the hospital?" (Hinglish: "Aapke seene ke dard ke liye aspatal jaakar ECG karwana zaroori hai. Bhaari kaam na karein. Kya aap aspatal ja sakte hain?")',
-        options: isLifeThreateningCardiac
-          ? [
-              "Yes, family member is with me",
-              "I am alone, please send ambulance immediately",
-              "Taking prescribed sorbitrate / aspirin",
-              "Awaiting ambulance arrival",
-            ]
-          : [
-              "Yes, I will go to the nearest hospital",
-              "Going to ESIC Hospital casualty",
-              "Need nearest hospital address",
-              "Pain is tolerable, resting right now",
-            ],
+        question:
+          'Ask the IP: "Please sit upright, rest calmly, and avoid exertion. Is the chest pain radiating to your left arm or jaw, and are you having cold sweating or breathlessness?" (Hinglish: "Kripya aaram se baith jayein aur tanaav na lein. Kya seene ka dard baayein haath ya jabde tak ja raha hai, aur kya thanda paseena ya saans lene me takleef hai?")',
+        options: [
+          "Severe chest pressure with left arm pain and sweating",
+          "Chest heaviness, but no sweating or radiation",
+          "Sharp burning sensation / acidity feeling",
+          "Mild chest soreness on deep breathing",
+        ],
       },
     ];
 
@@ -2943,8 +3044,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         'Ask the IP: "Are you struggling to breathe, gasping for air, unable to speak in full sentences, or have bluish lips/fingertips?" (Hinglish: "Kya aapko saans lene mein bahut takleef ho rahi hai, saans phool rahi hai jisse bolna mushkil hai, ya hoth neele pad rahe hain?")'
       ),
       suggestedAnswers: [
-        "Yes, gasping for air and cannot speak in full sentences (Emergency)",
-        "Severe asthma attack / acute wheezing struggle (Emergency)",
+        "Yes, gasping for air and cannot speak in full sentences",
+        "Severe asthma attack / acute wheezing struggle",
         "Moderate breathing discomfort, but able to speak sentences",
         "Mild breathlessness with coughing, stable while resting",
       ],
@@ -2972,13 +3073,13 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     const snakeReason = "Snake bite is a critical life-threatening emergency requiring immediate 108 Emergency Ambulance dispatch for anti-snake venom (ASV) and casualty resuscitation.";
 
     const probingQ = hasReportedLocationOrSwelling
-      ? 'Ask the IP: "Keep the bitten limb completely still below heart level and do not tie a tight tourniquet. Are you experiencing rapid swelling, numbness, or breathing difficulty while the 108 Ambulance is being alerted?" (Hinglish: "Kaate huye hisse ko hilayein nahi aur dil ke level se neeche rakhein, koi kassi patti na baandhein. 108 Ambulance bulayi ja rahi hai. Kya tezi se sujan, sunnta ya saans lene me takleef ho rahi hai?")'
-      : 'Ask the IP: "Snake bite is a life-threatening medical emergency. Which part of your body was bitten, and is there swelling or fang marks? 108 Ambulance is being alerted immediately." (Hinglish: "Saanp ka kaatna gambhir emergency hai. Sharir ke kis hisse par kaata hai aur kya sujan ya daant ke nishan hain? 108 Ambulance turant bheji ja rahi hai.")';
+      ? 'Ask the IP: "Keep the bitten limb completely still below heart level and do not tie a tight tourniquet. Are you experiencing rapid swelling, numbness, or breathing difficulty?" (Hinglish: "Kaate huye hisse ko hilayein nahi aur dil ke level se neeche rakhein, koi kassi patti na baandhein. Kya tezi se sujan, sunnta ya saans lene me takleef ho rahi hai?")'
+      : 'Ask the IP: "Which part of your body was bitten, and is there visible swelling or fang puncture marks?" (Hinglish: "Sharir ke kis hisse par kaata hai aur kya sujan ya daant ke nishan hain?")';
 
     const snakeOptions = [
-      "Bite on leg / foot with swelling and pain (Ambulance dispatched)",
-      "Bite on hand / arm with spreading numbness (Ambulance dispatched)",
-      "Difficulty breathing / dizziness after bite (Emergency)",
+      "Bite on leg / foot with swelling and pain",
+      "Bite on hand / arm with spreading numbness",
+      "Difficulty breathing / dizziness after bite",
       "Bite marks visible, keeping limb still and calm",
     ];
 
@@ -3035,7 +3136,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Very heavy bleeding with large clots and weakness",
           "Moderate lower belly cramps and lower back ache",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAskedMedicationOrRemedy) {
       currentStep = {
@@ -3047,7 +3148,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Have not taken any medication or pain reliever yet",
           "Took medicine but cramps are still persisting",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAskedAssociatedOrRedFlags) {
       currentStep = {
@@ -3059,7 +3160,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "High fever with severe pelvic pain",
           "Feeling dizzy and faint when standing up",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else {
       currentStep = {
@@ -3071,7 +3172,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Symptoms are under control with rest and fluids",
           "Require doctor tele-consultation on phone",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     }
   }
@@ -3213,8 +3314,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         title: "Severe Breathing Emergency Evaluation",
         question: 'Ask the IP: "Is the difficulty in breathing so severe that you are gasping for air, skin or lips turning blue, or unable to speak in full sentences?" (Hinglish: "Kya saans lene me itni zyada takleef hai ki aap haanf rahe hain, honth/tvacha neeli pad rahi hai, ya poori baat ek baar me nahi bol pa rahe?")',
         options: [
-          "Yes, gasping for air and cannot speak in full sentences (Emergency)",
-          "Lips or skin look bluish / struggling for every breath (Emergency)",
+          "Yes, gasping for air and cannot speak in full sentences",
+          "Lips or skin look bluish / struggling for every breath",
           "No, I can speak normally but feel breathless",
           "Manageable breathlessness with cough and congestion",
         ],
@@ -3265,10 +3366,10 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         title: "Febrile Associated Symptoms & Airway Warning Signs",
         question: 'Ask the IP: "Are you having chills with shivering, or any breathing difficulty like gasping for air or inability to speak in full sentences?" (Hinglish: "Kya bukhar ke saath thand/kampkampi hai, ya saans lene me takleef jaise haanfna ya poori baat na bol pana?")',
         options: [
-          "Mild fever, no shivering (Manageable at home/dispensary)",
+          "Mild fever, no shivering",
           "High fever with chills and shivering, breathing is manageable",
           "No, I can speak normally but feel breathless",
-          "Severe breathing difficulty, gasping for air (Emergency)",
+          "Severe breathing difficulty, gasping for air",
           "High fever with severe body ache and headache",
         ],
         severity: /\b(high fever|tez bukhar|severe|chills|shivering)\b/i.test(effectiveInput) ? "Severe" : "Mild",
@@ -3428,7 +3529,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Dull band-like pressure across forehead",
           "Mild headache relieved by resting",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAsked(["vomiting", "ulti", "light", "roshni", "neck", "gardan"])) {
       currentStep = {
@@ -3440,7 +3541,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Stiff neck with fever",
           "No light sensitivity, only head heaviness",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else {
       currentStep = {
@@ -3452,7 +3553,53 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Comes regularly every few weeks",
           "Sudden onset without clear trigger",
         ],
-        severity: "Moderate",
+        severity: "Mild",
+      };
+    }
+  } else if (
+    /\b(head\s*injury|head\s*trauma|sar\s*(?:par|me|pe)?\s*chot|concussion|skull|hit.*head|head\s*wound)\b/i.test(effectiveInput) ||
+    /\b(head\s*injury|head\s*trauma)\b/i.test(prevState.suspectedCondition || "")
+  ) {
+    conditionLabel = "Head Injury / Head Trauma Assessment";
+    const hasLOCAnswer = /\b(lost consciousness|loss of consciousness|unconscious|blackout|blacked out|behosh)\b/i.test(allContext);
+    const hasVomitOrFluidAnswer = /\b(vomit|vomiting|ulti|fluid from ear|blood from ear|clear fluid|seizure)\b/i.test(allContext);
+    const headSeverity = (hasLOCAnswer || hasVomitOrFluidAnswer) ? "Severe" : "Moderate";
+
+    if (!hasAsked(["unconscious", "blackout", "behosh", "vomit", "dizzy", "headache"])) {
+      currentStep = {
+        title: "Head Injury & Neurological Assessment",
+        question: 'Ask the IP: "I am very sorry to hear you suffered a head injury. Did you lose consciousness or blackout when it happened, or are you having severe headache, vomiting, or dizziness?" (Hinglish: "Aapke sar par chot lagne ke baare me sunkar afsos hua. Kya chot lagte waqt aap behosh hue the, ya tez sar dard, ulti ya chakkar aa rahe hain?")',
+        options: [
+          "No loss of consciousness, alert and fully oriented",
+          "Mild headache and local swelling, no vomiting",
+          "Lost consciousness or blacked out for a few moments",
+          "Repeated vomiting, severe dizziness, or confusion",
+        ],
+        severity: headSeverity,
+      };
+    } else if (!hasAsked(["active continuous bleeding", "bleeding from the scalp", "bleeding from the head", "fluid"])) {
+      currentStep = {
+        title: "Head Wound & Hemorrhage Check",
+        question: 'Ask the IP: "Is there active continuous bleeding from the head wound, or any clear fluid or blood leaking from your ears or nose?" (Hinglish: "Kya sar ke ghaav se lagataar khoon beh raha hai, ya kaan/naak se khoon ya paani nikal raha hai?")',
+        options: [
+          "Active continuous bleeding from scalp cut",
+          "Minor scalp cut, bleeding stopped with pressure",
+          "Clear fluid or bleeding from ear or nose",
+          "Painful swelling / bump without open bleeding",
+        ],
+        severity: headSeverity,
+      };
+    } else {
+      currentStep = {
+        title: "Head Injury Functional & Vision Check",
+        question: 'Ask the IP: "Are you having any blurred vision, neck stiffness, or difficulty speaking and walking normally?" (Hinglish: "Kya dhundhla dikh raha hai, gardan me akad hai, ya bolne aur chalne me dikkat ho rahi hai?")',
+        options: [
+          "Vision is normal, able to walk steadily",
+          "Blurred vision and sensitivity to bright light",
+          "Neck stiffness and severe pain with head movement",
+          "Dazed, feeling unsteady on feet",
+        ],
+        severity: headSeverity,
       };
     }
   } else if (!isAccidentDenied && /\b(fall|fell|falling|gira|giri|bed se|chhat se|height|tripped|slip|slipped|sleeped|slept from|car|bike|vehicle|auto|bus|accident|scooty|injury|chot|hit)\b/i.test(effectiveInput)) {
@@ -3499,7 +3646,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
     if (!hasAsked(["active continuous bleeding", "lagataar khoon", "bleeding from the wound"])) {
       currentStep = {
         title: "Trauma & Hemorrhage Check",
-        question: 'Ask the IP: "Is there active continuous bleeding from the wound?" (Hinglish: "Kya chot se lagataar khoon beh raha hai?")',
+        question: 'Ask the IP: "I understand you have an injury. Is there active continuous bleeding from the wound, or is it manageable with firm pressure?" (Hinglish: "Hum samajh sakte hain aapko chot aayi hai. Kya ghaav se lagataar khoon beh raha hai ya dabav se ruka hua hai?")',
         options: [
           "Heavy active bleeding requiring immediate pressure",
           "Deep cut but bleeding stopped with cloth",
@@ -3707,8 +3854,8 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
       hasKnownCondition ||
       askedQuestions.length > 0 ||
       history.length > 0 ||
-      /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(allCallerText) ||
-      /\b(pain|dard|hurt|hurts|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(cleanInput)
+      /\b(pain|dard|hurt|hurts|head|sar|sir|injury|trauma|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(allCallerText) ||
+      /\b(pain|dard|hurt|hurts|head|sar|sir|injury|trauma|neck|gardan|back|peeth|kamar|stiff|stiffness|cervical|spine|fever|bukhar|cough|khasi|headache|sirdard|cut|bleed|vomit|leg|arm|hand|chest|stomach|pet|chot|swelling|sujan|rash|loose motion|diarrhea|dizzy|chakkar|sprain|wound|burn|ache|sore|discomfort|takleef)\b/i.test(cleanInput)
     );
 
     if (!hasAsked(["where you are feeling", "what exact symptoms", "kahan dard", "kya mukhya lakshan", "describe where", "how high", "fever level"]) && !callerAlreadyReportedSymptoms) {
@@ -3721,7 +3868,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Stomach pain / cramps / nausea",
           "Headache, dizziness, or uneasiness",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasKnownDuration && !hasAsked(["since when", "how many days", "duration", "kab se"])) {
       currentStep = {
@@ -3733,7 +3880,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "For 3 to 7 days (Ongoing)",
           "More than a week / persistent",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAsked(["other symptoms", "fever, pain", "associated", "bukhar, dard", "chakkar", "vomiting, nausea", "sweating"])) {
       currentStep = {
@@ -3743,9 +3890,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Nausea, dizziness, or sweating",
           "Shortness of breath / severe weakness",
           "Body ache and shivering",
-          "No other emergency symptoms",
+          "No other severe symptoms",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"])) {
       currentStep = {
@@ -3758,7 +3905,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "History of Asthma / heart disease",
           "No pre-existing medical conditions",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAsked(["taken any medicine", "pain reliever", "paracetamol", "dawai li", "medication", "regular medicine"])) {
       currentStep = {
@@ -3771,7 +3918,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Have not taken any medicines yet",
           "Taking regular prescribed medicines daily",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else if (!hasAsked(["daily routine", "eat, drink", "khane-peene", "aaram", "affecting"])) {
       currentStep = {
@@ -3783,7 +3930,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Mild discomfort, managing daily routine",
           "Need doctor examination and medicines today",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     } else {
       currentStep = {
@@ -3795,7 +3942,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
           "Would like tele-doctor guidance on 104",
           "Carrying previous prescriptions",
         ],
-        severity: "Moderate",
+        severity: "Mild",
       };
     }
   }
@@ -3808,9 +3955,9 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const isSevere =
     currentStep.severity === "Severe" ||
     currentStep.severity === "High" ||
-    /emergency|fracture|dvt|blood|vomit blood|unconscious|rigors|severe|chest pain|chhati|poison|snake|bite/i.test(cleanInput) ||
-    prevState.severity === "Severe" ||
-    prevState.severity === "High";
+    /emergency|unconscious|behosh|vomit blood|hematemesis|poison|zeher|snake\s*bite|arterial bleed|profuse bleed/i.test(cleanInput) ||
+    (/\b(chest pain|chhati|angina)\b/i.test(cleanInput) && /\b(arm|haath|jaw|jabda|radiation|radiat|pasina|sweat|diaphoresis|saans|breath|collapse)\b/i.test(cleanInput)) ||
+    (prevState.severity === "Severe" && prevState.severityScore >= 8);
 
   // If conversation has reached turn 5-7 without breaking flow and comorbidity hasn't been asked yet
   const hasAskedComorbidityAlready = hasAsked(["pre-existing", "diabetes", "high bp", "asthma", "purani bimari", "comorbidit", "blood pressure"]);
@@ -3826,7 +3973,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         "History of Asthma / using inhaler",
         "No pre-existing health conditions or regular medicines",
       ],
-      severity: "Moderate",
+      severity: "Mild",
     };
   }
 
@@ -3842,8 +3989,34 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   });
 
   const isLifeThreateningCrisis = holisticScoreFallback.isLifeThreatening;
-  const severity = holisticScoreFallback.urgency_level;
-  const severityScore = holisticScoreFallback.score;
+  let severity = holisticScoreFallback.urgency_level;
+  let severityScore = holisticScoreFallback.score;
+
+  const requiresHospitalCareFallback = Boolean(
+    isLifeThreateningCrisis ||
+    isPsychFallback ||
+    /\b(ipd|admit|admission|hospitaliz\w*|overnight|observation|bed|day care|inpatient|iv fluid|iv drip|saline drip|intravenous)\b/i.test(allContext) ||
+    /\b(specialist|cardiologist|orthopedic|orthopedist|neurologist|surgeon|general surgeon|gynecolog\w*|pediatrician|ent specialist|stitches|sutur\w*|taanke|fracture|broken bone|dislocation|plaster|cast|minor ot|wound toilet|incision|abscess drainage)\b/i.test(allContext) ||
+    /\b(lab|blood test|cbc|x-ray|xray|ecg|ultrasound|usg|scan|imaging|serology|pathology|biochemistry|cardiac enzyme|troponin)\b/i.test(allContext) ||
+    /\b(continuous vomit|cannot keep.*fluid|unable to retain fluid|severe abdominal pain|rigid abdomen|blood in vomit|hematemesis|deep cut|stitches)\b/i.test(allContext) ||
+    /\b(head injury|head trauma|sar.*chot|concussion|skull|hit.*head|loss of consciousness|lost consciousness|blackout|blacked out|behosh|unconscious|deep cut|gaping cut|exposing fat|exposing muscle)\b/i.test(allContext)
+  );
+
+  // USER MANDATE:
+  // 1. For 1-3 days duration (or 2-3 days, today, yesterday):
+  //    If other condition or answers are Moderate level or Severe level, then based on the situation show Moderate or Severe!
+  //    DO NOT restrict anything. Based on every situation show the forward referral.
+  // 2. Only if other answers are genuinely mild, evaluate as Mild.
+  const isClinicalModOrSevChat =
+    severity === "Moderate" ||
+    severity === "Severe" ||
+    severityScore >= 5 ||
+    isLifeThreateningCrisis;
+
+  if (!isClinicalModOrSevChat) {
+    severity = "Mild";
+    severityScore = (severityScore >= 1 && severityScore <= 4) ? severityScore : 3;
+  }
 
   let referralDestination;
   let referralReason;
@@ -3853,11 +4026,16 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   const fallbackDispensaryStatus = getDispensaryOperatingStatus();
   const isDistHospRequest = /\b(district hospital|dist hosp|civil hospital|govt hospital|public hospital|non-esic|immunization|vaccination|tika|tika karan|child vaccine)\b/i.test(effectiveInput);
 
-  if (isLifeThreateningCrisis || severity === "Severe") {
+  if (isLifeThreateningCrisis || (severity === "Severe" && severityScore >= 10)) {
     referralDestination = "108 Ambulance";
     referralReason = ambulanceFallbackCheck.reason || "Severe acute emergency or trauma requiring immediate 108 Ambulance dispatch.";
     secondaryReferral = isPsychFallback ? "104 Health Helpline" : "ESIC Hospital";
     isDualProtocol = Boolean(isPsychFallback);
+  } else if (severity === "Severe") {
+    referralDestination = isDistHospRequest ? "Govt District Hospital" : "ESIC Hospital";
+    referralReason = "High-acuity clinical condition / neurotrauma requiring hospital casualty evaluation, IPD admission/observation, and urgent physician care.";
+    secondaryReferral = "Govt District Hospital";
+    isDualProtocol = false;
   } else if (severity === "Moderate") {
     if (isDistHospRequest) {
       referralDestination = "Govt District Hospital";
@@ -3920,7 +4098,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
         "Dispur / Six Mile / Beltola",
         "Share 6-digit PIN code",
       ],
-      severity: "Moderate",
+      severity: "Mild",
     };
   }
 
@@ -3934,7 +4112,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
 
   return {
     probingQuestion: probingText,
-    suggestedAnswers: currentStep.options,
+    suggestedAnswers: (currentStep.options || []).map(sanitizeSuggestedAnswer).filter(Boolean),
     suspectedCondition: conditionLabel,
     isPsychiatric: isPsychFallback,
     severity,

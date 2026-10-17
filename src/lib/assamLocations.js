@@ -1,4 +1,4 @@
-import assamPincodesData from "../data/assam_pincodes.json";
+import assamPincodesData from "../data/assam_pincodes.json" with { type: "json" };
 import { calculateHaversineDistanceKm, calculateRoadDistanceKm, isDispensary, isHospital, isEsicHospital, isGovtDistrictHospital, isTieUp } from "./geo.js";
 
 /**

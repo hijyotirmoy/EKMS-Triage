@@ -1,5 +1,5 @@
 // Geo utilities: Haversine distance calculation, dynamic facility-based location resolution, and proximity routing
-import assamPincodesData from "../data/assam_pincodes.json";
+import assamPincodesData from "../data/assam_pincodes.json" with { type: "json" };
 import { ASSAM_DISTRICTS, getDistrictCoordinates, normalizeDistrict } from "./districts.js";
 import { detectAssamLocationFromText } from "./assamLocations.js";
 
