@@ -32,10 +32,19 @@ const SYSTEM_PROMPT = `You are EKMS AI, a world-class clinical triage and call-f
 YOU SPEAK WITH THE COMPASSION, WARMTH, AND CLINICAL SHARPNESS OF AN EXPERIENCED DOCTOR.
 
 CORE CLINICAL RULES:
-1. EMPATHY & COMPASSION OPENING:
-   - Always open with genuine human empathy and compassion acknowledging their distress, pain, fever, or injury before asking the question.
-   - For Head Injury: Express immediate compassion and probe critical neurological signs (loss of consciousness / blackout at impact, vomiting, severe dizziness, confusion). Head trauma CANNOT BE MILD! If caller reports LOC, blackout, vomiting, or dizziness, rate as SEVERE (Score 8-9, hospital IPD/casualty).
-   - For Deep Cuts/Wounds: Probe wound depth (whether yellow fat, muscle tissue, or bone is visible) and bleeding. When deep cut exposes muscle or fat with heavy bleeding/severe pain, rate as SEVERE (Score 10) and route to 108 Ambulance!
+1. CONCISE DOCTOR EMPATHY & HUMAN SYMPATHY (MANDATORY IN EVERY QUESTION):
+   - You are a caring, experienced doctor talking directly to a distressed patient.
+   - Every question must be warm and sympathetic, but CONCISE (NOT too long, strictly under 20-22 words per language).
+   - Structure: 1 short empathy sentence (5-8 words) + 1 clear single clinical question (8-12 words). NEVER write rambling or run-on paragraphs!
+   - Examples of concise empathy questions:
+     * Cut/Wound: Ask the IP: "I'm sorry to hear about this cut; please keep it rested. Is the bleeding active or stopped?" (Hinglish: "Chot lagne par afsos hai; kripya aaram karein. Kya khoon abhi beh raha hai ya ruk gaya?")
+     * Head Injury: Ask the IP: "I'm so sorry about your head injury; please stay calm and rest. Did you blackout or vomit?" (Hinglish: "Sar par chot lagne par afsos hai; kripya shaant rahein. Kya aap behosh hue the ya ulti aayi?")
+     * Fever: Ask the IP: "I'm so sorry you have this fever; please rest and keep warm. How many days have you had it?" (Hinglish: "Bukhar aane par afsos hai; kripya aaram karein. Yeh kitne dino se aa raha hai?")
+     * Dizziness: Ask the IP: "I'm concerned about your dizziness; please sit down safely. Did it start suddenly today?" (Hinglish: "Chakkar aane par dhyan dein; kripya baith jayein. Kya yeh aaj achanak shuru hua?")
+     * Comorbidities: Ask the IP: "I know how exhausting this illness is. Do you have any pre-existing conditions like diabetes or high BP?" (Hinglish: "Takleef par afsos hai. Kya aapko pehle se diabetes ya high BP ki bimari hai?")
+     * Medications: Ask the IP: "I want to help you feel better. Have you taken any medicines yet, and did they give relief?" (Hinglish: "Aapki rahat ke liye, kya aapne koi dawai li hai aur kya usse aaram mila?")
+   - Head trauma CANNOT BE MILD! If LOC, blackout, vomiting, or dizziness -> SEVERE Score 8-9.
+   - Deep Cut/Wound: Probe depth (yellow fat, muscle, bone visible) & bleeding. If muscle/fat visible with heavy bleed/pain -> SEVERE Score 10 (108 Ambulance).
 
 2. ADAPTIVE CLINICAL PROBING FLOW (1 QUESTION PER TURN):
    - Turn 1: Symptom specifics & severity (degree of fever/chills, pain character, wound depth & tissue exposure).
@@ -49,8 +58,11 @@ CORE CLINICAL RULES:
 3. FREE-FORM EXTRACTION MANDATE:
    - When caller mentions ANY chronic condition or medicine at ANY turn, extract into "comorbidity" and "medications" respectively!
 
-4. LANGUAGE PROTOCOL (ENGLISH + ROMANIZED HINGLISH):
-   - Ask exactly ONE question per turn in format: Ask the IP: "<English Question>" (Hinglish: <Romanized Hinglish Question>)
+4. LANGUAGE PROTOCOL & STRICT BRACKET SEPARATION:
+   - Every probing question MUST follow this EXACT bracket separation format:
+     Ask the IP: "<English Question>" (Hinglish: "<Romanized Hinglish Question>")
+   - Put the English question first in quotes, followed by space and the Romanized Hinglish question enclosed in bracket parentheses '(Hinglish: "...")'.
+   - Both English and Hinglish MUST be concise (under 20-22 words) with warm doctor empathy.
    - NO Devanagari Hindi script. Use ONLY English and Latin-script Hinglish.
    - Provide 3-4 realistic suggestedAnswers directly answering the single question. NEVER include "(Emergency)", "(108)", or referral tags in suggestedAnswers.
 
@@ -1305,7 +1317,7 @@ export function sanitizeClinicalQuestion(questionText, allContext = "", cleanInp
       .replace(/\bwas the (?:caller|person|patient)\b/gi, "were you")
       .replace(/\btheir (head|body|arm|leg|chest|back|mind|vision)\b/gi, "your $1")
       .replace(/\bthe (?:caller's|person's|patient's)\b/gi, "your")
-      .replace(/(["']\s*)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
+      .replace(/(^|[^\w])(["']\s*)([a-z])/g, (m, p0, p1, p2) => p0 + p1 + p2.toUpperCase());
   }
 
   return questionText;
@@ -1522,6 +1534,166 @@ export function extractMedicationsFromText(text = "", existingMed = null) {
   return existingMed && existingMed !== "None reported" && existingMed !== "None reported by caller" && existingMed !== "No prior medication taken for current episode" && existingMed !== ""
     ? String(existingMed).replace(/^medications?\s*(?:taken)?[:\s]*/i, "")
     : "";
+}
+
+/**
+ * Detects whether a string has genuine human empathy, sympathy, and emotional reassurance
+ * (not merely dry clinical acknowledgement like "I understand the wound is deep" or "To ensure your safety").
+ */
+export function hasGenuineDoctorEmpathy(text) {
+  if (!text || typeof text !== "string") return false;
+  const lower = text.toLowerCase();
+
+  // Dry factual observations or procedural transitions to reject as non-empathy:
+  if (/^(?:i understand (?:the|that|your wound|the cut|the bleeding|the fever|the pain is)|to ensure (?:your|safety)|as you mentioned|i see)/i.test(lower)) {
+    if (!/\b(sorry|distress|exhausting|unbearable|comfort|reassur|worry|here to help|take care|rest assured)\b/i.test(lower)) {
+      return false;
+    }
+  }
+
+  return (
+    /\b(?:i\s+am|i['’]?m)\s+(?:(?:so|very|deeply|truly|really)\s+)?(?:sorry|concerned)\b/i.test(lower) ||
+    /\b(?:so\s+sorry|deeply\s+sorry|truly\s+sorry|very\s+sorry)\s+to\s+hear\b/i.test(lower) ||
+    /\bi\s+understand\s+how\s+(?:distressing|painful|difficult|exhausting|uncomfortable)\b/i.test(lower) ||
+    /\b(?:we\s+are\s+here\s+to\s+(?:support|help)|take\s+care|rest\s+assured|stay\s+calm|please\s+(?:rest|sit|keep|stay))\b/i.test(lower) ||
+    /\b(?:afsos|chinta|dukh|samajh\s+sakta|shaant|shant|aaram|garm\s+rakhein|pareshan)\b/i.test(lower)
+  );
+}
+
+/**
+ * Returns tailored empathetic and comforting statements based on clinical context
+ */
+export function getTailoredDoctorEmpathy(cleanInput = "", allContext = "") {
+  const ctx = `${cleanInput} ${allContext}`.toLowerCase();
+
+  // 1. Head injury / Trauma
+  if (/\b(head\s*injury|head\s*trauma|hit.*head|concussion|skull|sar\s*(?:par|me|pe)?\s*chot)\b/i.test(ctx)) {
+    return {
+      en: "I'm so sorry about your head injury; please stay calm and rest.",
+      hi: "Sar par chot lagne par afsos hai; kripya shaant reh kar aaram karein."
+    };
+  }
+
+  // 2. Severe Bleeding / Deep Cut / Workplace Injury / Fracture
+  if (/\b(cut|bleed|wound|laceration|accident|fracture|broken bone|chot|ghaav|khoon)\b/i.test(ctx)) {
+    return {
+      en: "I'm sorry to hear about this painful cut; please keep it rested.",
+      hi: "Chot aur dard par afsos hai; kripya ise aaram se rakhein."
+    };
+  }
+
+  // 3. Chest Pain / Cardiac / Breathlessness / Asthma
+  if (/\b(chest|chhati|heart|breathless|shortness of breath|saans|gasping|wheezing)\b/i.test(ctx)) {
+    return {
+      en: "I understand your distress; please sit upright calmly and rest.",
+      hi: "Yeh takleef pareshan karne wali hai; kripya aaram se baithein."
+    };
+  }
+
+  // 4. Fever / Chills / Shivering / Cold / Flu
+  if (/\b(fever|bukhar|temperature|chills|shivering|thandi|kampkampi)\b/i.test(ctx)) {
+    return {
+      en: "I'm so sorry you have this fever; please rest and keep warm.",
+      hi: "Bukhar aur takleef par afsos hai; kripya aaram karein."
+    };
+  }
+
+  // 5. Vomiting / Loose Motions / Stomach pain / Acidity / Nausea
+  if (/\b(vomit|ulti|nausea|loose motion|diarrhea|dast|stomach|pet|cramp)\b/i.test(ctx)) {
+    return {
+      en: "I'm sorry you have stomach discomfort; please rest and sip water.",
+      hi: "Pet me takleef par afsos hai; kripya aaram karein."
+    };
+  }
+
+  // 6. Dizziness / Fainting / Weakness / Fatigue
+  if (/\b(dizzy|dizziness|chakkar|faint|weakness|kamzori|fatigue|giddiness)\b/i.test(ctx)) {
+    return {
+      en: "I'm concerned about your dizziness; please sit down safely.",
+      hi: "Chakkar aane par dhyan dein; kripya baith kar aaram karein."
+    };
+  }
+
+  // 7. Headache / Migraine
+  if (/\b(headache|sar dard|sir dard|migraine)\b/i.test(ctx)) {
+    return {
+      en: "I'm sorry you have this severe headache; please rest in a quiet room.",
+      hi: "Sar dard se takleef par afsos hai; kripya aaram karein."
+    };
+  }
+
+  // 8. General Distress / Default
+  return {
+    en: "I'm sorry you're feeling unwell; we are here to support you.",
+    hi: "Aapki takleef sunkar afsos hua; hum aapki madad karenge."
+  };
+}
+
+/**
+ * Ensures that the probing question always starts with genuine doctor empathy, warmth, and compassion,
+ * while keeping it concise (under 20-22 words) with clean bracket separation:
+ * Format: Ask the IP: "<English Question>" (Hinglish: "<Romanized Hinglish Question>")
+ */
+export function ensureDoctorEmpathy(questionText, allContext = "", cleanInput = "") {
+  if (!questionText || typeof questionText !== "string") return questionText;
+
+  // Skip location / PIN code queries
+  if (/\b(postal PIN|6-digit|pincode|confirm your (?:exact )?location|share your address|share 6-digit)\b/i.test(questionText)) {
+    return questionText;
+  }
+
+  // Extract English and Hinglish parts - support (), [], or {}
+  const hindiMatch = questionText.match(/[(\[{](?:Hindi|Hinglish|हिन्दी):\s*['"]?([\s\S]*?)['"]?\s*[)\]}]/i);
+  let englishPart = questionText.replace(/[(\[{](?:Hindi|Hinglish|हिन्दी):[\s\S]*?[)\]}]/i, "").trim();
+  englishPart = englishPart.replace(/^Ask the IP:\s*["']?/i, "").replace(/["']?\s*$/i, "").trim();
+
+  let hinglishPart = hindiMatch ? hindiMatch[1].replace(/^['"]|['"]$/g, "").trim() : "";
+
+  const hasEnEmpathy = hasGenuineDoctorEmpathy(englishPart);
+  const hasHiEmpathy = hinglishPart ? hasGenuineDoctorEmpathy(hinglishPart) : false;
+
+  const tailored = getTailoredDoctorEmpathy(cleanInput, allContext);
+
+  if (!hasEnEmpathy) {
+    // Strip dry factual lead-ins like "I understand the wound is deep but not exposing muscle."
+    englishPart = englishPart
+      .replace(/^(?:I understand (?:that|the)[^.?!]*[.?!]\s*|To ensure your safety,?\s*|I see[^.?!]*[.?!]\s*)/i, "")
+      .trim();
+    englishPart = englishPart.charAt(0).toUpperCase() + englishPart.slice(1);
+    englishPart = `${tailored.en} ${englishPart}`;
+  }
+
+  if (hinglishPart && !hasHiEmpathy) {
+    hinglishPart = hinglishPart
+      .replace(/^(?:Main samajhta hoon ki[^.?!]*[.?!]\s*|Aapki suraksha ke liye,?\s*)/i, "")
+      .trim();
+    hinglishPart = hinglishPart.charAt(0).toUpperCase() + hinglishPart.slice(1);
+    hinglishPart = `${tailored.hi} ${hinglishPart}`;
+  }
+
+  // Conciseness guard: If question has multiple interrogation sentences, keep only empathy + first question
+  const qMarkIdx = englishPart.indexOf("?");
+  if (qMarkIdx !== -1 && qMarkIdx < englishPart.length - 1) {
+    englishPart = englishPart.slice(0, qMarkIdx + 1).trim();
+  }
+  if (hinglishPart) {
+    const hiQMarkIdx = hinglishPart.indexOf("?");
+    if (hiQMarkIdx !== -1 && hiQMarkIdx < hinglishPart.length - 1) {
+      hinglishPart = hinglishPart.slice(0, hiQMarkIdx + 1).trim();
+    }
+  }
+
+  // Ensure trailing question mark
+  if (!englishPart.endsWith("?")) englishPart += "?";
+  if (hinglishPart && !hinglishPart.endsWith("?") && !hinglishPart.endsWith("।")) hinglishPart += "?";
+
+  // Clean double spaces and format with strict bracket separation
+  englishPart = englishPart.replace(/\s+/g, " ").trim();
+  if (hinglishPart) {
+    hinglishPart = hinglishPart.replace(/\s+/g, " ").trim();
+    return `Ask the IP: "${englishPart}" (Hinglish: "${hinglishPart}")`;
+  }
+  return `Ask the IP: "${englishPart}"`;
 }
 
 /**
@@ -2120,6 +2292,7 @@ function normalizeDoctorOutput(raw, userInput, prevState = {}, askedQuestionsLis
   probingQuestion = enforceSingleQuestion(probingQuestion);
   probingQuestion = sanitizeClinicalQuestion(probingQuestion, allContext, cleanInput);
   probingQuestion = enforceSingleQuestion(probingQuestion);
+  probingQuestion = ensureDoctorEmpathy(probingQuestion, allContext, cleanInput);
 
   let suggestedAnswers;
   const rawOptions = raw.suggestedAnswers || raw.options || raw.answers;
@@ -4114,6 +4287,7 @@ export function buildLocalDoctorConsultationFallback(userInput, history = [], pr
   probingText = enforceSingleQuestion(probingText);
   probingText = sanitizeClinicalQuestion(probingText, cleanInput, cleanInput);
   probingText = enforceSingleQuestion(probingText);
+  probingText = ensureDoctorEmpathy(probingText, allContext, cleanInput);
 
   return {
     probingQuestion: probingText,
